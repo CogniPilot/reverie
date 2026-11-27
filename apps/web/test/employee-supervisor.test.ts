@@ -1873,3 +1873,26 @@ describe('EmployeeSupervisor: a limits check that never returns', () => {
     expect(w.state.audits.map((entry) => entry.action)).toContain('supervisor_keep_limits_unreturned');
   });
 });
+
+describe('EmployeeSupervisor: limits that a laptop holds too much memory for', () => {
+  it('says so in the report, with the numbers, once that has lasted an hour, and goes on asking', async () => {
+    const detail =
+      'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE: the laptop holds 20.0 GiB that reclaim cannot give back, more than its ' +
+      'approved soft limit of 16.0 GiB and its hard limit of 48.0 GiB';
+    let held = true;
+    const w = world([person('a')], {
+      keepLimits: async () => (held ? { outcome: 'refused', detail } : { outcome: 'done', detail: 'restored' }),
+    });
+    await w.run(50);
+    expect(w.report('a').limitsHeld).toBeUndefined();
+    expect(w.state.kept.length).toBeGreaterThan(4);
+    await w.run(20);
+    expect(w.report('a').limitsHeld).toMatch(
+      /^The approved limits of this laptop have not been put back since .* UTC: the laptop holds 20\.0 GiB that reclaim cannot give back, more than its approved soft limit of 16\.0 GiB and its hard limit of 48\.0 GiB\. /
+    );
+    expect(w.report('a').needsHuman).toBeUndefined();
+    held = false;
+    await w.run(11);
+    expect(w.report('a').limitsHeld).toBeUndefined();
+  });
+});

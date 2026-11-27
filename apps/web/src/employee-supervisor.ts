@@ -389,7 +389,15 @@ export interface SupervisorLimitsReport {
   readonly outcome: SupervisorActionResult['outcome'];
   /** `unchanged`, `restored` or `not-running` when it was done; otherwise the code or phrase of the refusal. */
   readonly detail?: string;
+  /** Since when checks have been refused with the same code, without a break. Absent for one that was done. */
+  readonly since?: number;
 }
+
+/** A refusal of a limits check that is said in the employee's report once it has lasted `LIMITS_HELD_REPORT_MS`. */
+const MEMORY_IN_USE = 'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE';
+const LIMITS_HELD_REPORT_MS = 60 * 60_000;
+/** The code of a limits check's detail: what comes before its first colon. */
+const limitsCode = (entry: SupervisorLimitsReport | undefined) => entry?.detail?.split(':')[0];
 
 /** What `GET /api/company` shows for one employee. */
 export interface SupervisorReport {
@@ -415,6 +423,11 @@ export interface SupervisorReport {
   readonly needsHuman?: string;
   /** The last check of the laptop's approved limits, for an employee who has a finished laptop. */
   readonly limits?: SupervisorLimitsReport;
+  /**
+   * Said once the approved limits of the laptop have not been put back for an hour because the laptop holds more
+   * memory than they allow, with the numbers. The office goes on asking; nothing is asked of anybody.
+   */
+  readonly limitsHeld?: string;
   /** The office's last look at the shared pool, while no terminal is attached and it is looking. */
   readonly pool?: SupervisorPoolReport;
   /** What the office checks of a stopped laptop's stored home with the verifier image it has. */
@@ -1017,6 +1030,20 @@ export class EmployeeSupervisor {
     return true;
   }
 
+  /** The sentence for limits that a laptop's memory has kept from being put back for an hour or more. */
+  #limitsHeld(employeeId: string, now: number): { limitsHeld?: string } {
+    const entry = this.#limits.get(employeeId);
+    if (!entry || entry.since === undefined || limitsCode(entry) !== MEMORY_IN_USE) return {};
+    if (now - entry.since < LIMITS_HELD_REPORT_MS) return {};
+    const said = entry.detail!.slice(MEMORY_IN_USE.length + 1).trim();
+    return {
+      limitsHeld:
+        `The approved limits of this laptop have not been put back since ${when(entry.since)}: ${said}. Writing ` +
+        'them would make the kernel reclaim from the working agent or end one of its processes, so the office ' +
+        'asks again about every ten minutes and writes them once the laptop holds less.',
+    };
+  }
+
   /** Record one limits check. A line and an audit entry are written when limits were put back, and once when a
    * check starts to be refused or to fail; a check that found everything in place says nothing. */
   #limitsChecked(employee: SupervisedEmployee, result: SupervisorActionResult | undefined, at: number): void {
@@ -1031,10 +1058,14 @@ export class EmployeeSupervisor {
       this.#limitsDue.set(employee.id, at + LIMITS_BUSY_RETRY_MS);
       return;
     }
+    const refused = result.outcome !== 'done',
+      code = result.detail?.split(':')[0],
+      since = refused && before?.outcome === result.outcome && limitsCode(before) === code ? before.since : at;
     const entry: SupervisorLimitsReport = {
       at,
       outcome: result.outcome,
       ...(result.detail ? { detail: result.detail } : {}),
+      ...(refused && since !== undefined ? { since } : {}),
     };
     this.#limits.set(employee.id, entry);
     const report = this.#reports.get(employee.id);
@@ -1838,6 +1869,7 @@ export class EmployeeSupervisor {
         : {}),
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
       ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
+      ...this.#limitsHeld(employee.id, now),
       ...(this.#pool && assessment.condition !== 'owner-stopped' ? { pool: this.#pool } : {}),
       ...(this.ports.storedHomeCheck && assessment.condition !== 'owner-stopped'
         ? { storedHomeCheck: this.ports.storedHomeCheck() }

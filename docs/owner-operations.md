@@ -1605,15 +1605,24 @@ owner and to an agent with a current `recoverEmployees` grant:
    that was refused only for its limits reads `ready` again and the office
    terminal is attached to it; nothing in the laptop is restarted.
 
-   The writer sets the laptop's hard memory limit as well. Before it is
-   issued, the office reads the laptop's own `memory.current` inside the
-   laptop. While that is above the approved hard limit, or cannot be read,
-   nothing is written and no attempt is opened: the repair answers
-   `DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE` or
+   The writer sets the laptop's soft and hard memory limits (`memory.high`,
+   `memory.max`) as well. Before it is issued, the office reads the laptop's
+   own `memory.stat` inside the laptop and adds up what reclaim cannot give
+   back: anonymous memory, shared memory (laptops have no swap) and the
+   kernel memory that cannot be reclaimed (`kernel_stack`, `pagetables`,
+   `sec_pagetables`, `percpu`, `sock`, `vmalloc`, `slab_unreclaimable`). Page
+   cache is left out: a laptop that ran without its limits holds cache above
+   them, and reclaim gives it back without harm. While what is held is above
+   either limit, or cannot be read, nothing is written and no attempt is
+   opened: the repair answers `DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE`, with
+   the numbers in the limits check's `detail`, or
    `DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD`, and the supervisor's limits check
-   asks again about every ten minutes. A limit below what a working agent
-   uses would make the kernel reclaim at once or kill a process of the laptop
-   for memory; the laptop stays under the shared pool's limit meanwhile.
+   asks again about every ten minutes. Above the soft limit the kernel would
+   throttle the working agent and reclaim hard; above the hard one it would
+   kill a process of the laptop. Once that has lasted an hour, the employee's
+   report says so in `supervisor.limitsHeld`, with the numbers and since when;
+   nothing is asked of anybody, and the laptop stays under the shared pool's
+   limit meanwhile.
 
    For an employee who is stopped or out of the office the same route answers
    `{ operationId, limits }` with `unchanged` or `restored` and reads nothing

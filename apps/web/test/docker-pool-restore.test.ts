@@ -12,7 +12,7 @@ import {
   allowedDockerTaskTransition,
   dockerFailedWriterHold,
 } from '../src/docker-continuation-task.js';
-import { DockerPoolReconciliationReceipt } from '../src/docker-contained-resource-controller.js';
+import { DockerPoolReconciliationReceipt, heldMemoryBytes } from '../src/docker-contained-resource-controller.js';
 import { dockerSupersededHelperProven } from '../src/docker-engine-command.js';
 import { dockerResourceHelperConfiguration } from '../src/docker-resource-helper-inspection.js';
 
@@ -571,23 +571,38 @@ describe('a running laptop after a reload of the service manager', () => {
     expect(f.creates).toHaveLength(creates);
   });
 
-  it('writes no memory limit below what the laptop uses now, opens no attempt for it, and asks again later', async () => {
+  it('writes no memory limit below what the laptop holds and reclaim cannot give back, and asks again later', async () => {
     const { f, entries } = await reloaded();
     const creates = f.creates.length,
-      journal = entries().length;
-    // More in use than the approved hard limit: writing it would make the kernel reclaim or kill for memory.
-    f.setMemoryCurrent(String(policy.memoryMaxBytes + 1));
+      journal = entries().length,
+      high = policy.memoryHighBytes!;
+    const stat = (anon: number, rest = '') => `anon ${anon}\nfile ${8 * 1024 ** 3}\n${rest}`;
+    // Above the soft limit, below the hard one: the laptop would be throttled and reclaimed hard.
+    f.setMemoryStat(stat(high + 1));
+    const refused = await f.controller.repairLeaf(f.row(), f.current).catch((error: unknown) => error);
+    expect(refused).toMatchObject({
+      code: 'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE',
+      cause: { heldBytes: high + 1, memoryHighBytes: high, memoryMaxBytes: policy.memoryMaxBytes },
+    });
+    // What the kernel holds that cannot be reclaimed, and shared memory, count as well.
+    f.setMemoryStat(stat(high - 4096, 'shmem 2048\nslab_unreclaimable 4096\nslab_reclaimable 999999\n'));
     await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE');
     // A read that gives no answer is no answer either.
-    for (const answer of [new Error('exec failed'), 'max', '']) {
-      f.setMemoryCurrent(answer);
+    for (const answer of [new Error('exec failed'), 'max', '', 'file 10\n']) {
+      f.setMemoryStat(answer);
       await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
     }
     expect(f.creates).toHaveLength(creates);
     expect(entries()).toHaveLength(journal);
-    // At the limit or under it, the next look writes it.
-    f.setMemoryCurrent(String(policy.memoryMaxBytes));
+    // Page cache above the limits is no reason: reclaim gives it back. The next look writes them.
+    f.setMemoryStat(stat(high - 1, 'slab_reclaimable 999999\n'));
     await expect(f.controller.repairLeaf(f.row(), f.current)).resolves.toBe('restored');
+  });
+
+  it('counts only what reclaim cannot give back of a memory.stat', () => {
+    expect(heldMemoryBytes('anon 10\nfile 100\nshmem 1\nkernel_stack 2\npagetables 3\nsock 4\nslab_unreclaimable 5\nslab_reclaimable 50\n')).toBe(25);
+    expect(heldMemoryBytes('file 100\n')).toBeUndefined();
+    expect(heldMemoryBytes('anon -1\n')).toBeUndefined();
   });
 
   it.each([

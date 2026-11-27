@@ -1551,3 +1551,21 @@ describe('a rebuild in flight in the rebuild service', () => {
     expect(w.laptops.flightActive(EMPLOYEE.id)).toBe(true);
   });
 });
+
+describe('limits that the laptop holds too much memory for', () => {
+  it('are refused with the numbers in the detail', async () => {
+    const w = world();
+    w.state.record = { ...w.state.record!, phase: 'ready' };
+    w.state.kept = [
+      new DockerEmployeeContinuationError('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE', 409, {
+        cause: { heldBytes: 20 * 1024 ** 3, memoryHighBytes: 16 * 1024 ** 3, memoryMaxBytes: 48 * 1024 ** 3 },
+      }),
+    ] as never;
+    expect(await w.laptops.keepLimits(EMPLOYEE, w.guard)).toEqual({
+      outcome: 'refused',
+      detail:
+        'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE: the laptop holds 20.0 GiB that reclaim cannot give back, more than its ' +
+        'approved soft limit of 16.0 GiB and its hard limit of 48.0 GiB',
+    });
+  });
+});

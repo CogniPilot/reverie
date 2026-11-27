@@ -248,6 +248,43 @@ export function requireDockerEffectiveResourceProof(
   if (!(proof instanceof DockerEffectiveResourceProof)) refuse('DOCKER_RESOURCE_REVISION_PROOF_REQUIRED');
   DockerEffectiveResourceProof.prototype.require.call(proof as DockerEffectiveResourceProof, row, actual);
 }
+/** What a refusal to write a laptop's memory limits below what it holds carries (`DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE`). */
+export interface DockerHeldMemory {
+  readonly heldBytes: number;
+  readonly memoryHighBytes: number | null;
+  readonly memoryMaxBytes: number;
+}
+/** The lines of a cgroup's `memory.stat` that reclaim cannot give back without swap. */
+const HELD_MEMORY_FIELDS = [
+  'anon',
+  'shmem',
+  'kernel_stack',
+  'pagetables',
+  'sec_pagetables',
+  'percpu',
+  'sock',
+  'vmalloc',
+  'slab_unreclaimable',
+];
+/**
+ * The memory a cgroup holds that reclaim cannot give back, from its `memory.stat`: the sum of `HELD_MEMORY_FIELDS`
+ * that the kernel reports. Undefined for text that is not such a file, or that lacks `anon`.
+ */
+export function heldMemoryBytes(stat: string): number | undefined {
+  if (stat.length > 16384) return undefined;
+  const values = new Map<string, number>();
+  for (const line of stat.split('\n')) {
+    if (!line.trim()) continue;
+    const match = /^([a-z_]{1,64}) (0|[1-9][0-9]{0,19})$/.exec(line.trim());
+    if (!match) return undefined;
+    values.set(match[1]!, Number(match[2]));
+  }
+  if (!values.has('anon')) return undefined;
+  let total = 0;
+  for (const field of HELD_MEMORY_FIELDS) total += values.get(field) ?? 0;
+  return Number.isSafeInteger(total) ? total : undefined;
+}
+
 export class DockerContainedResources implements DockerContainedResourceController {
   readonly #parent: string;
   readonly #slice: string;
@@ -1977,7 +2014,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const seen = await this.#probe(anchor, worker);
     current();
     if (!seen.worker) refuse('DOCKER_RESOURCE_WORKER_READBACK');
-    await this.#memoryFits(worker.id, row.policy.memoryMaxBytes);
+    await this.#memoryFits(worker.id, row.policy);
     current();
     // No other writer of this laptop's leaf is left unterminated.
     await this.#workerLeafWriters(seen.worker.id, current);
@@ -1992,23 +2029,34 @@ export class DockerContainedResources implements DockerContainedResourceControll
     );
   }
   /**
-   * A repair writes the laptop's approved `memory.max` into a laptop that is running, with an agent at work in it.
-   * A limit below what the laptop uses at that moment would make the kernel reclaim at once and, failing that,
-   * kill a process of the laptop for memory. So the laptop's own `memory.current` is read first, inside it, and the
-   * repair refuses, writing nothing and opening no attempt, while that is above the limit, or cannot be read. The
-   * next look asks again; the laptop goes on under the shared pool's limit meanwhile.
+   * A repair writes the laptop's approved `memory.high` and `memory.max` into a laptop that is running, with an
+   * agent at work in it. Above `memory.high` the kernel throttles the laptop and reclaims hard; above `memory.max`
+   * it reclaims at once and, failing that, kills a process of the laptop for memory. What reclaim cannot give back
+   * is the memory the laptop holds that is not page cache: anonymous memory, shared memory (with no swap, it stays
+   * where it is) and the kernel's own memory that cannot be reclaimed, read from the laptop's own `memory.stat`
+   * inside it (`heldMemoryBytes`). Page cache is left out on purpose: a laptop that ran without its limit for a
+   * while holds cache above it, and reclaim gives that back without harm. The repair refuses, writing nothing and
+   * opening no attempt, while what is held is above either limit, or cannot be read; the next look asks again,
+   * and the laptop goes on under the shared pool's limit meanwhile. The refusal carries the numbers.
    */
-  async #memoryFits(workerId: string, memoryMaxBytes: number): Promise<void> {
+  async #memoryFits(workerId: string, policy: DockerEmployeeResourcePolicy): Promise<void> {
     let raw: string;
     try {
-      raw = await this.command.run(['exec', workerId, '/bin/cat', '/sys/fs/cgroup/memory.current']);
+      raw = await this.command.run(['exec', workerId, '/bin/cat', '/sys/fs/cgroup/memory.stat']);
     } catch {
       return refuse('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
     }
-    const value = raw.trim();
-    if (!/^(0|[1-9][0-9]{0,19})$/.test(value) || !Number.isSafeInteger(Number(value)))
-      refuse('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
-    if (Number(value) > memoryMaxBytes) refuse('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE');
+    const heldBytes = heldMemoryBytes(raw);
+    if (heldBytes === undefined) refuse('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
+    const limits = [policy.memoryHighBytes, policy.memoryMaxBytes].filter((value): value is number => value !== null);
+    if (heldBytes! > Math.min(...limits))
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE', 409, {
+        cause: {
+          heldBytes,
+          memoryHighBytes: policy.memoryHighBytes,
+          memoryMaxBytes: policy.memoryMaxBytes,
+        } satisfies DockerHeldMemory,
+      });
   }
   /** Once a repair's writer is acknowledged and read back, every earlier
    * repair writer of the same target that is recorded finished is superseded:

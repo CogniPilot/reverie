@@ -78,6 +78,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { DockerLaptopOtherWork, DockerStoppedStorage, DockerStoredHomeLayout } from './docker-employee-engine.js';
+import type { DockerHeldMemory } from './docker-contained-resource-controller.js';
 import { reprovisionStorage } from './docker-absent-reprovision-source.js';
 import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
 import { ZodError } from 'zod';
@@ -245,6 +246,25 @@ function refusal(error: unknown): SupervisorActionResult {
   if (error instanceof CompanyError) return { outcome: 'refused', detail: error.message };
   if (error instanceof ZodError) return { outcome: 'failed', detail: 'the request did not fit the service' };
   throw error;
+}
+
+/**
+ * A refusal to write a laptop's limits below the memory it holds, as a short phrase with its numbers, for the
+ * supervisor's report; undefined for any other error.
+ */
+function heldMemoryRefusal(error: unknown): SupervisorActionResult | undefined {
+  if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE')
+    return undefined;
+  const held = error.cause as DockerHeldMemory | undefined;
+  if (!held || typeof held.heldBytes !== 'number') return undefined;
+  const gib = (bytes: number) => (bytes / 1024 ** 3).toFixed(1) + ' GiB';
+  const soft = held.memoryHighBytes === null ? '' : `soft limit of ${gib(held.memoryHighBytes)} and its `;
+  return {
+    outcome: 'refused',
+    detail:
+      `${error.code}: the laptop holds ${gib(held.heldBytes)} that reclaim cannot give back, more than its approved ` +
+      `${soft}hard limit of ${gib(held.memoryMaxBytes)}`,
+  };
 }
 
 function settled(result: DockerContinuationResult): SupervisorActionResult {
@@ -629,7 +649,7 @@ export class DockerSupervisorLaptops {
     } catch (error) {
       if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_CONTINUATION_CONTAINER_STOPPED')
         return { outcome: 'done', detail: 'not-running' };
-      return refusal(error);
+      return heldMemoryRefusal(error) ?? refusal(error);
     }
   }
 
