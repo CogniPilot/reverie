@@ -892,6 +892,164 @@ describe('owner recovery of a stopped shared pool', () => {
     expect(replay.json().error.code).toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
     expect(effects).toEqual(['start original anchor']);
   });
+
+  it('recovers the pool from the record that a rebuild retired, while the employee has no laptop record', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    const row = f.companyStore.snapshot().dockerEmployeeContinuations![0]!;
+    const entry = (operationId: string, patch: Record<string, unknown>) => ({
+      version: 1, purpose: 'docker-absent-continuation-retirement-v1', retiredAt: 1, operationId,
+      employeeId: f.eid, sessionId: row.request.sessionId, sessionGeneration: row.request.sessionGeneration,
+      scopeDigest: '7'.repeat(64), templateDigest: '8'.repeat(64),
+      template: { user: '1000:1000', scratchRoot: '/host/scratch/laptops', mounts: [] },
+      binding: null, session: { phase: 'cleared', containerName: null }, source: { phase: 'pending' },
+      ...patch,
+    });
+    const retiredBy = randomUUID();
+    await f.companyStore.update((state) => {
+      // What a rebuild leaves: no laptop record, and the retired one in the history.
+      state.dockerEmployeeContinuations = [];
+      state.retiredDockerEmployeeContinuations = [
+        entry(retiredBy, {
+          reason: 'recorded-containers-absent', record: row,
+          absent: { containerIds: ['c'.repeat(64)], planMoveIds: [] },
+        }),
+        // The unused source of that rebuild was replaced since: the newest entry retired no record.
+        entry(randomUUID(), {
+          reason: 'source-replaced', previous: retiredBy,
+          removal: { phase: 'removed', name: 'reverie-boxed-source-' + 'a'.repeat(64), containerId: 'd'.repeat(64) },
+          absent: { containerIds: [], planMoveIds: [] },
+        }),
+      ] as never;
+    });
+    expect(f.store.record(f.eid)).toBeUndefined();
+    expect(f.companyStore.snapshot().retiredDockerEmployeeContinuations).toHaveLength(2);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it('recovers nothing for an employee who has no laptop record of their own, current or retired', async () => {
+    const f = await fixture({ cold: true });
+    await f.companyStore.update((state) => { state.dockerEmployeeContinuations = []; });
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+  });
+  // A recovery that was issued and did not finish is finished as itself. Nothing it issued is issued again.
+  function resume(f: Awaited<ReturnType<typeof fixture>>, headers = f.ownerHeaders) {
+    return f.app.inject({ method: 'POST', url: f.url + '/cold-resume', headers, payload: {} });
+  }
+  const idle = (f: Awaited<ReturnType<typeof fixture>>) => new DockerColdPoolJournal(f.coldFile).requireIdle();
+  it('finishes a recovery whose anchor START reply was lost: the anchor is not started again and its helper is issued once', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id, true);
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect((await resume(f, f.workerHeaders)).statusCode).toBe(403);
+    expect(effects).toEqual(['start original anchor']);
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    const last = await latest(f);
+    expect(last.scope.operationId).toBe(id);
+    expect(last.task.phase).toBe('completed');
+    const fresh = f.companyStore.snapshot().dockerPoolObservations?.find(record => record.epoch.anchor.startTicks === '999');
+    expect(last.observationDigest).toBe(dockerContinuationDigest(fresh));
+    expect(() => idle(f)).not.toThrow();
+    // Asked again, there is nothing left to finish: it answers with the pool's status and issues nothing.
+    const again = await resume(f);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json().data.state).toBe('retained');
+    expect(effects).toHaveLength(3);
+  });
+  it('runs a recovery as itself when its anchor START never took effect and nothing else changed', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    let refused = 0;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'start' && args[2] === f.anchor.containerId && !refused++)
+        throw Error('The Engine did not start the anchor');
+      return observed(args, input);
+    });
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    expect(effects).toEqual([]);
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    expect((await latest(f)).scope.operationId).toBe(id);
+    expect(() => idle(f)).not.toThrow();
+  });
+  it('ends a recovery whose anchor has stopped again without a helper, and lets a new one be previewed', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id, true);
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    // A second host restart: the anchor that this attempt started is stopped again.
+    const raw = f.physical.containers.get(f.anchor.containerId)!;
+    raw.State = {
+      Status: 'exited', Running: false, Restarting: false, Paused: false, Dead: false, Pid: 0,
+      OOMKilled: false, Error: '', ExitCode: 255, StartedAt: '2026-11-19T09:00:30Z', FinishedAt: '2026-11-19T09:00:45Z',
+    };
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    // It confirmed nothing and can write nothing: it is recorded as ended, and the pool reads as stopped.
+    expect(result.json().data).toMatchObject({ state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED' });
+    expect(await latest(f)).toMatchObject({ scope: { operationId: id }, ended: true });
+    expect((await latest(f)).task).toBeUndefined();
+    expect(effects).toEqual(['start original anchor']);
+    expect(() => idle(f)).not.toThrow();
+    // The next recovery is a new operation from a fresh preview.
+    vi.restoreAllMocks();
+    const next = randomUUID(), later = observeEffects(f, next);
+    const again = await recover(f, await preview(f), next);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json().data.state).toBe('retained');
+    expect(later).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it('records a helper that exited with an error as failed and ends the recovery instead of holding the pool for good', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    f.physical.failHelper('pool-helper');
+    const scope = await preview(f);
+    const failed = await recover(f, scope, id);
+    expect(failed.statusCode).toBe(409);
+    expect(failed.json().error.code).toBe('DOCKER_RESOURCE_HELPER_FAILED');
+    expect((await latest(f)).task.phase).toBe('start-issued');
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    // The helper is observed as itself: neither created nor started a second time.
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    const last = await latest(f);
+    expect(last).toMatchObject({ scope: { operationId: id }, ended: true, task: { phase: 'failed', exitCode: 1 } });
+    expect(last.observationDigest).toBeUndefined();
+    // The anchor runs with no limits written. That is a pool like any other now: no recovery holds it.
+    expect(result.json().data.state).toBe('held');
+    expect(result.json().data.code).not.toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect(() => idle(f)).not.toThrow();
+  });
+  it('keeps a recovery held while its helper cannot be proved to have ended', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID();
+    observeEffects(f, id);
+    f.physical.failHelper('pool-helper');
+    expect((await recover(f, await preview(f), id)).statusCode).toBe(409);
+    // The helper container is still running: it may yet write.
+    const helper = (await latest(f)).task.containerId as string;
+    const state = f.physical.containers.get(helper)!.State as Record<string, unknown>;
+    f.physical.containers.get(helper)!.State = { ...state, Status: 'running', Running: true, Pid: 321 };
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'wait' && args[2] === helper) throw Error('still running');
+      return observed(args, input);
+    });
+    const result = await resume(f);
+    expect(result.statusCode).toBe(409);
+    expect((await latest(f)).task.phase).toBe('start-issued');
+    expect((await latest(f)).ended).toBeUndefined();
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+  });
 });
 
 describe('supported metadata-only recovery of an already lost pool ACK', () => {
@@ -1217,5 +1375,48 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     expect(restarted.snapshot().dockerPoolObservations).toBeUndefined();
     expect((await f.service.status(f.eid, f.authority())).state).toBe('reconciliation-required');
     f.effects();
+  });
+});
+
+describe('the cold recovery journal', () => {
+  const scope = (operationId: string, scopeDigest = 'a'.repeat(64)) => ({
+    operationId, employeeId: '11111111-1111-4111-8111-111111111111', sessionId: '22222222-2222-4222-8222-222222222222',
+    sessionGeneration: 1, scopeDigest,
+  });
+  async function journal() {
+    const directory = await fs.mkdtemp(join(tmpdir(), 'cold-journal-'));
+    cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+    return new DockerColdPoolJournal(join(directory, 'cold-pool.jsonl'));
+  }
+  const current = () => {};
+  it('holds an attempt until it is confirmed or ended, and resumes exactly that attempt', async () => {
+    const cold = await journal(), first = randomUUID();
+    expect(cold.held()).toBeUndefined();
+    await expect(cold.resume(current, async () => 'never')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_ABSENT');
+    await expect(cold.issue(scope(first), current, async () => { throw Error('lost'); })).rejects.toThrow('lost');
+    expect(cold.held()).toEqual(scope(first));
+    expect(() => cold.requireIdle()).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    await expect(cold.issue(scope(randomUUID(), 'b'.repeat(64)), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    await expect(cold.resume(current, async (attempt) => {
+      expect(attempt.scope).toEqual(scope(first));
+      attempt.end();
+      // An ended attempt takes nothing more.
+      expect(() => attempt.end()).toThrow('DOCKER_POOL_COLD_JOURNAL_CHANGED');
+      expect(() => attempt.confirm('c'.repeat(64))).toThrow();
+      return 'ended';
+    })).resolves.toBe('ended');
+    expect(cold.held()).toBeUndefined();
+    expect(() => cold.requireIdle()).not.toThrow();
+  });
+  it('lets the scope of an ended attempt be issued again under a new operation, and never the scope of any other', async () => {
+    const cold = await journal(), first = randomUUID(), second = randomUUID();
+    await expect(cold.issue(scope(first), current, async () => { throw Error('lost'); })).rejects.toThrow('lost');
+    await cold.resume(current, async (attempt) => attempt.end());
+    // The same operation is never issued twice, ended or not.
+    await expect(cold.issue(scope(first), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ALREADY_ISSUED');
+    await expect(cold.issue(scope(second), current, async () => { throw Error('lost again'); })).rejects.toThrow('lost again');
+    expect(cold.held()).toEqual(scope(second));
+    // An attempt that is only held has not ended: its scope stays issued.
+    await expect(cold.issue(scope(randomUUID()), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
   });
 });

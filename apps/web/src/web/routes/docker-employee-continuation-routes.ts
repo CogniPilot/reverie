@@ -245,6 +245,18 @@ export function registerDockerEmployeeContinuationRoutes(
         return pool.coldRecover(id, input, capture(req, id));
       })
     );
+    // Finishes a recovery that was issued and has not finished, as itself. It
+    // takes nothing: what is left to do is decided from the journal and from
+    // fresh reads. With no unfinished recovery it answers with the pool status.
+    app.post('/api/company/employees/:id/docker-pool/cold-resume', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        z.object({}).strict().parse(req.body ?? {});
+        return pool.coldResume(id, capture(req, id));
+      })
+    );
     app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);

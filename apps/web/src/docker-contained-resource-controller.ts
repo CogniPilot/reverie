@@ -2053,13 +2053,141 @@ export class DockerContainedResources implements DockerContainedResourceControll
     current();
     if (!init || await this.#coldPoolMembers(current) !== source.members)
       refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    return this.#configureColdPool(row, init, attempt.id, journal, current);
+  }
+  /** The attempt's one pool writer under its own cursor, then the fresh observation that acknowledges it. */
+  async #configureColdPool(
+    row: DockerEmployeeContinuationRecord,
+    init: Init,
+    attemptId: string,
+    journal: DockerContinuationTaskJournal,
+    current: () => void
+  ): Promise<DockerPoolReconciliationReceipt> {
     const seen = await this.#probe(init);
     current();
     await this.#configureTask(row, 'pool-helper', this.#poolArguments(seen, row.policy.pool), {
       path: this.#parent, target: '/run/reverie-box-pool',
-    }, current, { id: attempt.id, journal, imageId: this.configuration.helperImageId });
+    }, current, { id: attemptId, journal, imageId: this.configuration.helperImageId });
     current();
     return this.capturePoolObservation(row.policy.pool, current);
+  }
+  /** Observes the helper of an unfinished cold attempt as itself until its
+   * cursor records how it ended, exactly as an issued repair attempt is
+   * observed: its CREATE and START are never repeated, a helper that was
+   * created and never started is started with the arguments it was created
+   * with (it re-proves every one of them before it writes), and one that
+   * exited with an error is recorded as failed. A helper that cannot be proved
+   * to have ended throws, and the attempt stays held. */
+  async #settleColdWriter(
+    row: DockerEmployeeContinuationRecord,
+    journal: DockerContinuationTaskJournal,
+    current: () => void
+  ): Promise<void> {
+    const task = journal.read(row, 'pool-helper');
+    if (!task || task.phase === 'completed' || task.phase === 'failed') return;
+    let id = 'containerId' in task ? task.containerId : undefined;
+    if (!id) {
+      const listed = (
+        await this.command.run([
+          'container', 'ls', '--all', '--no-trunc', '--filter', 'label=reverie.box.resource.name=' + task.name,
+          '--format', '{{.ID}}',
+        ])
+      ).trim();
+      current();
+      // Only a journaled `created` container is ever started, so one that was
+      // never recorded as created can never write for this attempt.
+      if (!listed) return;
+      id = cid.parse(listed);
+    }
+    const config = this.#repairConfiguration(task, await this.#inspect(id));
+    current();
+    await this.#poolWritersClosed(task);
+    current();
+    try {
+      await this.#runWriter(row, 'pool-helper', task.name, config, current, journal, 1);
+    } catch (error) {
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_HELPER_FAILED')
+        throw error;
+      if (!(await this.#settleFailedRepair(row, 'pool-helper', journal, current))) throw error;
+    }
+  }
+  /** Finishes the one unfinished cold attempt as itself. Nothing it already
+   * issued is issued again.
+   *
+   * - No helper on its cursor and the anchor still stopped: when every native
+   *   fact is exactly what the attempt was issued for (`issuedFor`), its anchor
+   *   START never took effect and it runs now, as itself. When the facts
+   *   differ, or a laptop runs, it did nothing that lasts.
+   * - No helper on its cursor and the anchor running: the START took effect.
+   *   Its helper was never issued and is issued now, once.
+   * - A helper on its cursor: that helper is observed as itself to its end.
+   *
+   * Returns the fresh pool observation when the pool is confirmed. Returns
+   * null when the attempt confirmed nothing and can write nothing more: it has
+   * no helper, or its helper is terminal or was never created. Anything that
+   * cannot be proved throws, and the attempt stays held. */
+  async resumeColdPool(
+    row: DockerEmployeeContinuationRecord,
+    attempt: { id: string; issuedFor(nativeDigest: string): boolean },
+    journal: DockerContinuationTaskJournal,
+    current: () => void
+  ): Promise<DockerPoolReconciliationReceipt | null> {
+    current();
+    const original = row.tasks?.find(task => task.role === 'anchor');
+    const name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32);
+    const configuration = this.#configuration('anchor', name, ['anchor']);
+    if (!row.pool || original?.phase !== 'running' || original.containerId !== row.pool.containerId ||
+        original.configurationDigest !== dockerContinuationDigest(configuration))
+      refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const id = original.containerId;
+    const anchors = await this.#poolCensus('anchor');
+    current();
+    if (anchors.length !== 1 || anchors[0] !== id) refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const running = async () => {
+      const raw = await this.#fixed(id, configuration);
+      current();
+      return (raw.State as { Running?: unknown }).Running === true;
+    };
+    if (!journal.read(row, 'pool-helper')) {
+      // A laptop runs: nothing is recovered cold beside it, and this attempt has no writer.
+      const beside = (error: unknown): null => {
+        current();
+        if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_POOL_COLD_WORKERS_RUNNING')
+          return null;
+        throw error;
+      };
+      if (await running()) {
+        const init = await this.#init(id);
+        current();
+        if (!init) refuse('DOCKER_POOL_COLD_START_UNCONFIRMED');
+        try {
+          await this.#coldPoolMembers(current);
+        } catch (error) {
+          return beside(error);
+        }
+        return this.#configureColdPool(row, init, attempt.id, journal, current);
+      }
+      let source: Awaited<ReturnType<DockerContainedResources['coldPoolScope']>>;
+      try {
+        source = await this.coldPoolScope(row, current);
+      } catch (error) {
+        return beside(error);
+      }
+      if (!attempt.issuedFor(source.digest)) return null;
+      return this.recoverColdPool(row, { id: attempt.id, nativeDigest: source.digest }, journal, current);
+    }
+    await this.#settleColdWriter(row, journal, current);
+    current();
+    if (journal.read(row, 'pool-helper')?.phase !== 'completed' || !(await running())) return null;
+    try {
+      return await this.capturePoolObservation(row.policy.pool, current);
+    } catch (error) {
+      current();
+      // The helper acknowledged and has ended. What it acknowledged no longer
+      // covers the pool as it is now, so the attempt confirms nothing.
+      if (error instanceof DockerEmployeeContinuationError) return null;
+      throw error;
+    }
   }
   async #worker(row: DockerEmployeeContinuationRecord): Promise<Init> {
     if (!row.destination) refuse('DOCKER_RESOURCE_DESTINATION_REQUIRED');

@@ -12,6 +12,7 @@ import {
 import { dockerPoolMetadataDigest, type DockerPoolObservationRecord } from './docker-pool-observation-data.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
+import { reprovisionHeads } from './docker-absent-reprovision-data.js';
 export interface DockerPoolStatus {
   readonly state: 'retained' | 'reconciliation-required' | 'held';
   readonly sessionId: string;
@@ -118,9 +119,31 @@ export class DockerPoolReconciliation {
     ) === true;
   }
 
+  /** The laptop record that names the stopped anchor for a cold recovery: the
+   * employee's current one, or, while they have none, the one their last
+   * rebuild retired. A rebuild retires the record and keeps the employee, the
+   * session and the pool, so the retired record still names the box's one
+   * anchor; without it an office whose laptops were all being rebuilt when the
+   * host restarted could never start its anchor again. Every native check of
+   * the recovery is made against that anchor as it is now. */
+  #coldSource(employeeId: string): DockerEmployeeContinuationRecord | undefined {
+    const current = this.store.record(employeeId);
+    if (current) return current;
+    const retired = this.company.store.snapshot().retiredDockerEmployeeContinuations ?? [];
+    const heads = reprovisionHeads(retired, employeeId);
+    if (heads.length !== 1) return undefined;
+    // The newest entry of the one history that retired a record: replacing an unused source retires none.
+    let entry: (typeof retired)[number] | undefined = heads[0];
+    for (let steps = 0; entry && !entry.record && steps < retired.length; steps++) {
+      const previous: string | undefined = entry.previous;
+      entry = retired.find((value) => value.employeeId === employeeId && value.operationId === previous);
+    }
+    return entry?.record;
+  }
+
   #coldContext(employeeId: string, authority: DockerContinuationAuthority) {
     const base = this.#context(employeeId, authority);
-    const row = this.store.record(employeeId);
+    const row = this.#coldSource(employeeId);
     if (!row || row.owner !== authority.owner ||
         row.request.sessionId !== base.original.sessionId ||
         row.request.sessionGeneration !== base.original.sessionGeneration ||
@@ -130,7 +153,7 @@ export class DockerPoolReconciliation {
     const requireSource = () => {
       authority.requireOffice();
       if (this.company.store.publicationUnconfirmed ||
-          dockerContinuationDigest(this.store.record(employeeId) ?? null) !== rowDigest)
+          dockerContinuationDigest(this.#coldSource(employeeId) ?? null) !== rowDigest)
         refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
       if (this.company.store.snapshot().employees.some(employee => employee.dockerResourcePolicy &&
           dockerContinuationDigest(employee.dockerResourcePolicy.pool) !== dockerContinuationDigest(row.policy.pool)))
@@ -192,6 +215,64 @@ export class DockerPoolReconciliation {
       confirm(dockerContinuationDigest(observation));
       return this.#result(base, observation, dockerPoolMetadataDigest(this.company.store.snapshot()));
     });
+  }
+
+  /** The one cold recovery that was issued and has not finished, when there
+   * is one. DATA only: the employee and session it was issued for. */
+  coldHeld(): { employeeId: string; sessionId: string; sessionGeneration: number; operationId: string } | undefined {
+    const held = this.cold?.held();
+    return held && {
+      employeeId: held.employeeId, sessionId: held.sessionId, sessionGeneration: held.sessionGeneration,
+      operationId: held.operationId,
+    };
+  }
+
+  /** Finishes the one unfinished cold recovery as itself. Nothing it already
+   * issued is issued again: its anchor START is repeated only when every
+   * native fact is still exactly what the attempt was issued for, for the same
+   * employee, and its helper is observed under its own cursor. An employee
+   * other than the one it was issued for can finish it and can never restart
+   * it: the scope it was issued for names its own employee.
+   * The attempt then ends one of two ways. A confirmed pool is published and
+   * closes it, as a recovery that never stopped does. An attempt that can
+   * write nothing more and confirmed nothing is recorded as ended; the pool is
+   * then read again like any other, and a new recovery may be previewed.
+   * Anything that cannot be proved leaves the attempt held. */
+  async coldResume(employeeId: string, authority: DockerContinuationAuthority): Promise<DockerPoolStatus> {
+    if (!this.cold) refuse('DOCKER_POOL_COLD_RECOVERY_UNAVAILABLE');
+    if (!this.cold.held()) return this.status(employeeId, authority);
+    const context = this.#coldContext(employeeId, authority);
+    const { base } = context;
+    let published: DockerPoolObservationRecord | undefined;
+    const current = () => {
+      if (published) {
+        base.requireSubject();
+        context.requireSource();
+        if (!this.#retained(published)) refuse('DOCKER_POOL_CANONICAL_CHANGED');
+      } else context.current();
+    };
+    const subject = (native: string) =>
+      dockerContinuationDigest({ subject: base.original, prior: base.beforePool, native });
+    const result = await this.cold.resume(current, async (attempt) => {
+      const receipt = await this.resources.resumeColdPool(context.row, {
+        id: attempt.scope.operationId, issuedFor: (native) => subject(native) === attempt.scope.scopeDigest,
+      }, attempt.journal, current);
+      if (!receipt || attempt.journal.read(context.row, 'pool-helper')?.phase !== 'completed') {
+        attempt.end();
+        return undefined;
+      }
+      const observation = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, current);
+      if (!this.#retained(observation)) {
+        const saved = await this.company.store.publishDockerPoolObservation(receipt, base.beforePool, current);
+        if (saved.state === 'not-issued') throw saved.cause;
+        if (saved.state === 'unconfirmed') refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
+      }
+      published = observation;
+      current();
+      attempt.confirm(dockerContinuationDigest(observation));
+      return this.#result(base, observation, dockerPoolMetadataDigest(this.company.store.snapshot()));
+    });
+    return result ?? this.status(employeeId, authority);
   }
 
   /** A plan move may read an already-reconciled source pool. The original
