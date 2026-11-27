@@ -77,22 +77,33 @@ audit log as `office supervisor` with one console line `[supervisor] …`.
 
 `GET /api/company` carries a `supervisor` object on each employee: `condition`,
 `sentence`, `code`, `since`, `last` (what it did and how that ended), `next`
-(what it will do and no earlier than when), `waitingFor`, and `needsHuman` (what
-a person or a managing agent has to do, with the route to call). The company
-card shows the short form and keeps the sentence in its tooltip.
+(what it will do and no earlier than when), `waitingFor`, `waitingUntil` (when
+that wait ends by itself, where it is known), and `needsHuman` (what a person or
+a managing agent has to do, with the route to call). The company card shows the
+short form and keeps the sentence in its tooltip.
 
-Steps, least destructive first, each bounded per episode (an episode ends after
-ten healthy minutes):
+No path of the supervisor ends for good. `needsHuman` is set in three cases
+only: the owner switched that kind of step off in the company settings; the
+office has nothing approved, or nothing on record, to act with (below); or a
+step belongs to another part of the office that still names a person. A wait says what it waits for,
+and `waitingUntil` says when it ends where a clock decides that.
+
+Steps, least destructive first, each bounded per round. A round ends after ten
+healthy minutes, and it also ends six hours after its last attempt: the counts
+are then cleared and the steps start again from the first one, for every path.
+While a used-up round waits for that, `waitingFor` reads “the next round of
+repair steps, which starts at …” and nobody is asked for anything.
 
 | Step | When | Bound |
 | --- | --- | --- |
 | Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min; once when only `continue` is offered and the request was refused with a code that only a fresh laptop settles |
 | Put approved limits back in place (the shared pool first, then the laptop's own) | a running laptop's read offers `repair-pool` or `repair` | the same 4 |
+| Give the owner's standing default limits | no laptop and no approved resource limits, with the standing defaults switched on | 2 |
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
-| Wake (attach a provider that already runs) | the terminal is not connected | 6; once when the terminal's input is also held for good and the wake was refused |
+| Wake (attach a provider that already runs) | the terminal is not connected, or the session is not in a laptop | 6; once when the terminal's input is also held for good and the wake was refused |
 | Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
-| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns | 2, and 2 per day |
+| Rebuild the laptop, then start it | the operation cannot advance, an unused laptop was made for an earlier laptop image, a code the office does not recognize has stood for 30 minutes, the laptop has been starting for 15 minutes, or the laptop is gone while an earlier laptop operation is on record. At once when nothing runs in the laptop; otherwise between the agent's turns | 2, and 2 per day across rounds |
 
 A laptop record can offer `continue` for a step it has not issued while the
 request is refused before that step, for example a set-up that was made for a
@@ -104,8 +115,8 @@ problem was first seen, and then starts the fresh laptop. With
 `supervisorAutoRepair` off it sends the request once and then names that switch
 and the rebuild calls.
 
-An office terminal whose input is held for good is the one case in which the
-supervisor rebuilds a laptop its agent still runs in. The hold records an input
+An office terminal whose input is held for good was the first case in which
+the supervisor rebuilds a laptop its agent still runs in. The hold records an input
 that may have been sent and was never confirmed; neither a healthy laptop nor a
 new terminal client clears it, so every wake is refused, chat cannot reach the
 employee and the office can never type to that agent again. The supervisor
@@ -115,27 +126,130 @@ terminal must show the agent idle and its pane must have been silent for two
 minutes, and both are read again immediately before the rebuild is requested.
 The running laptop is discarded only when it is the one recorded laptop of that
 employee. While a turn is in progress, or while the office is not reading the
-pane (after an office restart it has no terminal on a held session), it waits;
-after thirty minutes `needsHuman` says so and names the calls, and the office
-still rebuilds by itself as soon as the turn has ended. An agent that ended its
-turn with work left running (a monitor, a background shell) is given those same
-thirty minutes for it, and is then rebuilt with that work still running. The
+pane, it waits and asks nobody. An agent that ended its
+turn with work left running (a monitor, a background shell) is given thirty
+minutes from when the problem was first seen, and is then rebuilt with that
+work still running. The
 home directory is
 kept and the fresh laptop is started as after any rebuild. With
 `supervisorAutoRepair` off it wakes once and then names that switch and the
 calls, including `confirmDiscardRunning`. A terminal that is not connected but
 still takes input is only woken, never rebuilt.
 
-It never answers a sign-in or an owner's decision screen, never approves limits
-or a laptop layout, never returns anyone to the office, and never rebuilds
-while it cannot read the laptop or, with that one exception, while an agent
-runs in the laptop. A rebuild
+The same rule serves every other laptop that only a rebuild settles while an
+agent runs in it, for example one whose limits helper failed for good or one
+that reports `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did
+not start runs in its terminal, which the office cannot take over). Such a
+laptop is rebuilt between the agent's turns and never in the middle of one:
+
+- A turn the office terminal shows in progress is waited for, however long it
+  lasts.
+- An idle pane must have been silent for two minutes. The step reads the pane
+  again itself immediately before the rebuild, and where the reason is a held
+  laptop it reads the laptop again too; a laptop that has finished meanwhile is
+  kept.
+- A read that cannot say what runs in the laptop is never taken for an empty
+  laptop. It is asked again for fifteen minutes; after that the laptop is
+  treated as one an agent runs in.
+- A pane the office cannot read at all has no turn to wait for. That is the
+  case after an office restart for a session whose input is held (the office
+  has no terminal on it), and for a process the office did not start. A read
+  inside the laptop is made first, and a laptop it shows to be empty is rebuilt
+  at once. Otherwise the laptop is rebuilt two hours after the problem was
+  first seen, and `waitingFor` names that time. Two hours is four times what an
+  ordinary turn is given; what an unusually long turn can lose is its
+  unfinished step, because the home directory and the conversation saved in it
+  are kept and the fresh laptop continues that conversation.
+- Only the one recorded laptop of the employee is ever discarded this way. A
+  second running laptop, or a running laptop that is not the recorded one, is
+  refused.
+
+A laptop code the office does not recognize is not acted on at once: it may be
+a state of a newer laptop runtime that settles by itself. The recorded request
+is sent again when the laptop offers that. When the code still stands after
+thirty minutes the laptop is treated as held, under every rule above. A laptop
+that has been starting, or between two states, for fifteen minutes without
+becoming healthy is treated the same way from that moment.
+
+The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
+daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
+next day the ladder goes on by itself.
+
+It never answers a sign-in or an owner's decision screen, never chooses limits
+or a laptop layout of its own, never returns anyone to the office, and never
+rebuilds a laptop in the middle of its agent's turn. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
-employee with none on record is rebuilt by hand once. A stopped or missing
+employee with none on record is given the standing default (below). A stopped or missing
 laptop is rebuilt only while another laptop of the box runs; when none does,
 that is what a host restart looks like, so recover the shared pool first
-(below). A code or a plan move error it does not recognize is reported and left
-alone.
+(below). A plan move error it does not recognize is reported and left alone.
+
+### Standing defaults for limits and layout
+
+Two things about a laptop are approved by the owner for each employee: its
+resource limits (`PUT …/docker-policy`) and its layout (the `template` of a
+rebuild or reprovision request). An employee who had neither used to wait for
+the owner. The company setting `supervisorStandingDefaults` (absent means on)
+lets the office give such an employee what the owner already approved for the
+other employees of the same company, reduced so that nobody is given more than
+every one of them has:
+
+- Limits: all of them must be in the same shared pool with the same pool
+  limits. The employee's own limits are the smallest of each value (hard and
+  soft memory, swap, tasks, CPU weight) and the processors all of them may use.
+  They are saved through the store method behind the docker-policy route; the
+  setting and the derived values are read again inside that save.
+- Layout: all laptops that have a layout on record must run as the same user
+  and keep scratch space under the same root. The drives are the ones every one
+  of them has, read-only where any has it read-only. The choice among several
+  office networks and a sign-in folder outside the home belong to one employee
+  and are never copied. The layout is used for a rebuild and is recorded with
+  that rebuild, as an owner's layout is.
+
+The office makes up no number and no path. Where the others disagree on the
+pool, the user or the scratch root, or no other employee has anything
+approved, there is no default: `needsHuman` says so and names the call. With
+the setting switched off, `needsHuman` names the setting. Each use is in the
+audit log (`supervisor_apply_standing_limits`, or the rebuild's own entry).
+
+One state is left that the office cannot leave by itself: an employee who has
+never had a laptop in this office. Every laptop operation makes a laptop from
+the record of an earlier one, which fixes where the home directory is, and the
+employee's own office network is made by the host set-up. The supervisor says
+so, goes on reading, and starts a stopped laptop of that employee as soon as
+one exists.
+
+### The office restarting itself
+
+The laptop runtime is composed once, at start, from the fixed runtime
+configuration and the private instance key, which the office keeps open and
+compares on every use. Once either differs from what was read at start, every
+laptop route answers `DOCKER_CONTINUATION_RUNTIME_CHANGED`, the supervisor
+stops its passes, and nothing reads them again in place. A new office process
+does. The office therefore ends its own process, by its ordinary graceful
+shutdown, so that Docker starts it again; laptops keep running and are
+attached again as after any office restart. It does so only when all of this
+holds:
+
+- the change has stood, with nothing about it changing, for ten minutes;
+- a new process would accept the configuration that is in place and would read
+  the same instance key (with another key every laptop's credential would be
+  out of use, so the office never restarts itself into one);
+- the Engine reports the restart policy `always` or `unless-stopped` for the
+  office's own container. A container nothing would start again is never
+  taken down;
+- `supervisorAutoRepair` is not switched off;
+- it has not restarted itself within the last hour, nor twice within a day.
+  The record is `office-self-restart.json` in the office data directory,
+  written before the exit and read after it; a record that cannot be read
+  counts as a restart made at that moment.
+
+Meanwhile every employee's `waitingFor` says what the office waits for, with
+the time of the restart or the condition that keeps it from restarting. The
+restart is in the audit log as `supervisor_restart_office`. The office cannot
+see the host's update tool. An update stops the office container before it
+changes anything, and Docker does not restart a container it was told to stop,
+so a restart of this kind cannot run into one.
 
 Putting limits back is not changing them. A reload of the host's service
 manager resets the limits that only a helper wrote, and every laptop is then
@@ -158,11 +272,12 @@ spends no attempt of a repair step. `GET /api/company` shows the last check as
 and an audit entry `supervisor_keep_limits` are written when limits were put
 back, and once when a check starts to be refused.
 
-Two company settings switch it (`PUT /api/company/settings`, owner only; absent
-means on): `supervisorEnabled` (observe, continue, wake) and
-`supervisorAutoRepair` (abandon and rebuild). Its pacing state is
-`employee-supervisor.json` in the office data directory; deleting it only
-restarts the waits.
+Three company settings switch it (`PUT /api/company/settings`, owner only;
+absent means on): `supervisorEnabled` (observe, continue, wake),
+`supervisorAutoRepair` (abandon, rebuild, give standing limits, restart the
+office) and `supervisorStandingDefaults` (limits and layout for an employee
+who has none). Its pacing state is `employee-supervisor.json` in the office
+data directory; deleting it only restarts the waits.
 
 ## Employee disk budget
 
