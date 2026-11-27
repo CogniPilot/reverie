@@ -1473,6 +1473,7 @@ const OPERATION_WAITS: ReadonlySet<string> = new Set([
  * | terminal attached, or the office reads the agent's pane (healthy, an  | `reads`                           |
  * |   agent at a start-up screen, a held laptop with an attached pane)    |                                   |
  * | plan move open, held or running; being moved to another session       | nothing: the move owns the laptop |
+ * |   (not the handoff a closed move owes, nor a retired runtime's move)  |   (`moveOwnsLaptop`)              |
  * | a set-up step, another laptop operation, an owner stop or recovery,   | nothing: an operation of the      |
  * |   a start or stop of the session, or an unconfirmed save is running   |   office's own holds them         |
  * | rebuild recorded and not finished                                     | nothing: being rebuilt            |
@@ -1500,7 +1501,8 @@ export function officeReading(
   const attached =
     laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected';
   if (session.turn === 'working' || session.turn === 'idle' || attached) return 'reads';
-  if (observed.move || observed.bindingMigration || observed.busy || !observed.boxed) return 'no-evidence';
+  if (moveOwnsLaptop(observed.move) || observed.bindingMigration || observed.busy || !observed.boxed)
+    return 'no-evidence';
   if (!laptop.record || laptop.rebuildPending || session.inputHeld === true) return 'no-evidence';
   if (laptop.pool !== undefined && laptop.pool !== 'up') return 'no-evidence';
   const seen = laptop.continuation;
@@ -1551,6 +1553,21 @@ function besideTheLaptop(observed: SupervisorObservation, base: SupervisorClassi
 const HANDOFF_OWED = 'handoff-owed';
 const HANDOFF_UNCONFIRMED = 'handoff-unconfirmed';
 const HANDOFF_WAIT = 'the agent to be idle at an empty composer, where the handoff is typed';
+
+/**
+ * A plan move owns the employee's laptop: it is open, held or running, and its steps stop, build or start laptops
+ * of this employee. Two kinds of record on the move's list own none. What a closed move left owing, its handoff
+ * (owed or unconfirmed), is typed into a laptop that is already the employee's, and a held move of the retired
+ * runtime gates no laptop at all. Both are looked at beside the laptop (`besideTheLaptop`), so every repair of the
+ * laptop goes on under them; without that, an agent parked on a start-up screen beside such a record had no step
+ * at all, and the handoff could never be typed either. Every rule that leaves an employee to their move asks this.
+ */
+export function moveOwnsLaptop(move: SupervisorObservation['move']): boolean {
+  if (!move) return false;
+  if (move.busy) return true;
+  if (move.phase === HANDOFF_OWED || move.phase === HANDOFF_UNCONFIRMED) return false;
+  return move.docker || move.phase !== 'recovery-required';
+}
 
 /**
  * An employee whose closed move still owes its handoff is never reported as simply running. While the laptop needs
@@ -2007,7 +2024,7 @@ function parkedScreenGate(
   policy: SupervisorPolicy
 ): Gate {
   const screen = observed.session.startupScreen;
-  if (!screen?.proof || !observed.boxed || observed.move) return { kind: 'skip' };
+  if (!screen?.proof || !observed.boxed || moveOwnsLaptop(observed.move)) return { kind: 'skip' };
   const relaunch = action === 'relaunch-provider';
   if (relaunch && (!flags.relaunchAvailable || observed.laptop.record?.version === 3)) return { kind: 'skip' };
   if (screen.kind === 'credential' && signedInNowhere(observed, history))
@@ -2384,11 +2401,12 @@ function gate(
         : { kind: 'skip' };
     case 'replace-sign-in':
       // Only for a laptop parked on the provider's own sign-in screen. A plan move that waits for a sign-in keeps
-      // its own record, and a supervisor that is switched off describes the screen as it always did.
+      // its own record, and a supervisor that is switched off describes the screen as it always did. What a closed
+      // move still owes owns no laptop (`moveOwnsLaptop`).
       return flags.enabled &&
         flags.signInRepairAvailable === true &&
         observed.boxed &&
-        !observed.move &&
+        !moveOwnsLaptop(observed.move) &&
         observed.session.startupScreen?.kind === 'credential' &&
         !signInAnswered(observed, history)
         ? { kind: 'ok' }

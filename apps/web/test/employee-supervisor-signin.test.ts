@@ -18,6 +18,8 @@ import {
   assessEmployee,
   classifyEmployee,
   ladderRestartAt,
+  moveOwnsLaptop,
+  officeReading,
   recordSupervisorAttempt,
   rollSupervisorHistory,
   type SupervisorFlags,
@@ -610,5 +612,123 @@ describe('the supervisor starting a parked agent again', () => {
     expect(w.state.acts.at(-1)).toBe('rebuild-laptop');
     expect(w.state.acts.filter((name) => name === 'rebuild-laptop')).toHaveLength(1);
     expect(w.report()).toMatchObject({ condition: 'healthy' });
+  });
+});
+
+describe('an agent parked on its sign-in screen beside what a closed plan move still owes', () => {
+  const REPAIR = flags({ autoRepair: true, relaunchAvailable: true });
+  const owing = (phase: 'handoff-owed' | 'handoff-unconfirmed') =>
+    ({ id: 'm1', docker: true, phase, busy: false, allowedActions: [] }) as const;
+
+  for (const phase of ['handoff-owed', 'handoff-unconfirmed'] as const) {
+    it(`${phase}: has its sign-in put back and its agent started again, as without the record`, () => {
+      const steps = new Set<string>();
+      let history: SupervisorHistory = EMPTY_SUPERVISOR_HISTORY;
+      for (let now = 0; now < 12 * 60 * MINUTE; now += 30_000) {
+        const seen = atSignIn({ move: owing(phase), session: { ...parkedSession, idleSince: now - 10 * MINUTE } });
+        history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+        const result = assessEmployee(seen, history, REPAIR, now);
+        expect(result.needsHuman).toBeUndefined();
+        if (result.next.action && (result.next.at ?? 0) <= now) {
+          steps.add(result.next.action);
+          history = recordSupervisorAttempt(history, result.next.action, now, 'done', 'sign-in already in place');
+        }
+      }
+      expect([...steps].sort()).toEqual(['rebuild-laptop', 'relaunch-provider', 'replace-sign-in']);
+    });
+  }
+
+  it('is a laptop the office reads, so the record does not keep it from counting as evidence about the office', () => {
+    for (const phase of ['handoff-owed', 'handoff-unconfirmed'] as const) {
+      const seen = atSignIn({ move: owing(phase), session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' } });
+      const ready = { ...seen, laptop: { ...seen.laptop, restoration: undefined, continuation: { state: 'ready', phase: 'ready', allowedActions: [] } } } as SupervisorObservation;
+      expect(officeReading(ready, true)).toBe('cannot-read');
+    }
+    // A move that is open still owns the laptop.
+    const open = atSignIn({ move: { id: 'm2', docker: true, phase: 'starting', busy: false, allowedActions: [] } });
+    expect(moveOwnsLaptop(open.move)).toBe(true);
+    expect(moveOwnsLaptop(owing('handoff-owed'))).toBe(false);
+    // A held move of the retired runtime gates no laptop either.
+    expect(moveOwnsLaptop({ id: 'm3', docker: false, phase: 'recovery-required', busy: false, allowedActions: ['settle'] })).toBe(false);
+  });
+
+  const employee: SupervisedEmployee = {
+    id: 'burt',
+    name: 'Burt',
+    owner: undefined,
+    sessionId: 's1',
+    sessionGeneration: 1,
+    desiredRunning: true,
+    onVacation: false,
+    bindingMigration: false,
+    planAccountId: 'anthropic-898367f5',
+    planLabel: 'Claude CogniPilot',
+  };
+  /** The office with the handoff on record for the session Burt is on; a rebuild keeps that session. */
+  function driven(phase: 'handoff-owed' | 'handoff-unconfirmed') {
+    const state = { now: 10 * MINUTE, acts: [] as string[], rebuilt: false, delivered: false };
+    const ports: EmployeeSupervisorPorts = {
+      now: () => state.now,
+      ready: () => true,
+      employees: () => [employee],
+      flags: () => ({ enabled: true, autoRepair: true }),
+      glance: () => {
+        const { session, ...rest } = atSignIn();
+        return state.rebuilt
+          ? { ...rest, session: { available: true, runtimeHealth: 'healthy', viewerHealth: 'connected', turn: 'idle', idleSince: state.now - MINUTE } }
+          : { ...rest, session: { ...session, idleSince: 5 * MINUTE } };
+      },
+      openMove: async () => (state.delivered ? undefined : owing(phase)),
+      planSignedIn: async () => true,
+      laptopSignedIn: () => true,
+      readLaptop: async () => undefined,
+      readSource: async () => 'unknown',
+      readProvider: async () => 'running',
+      actions: {
+        'rebuild-laptop': async () => {
+          state.acts.push('rebuild-laptop');
+          state.rebuilt = true;
+          return { outcome: 'done', detail: 'rebuilt new' };
+        },
+        'continue-move': async (_employee, _guard, move) => {
+          state.acts.push('continue-move:' + move?.id + ':' + move?.phase);
+          state.delivered = true;
+          return { outcome: 'done', detail: 'handoff delivered m1' };
+        },
+      },
+      load: () => new Map(),
+      save: async () => {},
+      audit: () => {},
+      log: () => {},
+    };
+    const supervisor = new EmployeeSupervisor(ports, SUPERVISOR_POLICY, {
+      actionsPerTick: 2,
+      startupGraceMs: 0,
+      actionWaitMs: 1000,
+      idleReadMs: 2 * MINUTE,
+      limitsCheckMs: 10 * MINUTE,
+    });
+    const run = async (minutes: number) => {
+      for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+        await supervisor.tick();
+        state.now += 30_000;
+      }
+    };
+    return { state, run, report: () => supervisor.reports(undefined)[0]! };
+  }
+
+  it('types the owed handoff into the rebuilt laptop once its agent is back, and is then running', async () => {
+    const w = driven('handoff-owed');
+    await w.run(30);
+    expect(w.state.acts).toEqual(['rebuild-laptop', 'continue-move:m1:handoff-owed']);
+    expect(w.report()).toMatchObject({ condition: 'healthy' });
+  });
+
+  it('rebuilds beside a handoff whose outcome is not known, and never types that one', async () => {
+    const w = driven('handoff-unconfirmed');
+    await w.run(30);
+    expect(w.state.acts).toEqual(['rebuild-laptop']);
+    expect(w.report()).toMatchObject({ condition: 'healthy' });
+    expect(w.report().sentence).toMatch(/never typed twice/);
   });
 });

@@ -964,7 +964,13 @@ stays owed, whoever closed the move (the supervisor, the owner's
   wrong, their `condition` is `move-held-retryable` with the code
   `move-handoff-owed` and a sentence that says the handoff has not been typed.
   While the laptop needs a repair, that repair comes first and its sentence
-  says that the handoff is owed as well.
+  says that the handoff is owed as well. What a closed move owes owns no
+  laptop: every repair runs as it would without the record, including the
+  sign-in, the restart of an agent parked on a start-up screen and the
+  rebuild, and the employee counts like any other when the office judges
+  whether it reads its laptops. A rebuild keeps the employee's session, so
+  the handoff stays owed to the rebuilt laptop and is typed there once its
+  agent is idle at an empty composer.
 - The office types exactly the move's text, once, into that same session, when
   the agent is next idle at an empty composer: the conditions under which the
   move itself types it, through the same guarded writer. It is the
@@ -979,7 +985,8 @@ stays owed, whoever closed the move (the supervisor, the owner's
   neither is one the move itself had begun to type. Its outcome is not known.
   The employee's sentence goes on saying so for as long as they are on that
   session: this is the one state the office cannot settle, and reading the
-  conversation tells whether the handoff is in it.
+  conversation tells whether the handoff is in it. It holds up nothing else:
+  the laptop is repaired as any other.
 - Nothing is owed for a move that was closed before the office first kept that
   file, for a session the employee has left since, or for a move that had not
   yet switched the employee. A file that cannot be read means nothing is
