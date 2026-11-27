@@ -479,7 +479,7 @@ record offers. No sentence about a held move asks for a person.
 | Any error, while the office's own look finds the shared pool down (its anchor stopped or a recovery open, as after a host restart) | Waits and spends no continue | Not abandoned while the pool is down; once it is back, three continues and then the abandon, as above |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; each move has its own attempts |
-| A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
+| A held move from before the laptop runtime | Closes it (below). A laptop that needs a repair comes first | After the employee has been running normally for 15 minutes |
 | A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
 The thirty minutes cover the repair of the pool's limits and the other causes
@@ -636,7 +636,11 @@ immediately before it launches the agent there.
 
 **A held move from before the laptop runtime** has no laptop journal. It gates
 no laptop, but it keeps its employee locked against every later plan move. The
-supervisor closes it and keeps the employee where they work now. When the
+supervisor closes it and keeps the employee where they work now. Because it
+gates no laptop, it never stands in front of one: while the employee's laptop
+needs any repair, that repair runs on its own steps and times as if the record
+were not there, and the record is looked at only once the employee is running
+normally. Its fifteen minutes are counted from then. When the
 employee already works on the session that move was creating and its source
 cleanup is durably recorded, it uses the owner's own adoption
 (`adopt-existing`, see [plan move recovery](plan-move-recovery.md)). Otherwise,

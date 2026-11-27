@@ -1485,6 +1485,18 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     rmSync(join(file, '..'), { recursive: true, force: true });
   });
 
+  it('repairs a laptop that is down although a held move of the retired runtime is on record', async () => {
+    const down = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    down.provider = 'absent';
+    down.move = { id: 'native', docker: false, phase: 'recovery-required', busy: false, error: 'x', allowedActions: ['settle'] };
+    const w = world([down]);
+    await w.run(5);
+    // The laptop is read and rebuilt on its own times. Nothing waits for the record's fifteen minutes.
+    expect(w.state.reads).toContain('laptop:a');
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(w.report('a').code).toBe('DOCKER_RESOURCE_HELPER_FAILED');
+  });
+
   it('acts on nothing while a step of the move is running', async () => {
     const stuck = heldMove(person('a'), 'x');
     stuck.move = { ...stuck.move!, busy: true };

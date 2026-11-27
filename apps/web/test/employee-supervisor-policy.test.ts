@@ -2113,6 +2113,50 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     });
   });
 
+  describe('a held move of the retired runtime beside a laptop that needs a repair', () => {
+    const retiredMove = { id: 'native', docker: false, phase: 'recovery-required', busy: false, error: 'x', allowedActions: ['settle'] };
+    const beside = (seen: SupervisorObservation): SupervisorObservation => ({ ...seen, move: retiredMove });
+
+    it('does not stand in front of the laptop: the laptop is classified and repaired as if the record were not there', () => {
+      const cases: SupervisorObservation[] = [
+        { ...held('DOCKER_RESOURCE_HELPER_FAILED'), laptop: { ...held('DOCKER_RESOURCE_HELPER_FAILED').laptop, provider: 'absent' } },
+        held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'),
+        observed({ session: { viewerHealth: 'disconnected' } }),
+        observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
+        observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped' } }),
+      ];
+      for (const laptop of cases) {
+        const alone = classifyEmployee(laptop),
+          withRecord = classifyEmployee(beside(laptop));
+        expect(alone.condition, alone.sentence).not.toBe('healthy');
+        expect(withRecord).toEqual(alone);
+        // The same step, at the same time, with the same history.
+        const history = since(START, alone.fingerprint, { watchSince: START });
+        expect(assessEmployee(beside(laptop), history, ON, START + 20 * MINUTE)).toEqual(
+          assessEmployee(laptop, history, ON, START + 20 * MINUTE)
+        );
+      }
+    });
+
+    it('is looked at once the laptop is in order, and closed after fifteen minutes of that', () => {
+      const well = beside(observed());
+      expect(classifyEmployee(well)).toMatchObject({ condition: 'move-held-retryable', code: 'move-retired' });
+      // The laptop was down for an hour first. The record's own time starts when the employee is well again.
+      const laptop = beside(held('DOCKER_RESOURCE_HELPER_FAILED'));
+      let history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(laptop), START);
+      history = rollSupervisorHistory(history, classifyEmployee(laptop), START + 60 * MINUTE);
+      const back = START + 61 * MINUTE;
+      history = rollSupervisorHistory(history, classifyEmployee(well), back);
+      expect(assessEmployee(well, history, ON, back + 10 * MINUTE).next).toMatchObject({ action: null, at: back + 15 * MINUTE });
+      expect(assessEmployee(well, history, ON, back + 15 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
+    });
+
+    it('still counts as a move in progress while a step of it is running, and leaves a stopped employee alone', () => {
+      expect(classifyEmployee({ ...observed(), move: { ...retiredMove, phase: 'starting' } }).condition).toBe('move-in-progress');
+      expect(classifyEmployee(beside(observed({ onVacation: true }))).condition).toBe('owner-stopped');
+    });
+  });
+
   describe('the attempts of the move steps', () => {
     const first = move('x'),
       second = move('x', { id: 'move-2' });

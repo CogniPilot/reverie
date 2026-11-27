@@ -920,12 +920,9 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
     fingerprint = `move:${move.id}:${error}`;
   // Every held move has the same ladder: it is continued while its record offers that, and then closed. None is
   // kept for the owner, so no class of error and no missing step ends in a sentence that asks for one.
-  if (!move.docker)
-    return classified(
-      'move-held-retryable',
-      `A plan move of ${name} from before the laptop runtime is still on record as stopped part-way: ${error}`,
-      { code: 'move-retired', fingerprint }
-    );
+  // A held move of the retired runtime gates no laptop, so it is not judged here, in front of the laptop: see
+  // `besideTheLaptop`.
+  if (!move.docker) return undefined;
   const kind = classifyMoveError(move.error);
   return classified('move-held-retryable', `${name}'s plan move stopped part-way: ${error}`, {
     code: 'move-' + kind,
@@ -1185,6 +1182,32 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
 
 /** One observation, one condition. Reads no history and no clock. */
 export function classifyEmployee(observed: SupervisorObservation): SupervisorClassification {
+  return besideTheLaptop(observed, classifyAlone(observed));
+}
+
+/**
+ * What a plan move left on record that gates no laptop. It is looked at only while everything else about the
+ * employee is in order: a laptop that needs a repair gets that repair first, by its own ladder and on its own
+ * clocks, and the record waits. Its own time is counted while it is what the office sees.
+ *
+ * A held move of the retired runtime is such a record. It keeps its employee locked against later plan moves and
+ * nothing else, so closing it is never worth a minute of a laptop that is down.
+ */
+function besideTheLaptop(observed: SupervisorObservation, base: SupervisorClassification): SupervisorClassification {
+  const move = observed.move;
+  if (!move || base.condition !== 'healthy') return base;
+  if (move.phase === 'recovery-required' && !move.docker) {
+    const error = clip(move.error ?? 'no reason was recorded', 300);
+    return classified(
+      'move-held-retryable',
+      `A plan move of ${observed.name} from before the laptop runtime is still on record as stopped part-way: ${error}`,
+      { code: 'move-retired', fingerprint: `move:${move.id}:${error}` }
+    );
+  }
+  return base;
+}
+
+function classifyAlone(observed: SupervisorObservation): SupervisorClassification {
   const name = observed.name;
   if (observed.onVacation || observed.desiredRunning !== true)
     return classified(
