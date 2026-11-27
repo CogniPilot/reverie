@@ -877,7 +877,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     helper: DockerWorkerReattachHelper | undefined,
     current: () => void,
-    layout?: DockerStoredHomeLayout
+    layout?: DockerStoredHomeLayout | (() => Promise<DockerStoredHomeLayout | undefined>)
   ): Promise<DockerStoppedStorage> {
     current();
     if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return { state: 'not-stopped' };
@@ -887,7 +887,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (!layout || !(await this.#positivelyAbsent(row.destination!.containerId)))
         return { state: 'unconfirmed', cause: 'laptop-unreadable' };
       current();
-      return this.#absentStorage(row, helper, layout, current);
+      // The layout is asked for only here, where a container is gone: a laptop that is there has its own mounts.
+      const bound = typeof layout === 'function' ? await layout().catch(() => undefined) : layout;
+      current();
+      if (!bound) return { state: 'unconfirmed', cause: 'laptop-unreadable' };
+      return this.#absentStorage(row, helper, bound, current);
     };
     let seen: DockerEmployeeInspect | null;
     try {

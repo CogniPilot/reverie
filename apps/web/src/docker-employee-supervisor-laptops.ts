@@ -158,7 +158,7 @@ export interface DockerSupervisorLaptopDeps {
     stopped(
       row: DockerEmployeeContinuationRecord,
       current: () => void,
-      layout?: DockerStoredHomeLayout
+      layout?: () => Promise<DockerStoredHomeLayout | undefined>
     ): Promise<DockerStoppedStorage>;
     /** What the configured verifier image can do; `none` when the office is configured with no verifier. */
     capability?(): 'none' | DockerVerifierCapability;
@@ -795,7 +795,7 @@ export class DockerSupervisorLaptops {
     if (!row || !storage) return { found: 'unchecked' };
     try {
       const authority = this.#authority(employee, guard);
-      const seen = await storage.stopped(row, authority.require, await this.#storedLayout(row));
+      const seen = await storage.stopped(row, authority.require, () => this.#storedLayout(row));
       if (seen.state === 'not-stopped' || seen.state === 'no-verifier') return { found: 'unchecked' };
       if (seen.state === 'unconfirmed') return { found: 'unknown', cause: seen.cause };
       if (seen.state === 'renumbered') return { found: 'renumbered', cause: seen.reason };

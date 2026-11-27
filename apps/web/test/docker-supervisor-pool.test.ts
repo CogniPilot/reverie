@@ -61,6 +61,8 @@ function world() {
       | undefined
       | Error,
     clock: 1_000_000,
+    /** The laptop container is gone, so the read asks where a rebuild would bind the directories from. */
+    absent: false,
     /** The layout each stored-home read was given, for a laptop whose container is gone. */
     layouts: [] as unknown[],
     /** What the configured verifier image can do, and what one attempt to record a home answers. */
@@ -207,10 +209,11 @@ function world() {
       },
     },
     storage: {
-      stopped: async (row: { employeeId: string }, current: () => void, layout?: unknown) => {
+      stopped: async (row: { employeeId: string }, current: () => void, layout?: () => Promise<unknown>) => {
         current();
         state.calls.push(['stored-home', row.employeeId]);
-        state.layouts.push(layout);
+        // As the engine does for a laptop whose container is gone, and for no other.
+        if (state.absent) state.layouts.push(await layout?.());
         return give(state.stopped);
       },
       capability: () => state.capability,
@@ -628,6 +631,10 @@ describe('the stored home of a stopped laptop', () => {
 
   it('tells the read where a rebuild would bind the home and the Nix store from, and as which user', async () => {
     const w = world();
+    // A laptop that is there has its own mounts: the layout is not even looked up for it.
+    await w.laptops.storedHome(A, guard);
+    expect(w.state.layouts).toEqual([]);
+    w.state.absent = true;
     await w.laptops.storedHome(A, guard);
     // From the laptop record and the layout a rebuild would use anyway: nothing here is chosen by the supervisor.
     expect(w.state.layouts).toEqual([

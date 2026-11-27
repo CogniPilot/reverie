@@ -102,6 +102,10 @@ function world() {
     beforeStop: undefined as (() => void) | undefined,
     /** The input holds taken and released for a session, in order. */
     holds: [] as string[],
+    /** Each read of the stored home: the holds in place then, and the calls that had been made before it. */
+    homeReads: [] as Array<{ holds: string; after: string[] }>,
+    /** What the read of the stored home finds. A laptop that runs has no stopped storage to compare. */
+    stored: { state: 'not-stopped' } as { state: string; cause?: string; reason?: string },
     now: 10 * 60_000,
     /** What the Engine says of the employee's own laptop, and the plan the employee is on. */
     inspect: undefined as Record<string, unknown> | Error | undefined,
@@ -231,6 +235,12 @@ function world() {
     holdInput: (sessionId: string) => {
       state.holds.push('hold ' + sessionId);
       return () => void state.holds.push('release ' + sessionId);
+    },
+    storage: {
+      stopped: async () => {
+        state.homeReads.push({ holds: state.holds.join(','), after: state.calls.map(([name]) => String(name)) });
+        return state.stored;
+      },
     },
     now: () => state.now,
     current: () => state.current,
@@ -1463,6 +1473,31 @@ describe('proving "between turns" up to the moment a laptop is stopped', () => {
       arrange(w);
       if (throws) await expect(w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).rejects.toThrow(throws);
       else expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).not.toBe('done');
+      expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    });
+
+    it('reads the stored home after the proof and before the stop, under the hold', async () => {
+      const w = occupied();
+      const order: string[] = [];
+      w.state.beforeStop = () => order.push('service');
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+      // The proof (the read inside the laptop), then the home under the hold, then the service with its own last
+      // look and the stop.
+      expect(w.state.homeReads).toEqual([{ holds: 'hold ' + SESSION, after: ['preview', 'observeDestination'] }]);
+      expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination', 'rebuild']);
+      expect(order).toEqual(['service']);
+    });
+
+    it.each([
+      [{ state: 'unconfirmed', cause: 'verifier-timed-out' }, 'the stored home could not be read'],
+      [{ state: 'renumbered', reason: 'no-record-no-grant' }, 'the stored home has a new device number that nothing accepts'],
+      [{ state: 'different' }, 'the stored home is not the directory the laptop was built on'],
+    ])('releases the hold and gives the attempt back when the stored home reads %j', async (stored, detail) => {
+      const w = occupied();
+      w.state.stored = stored;
+      // Nothing was stopped and nothing was tried: the attempt is not spent, and input flows again.
+      expect(await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).toEqual({ outcome: 'busy', detail });
+      expect(w.made('rebuild')).toEqual([]);
       expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
     });
 
