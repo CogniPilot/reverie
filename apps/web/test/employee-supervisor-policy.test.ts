@@ -2113,6 +2113,60 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     });
   });
 
+  describe('the attempts of the move steps', () => {
+    const first = move('x'),
+      second = move('x', { id: 'move-2' });
+    const used: SupervisorHistory = since(START, classifyEmployee(first).fingerprint, {
+      watchSince: START,
+      attempts: {
+        ...tried('continue-move', 3, START + 8 * MINUTE),
+        ...tried('abandon-move', 2, START + 20 * MINUTE),
+        ...tried('rebuild-laptop', 1, START - 60 * MINUTE),
+      },
+    });
+
+    it('are counted for one move: a second move of the employee starts with all of its own', () => {
+      // The first move used every step and was then closed by hand. A second move stops part-way an hour later.
+      const later = START + 60 * MINUTE;
+      const rolled = rollSupervisorHistory(used, classifyEmployee(second), later);
+      expect(rolled.attempts).toEqual(tried('rebuild-laptop', 1, START - 60 * MINUTE));
+      expect(assessEmployee(second, rolled, ON, later + MINUTE).next).toMatchObject({ action: 'continue-move' });
+      // And it gets both of its abandons: four continues-and-closes later the first move's counts are not back.
+      const closing = {
+        ...rolled,
+        attempts: { ...rolled.attempts, ...tried('continue-move', 3, later + 8 * MINUTE) },
+      };
+      expect(assessEmployee(second, closing, ON, later + 15 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
+    });
+
+    it('are dropped as well when the move is gone and the laptop it left is what remains', () => {
+      const laptop = held('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+      const rolled = rollSupervisorHistory(used, classifyEmployee(laptop), START + 30 * MINUTE);
+      expect(rolled.attempts).toEqual(tried('rebuild-laptop', 1, START - 60 * MINUTE));
+      // A move that follows finds nothing of the earlier one.
+      const next = rollSupervisorHistory(rolled, classifyEmployee(second), START + 60 * MINUTE);
+      expect(next.attempts['continue-move']).toBeUndefined();
+      expect(next.attempts['abandon-move']).toBeUndefined();
+    });
+
+    it('are kept for the same move through another error, a continue in flight and a healthy moment', () => {
+      const other = move('another error');
+      expect(rollSupervisorHistory(used, classifyEmployee(other), START + 30 * MINUTE).attempts).toEqual(used.attempts);
+      const flying = move('x', { busy: true });
+      expect(rollSupervisorHistory(used, classifyEmployee(flying), START + 30 * MINUTE).attempts).toEqual(used.attempts);
+      const well = rollSupervisorHistory(used, classifyEmployee(observed()), START + 30 * MINUTE);
+      expect(well.attempts).toEqual(used.attempts);
+      expect(rollSupervisorHistory(well, classifyEmployee(first), START + 31 * MINUTE).attempts).toEqual(used.attempts);
+    });
+
+    it('of the older of two open moves do not count against the one that is left', () => {
+      // The older move was closed with the first abandon; the port then shows the newer one.
+      const closedOlder = { ...used, attempts: tried('abandon-move', 1, START + 15 * MINUTE) };
+      const rolled = rollSupervisorHistory(closedOlder, classifyEmployee(second), START + 16 * MINUTE);
+      expect(rolled.attempts).toEqual({});
+    });
+  });
+
   it('treats a move the step watch held like any other held move', () => {
     const held = move(
       'The office stopped waiting for this move in its “starting” step: nothing came back from it for 10 minutes. ' +

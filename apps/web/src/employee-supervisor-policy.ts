@@ -2043,6 +2043,12 @@ export function rollSupervisorHistory(
 /**
  * The attempts of the plan move steps, as the next problem finds them.
  *
+ * They are counted for one move. Every other step is counted for the employee and the episode, because it is the
+ * same laptop that is repaired again; a second move is another move, with its own journal and its own cause. So
+ * when the problem being worked on is no longer the move those attempts were made for, they are dropped: the next
+ * move starts with all its continues and both its abandons, and so does the one that is left when the older of two
+ * open moves has been closed.
+ *
  * When the office has just seen the pool come back under a held move, every continue counted for that move was
  * made before the pool worked again. They are marked like the continues of an earlier office process, so the move
  * is closed only after a continue made with a pool that works has come back (`abandonMoveGate`).
@@ -2052,10 +2058,14 @@ function moveAttemptsAfter(
   seen: string,
   attempts: SupervisorHistory['attempts']
 ): SupervisorHistory['attempts'] {
-  const tried = attempts['continue-move'],
-    move = ofMove(before);
-  if (!tried || tried.earlier || move === undefined || move !== ofMove(seen)) return attempts;
-  if (before !== `move:${move}:pool-down` || seen === before) return attempts;
+  const move = ofMove(before);
+  if (move === undefined) return attempts;
+  if (move !== ofMove(seen)) {
+    const { 'continue-move': _continued, 'abandon-move': _abandoned, ...others } = attempts;
+    return others;
+  }
+  const tried = attempts['continue-move'];
+  if (!tried || tried.earlier || before !== `move:${move}:pool-down` || seen === before) return attempts;
   return { ...attempts, 'continue-move': { ...tried, earlier: true } };
 }
 

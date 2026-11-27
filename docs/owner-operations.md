@@ -478,7 +478,7 @@ record offers. No sentence about a held move asks for a person.
 | An operation that only has to finish, or something every laptop shares (the pool's limits, the office's configuration) | Three continues, spread as probes: 1, 10 and 30 minutes after the problem was first seen | Abandons 3 minutes after the last probe, if that probe found the cause still there |
 | Any error, while the office's own look finds the shared pool down (its anchor stopped or a recovery open, as after a host restart) | Waits and spends no continue | Not abandoned while the pool is down; once it is back, three continues and then the abandon, as above |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
-| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
+| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; each move has its own attempts |
 | A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
 | A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
@@ -527,6 +527,11 @@ which it is closed. A move that is still held after both steps were used,
 because the service refused to close it, is not left there: like every path,
 its round starts again six hours after its last attempt, with the three
 continues first and then the abandon.
+
+The three continues and the two abandons are counted for one move, not for the
+employee. A second move of the same employee starts with all of its own,
+whatever the first one used, and so does the move that is left when the older
+of two open moves has been closed.
 
 **What counts towards closing a move.** Every time in this section that ends
 in a move being closed is measured from what the running office process has
