@@ -2582,6 +2582,7 @@ describe('rebuild laptop', () => {
     f.engine.prepareOutcome = 'ok';
     await expect(f.service.rebuild(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
     expect(f.engine.created).toHaveLength(1);
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
   });
   it('still requires what a discarded laptop does not make moot', async () => {
     const busy = await fixture({ moves: abandonedMove(null) });
