@@ -19,13 +19,23 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true });
 });
 
-/** Short enough to test with real time: a step is given up after 150 ms of silence and released 100 ms later. */
+/**
+ * Short enough to test with real time: a step is given up after 150 ms of silence and released 100 ms later. Only the
+ * step a test means to stall runs under it. A test that then continues the move calls `relax()` first, so that the
+ * healthy steps after it are not taken for stalled on a loaded machine (a continue writes the journal several times).
+ */
 const QUICK: PlanMoveStepLimits = {
   stallMs: 150,
   phaseMs: { waiting: 60_000, creating: 60_000, stopping: 60_000, starting: 60_000, checking: 60_000 },
   graceMs: 100,
   checkMs: 20,
 };
+/**
+ * For a test whose healthy steps must all come back in time while one step never does: the stall bound is long enough
+ * that no healthy step on a loaded machine reaches it (a whole healthy move takes well under a second here, two seconds
+ * under heavy load), and short enough for the test to see the one that never returns.
+ */
+const PATIENT: PlanMoveStepLimits = { ...QUICK, stallMs: 3_000 };
 /** A wait that never returns until the test lets it. */
 function stuck() {
   let release!: () => void;
@@ -132,7 +142,18 @@ async function fixture(limits: PlanMoveStepLimits = QUICK, forceBusy = true) {
       audits.push({ phase: record.phase, ...(record.error ? { error: record.error } : {}) });
     }),
   };
-  const moves = new PlanMoves(port, limits);
+  // The service reads its limits at every look, so a test can relax them once the stall it wanted has happened.
+  const live: { stallMs: number; graceMs: number; checkMs: number; phaseMs: Record<string, number> } = {
+    stallMs: limits.stallMs,
+    graceMs: limits.graceMs,
+    checkMs: limits.checkMs,
+    phaseMs: { ...limits.phaseMs } as Record<string, number>,
+  };
+  const relax = () => {
+    live.stallMs = 60_000;
+    for (const phase of Object.keys(live.phaseMs)) live.phaseMs[phase] = 60_000;
+  };
+  const moves = new PlanMoves(port, live);
   const owner = f.record.owner;
   /** Wait until the move is held, closed or completed. */
   const settled = async () => {
@@ -157,7 +178,7 @@ async function fixture(limits: PlanMoveStepLimits = QUICK, forceBusy = true) {
       port
     );
   };
-  return { f, input, store, moves, port, actor, audits, owner, settled, resume, recordLaunch };
+  return { f, input, store, moves, port, actor, audits, owner, settled, resume, recordLaunch, relax };
 }
 
 describe('the step watch of a laptop plan move', () => {
@@ -229,6 +250,7 @@ describe('the step watch of a laptop plan move', () => {
     expect(durable).toMatchObject({ phase: 'recovery-required' });
     expect(durable.dockerReplacement!.paidDispatch).toMatchObject({ phase: 'issued' });
     // The supervisor's ordinary next step. With a launch on record it inspects and verifies; it does not start.
+    t.relax();
     await t.resume();
     expect(await t.settled()).toMatchObject({ phase: 'completed' });
     expect(t.actor.start).toHaveBeenCalledTimes(1);
@@ -313,6 +335,7 @@ describe('the step watch of a laptop plan move', () => {
       await journal.publish(before, { ...before, sourceStop: { ...t.f.closed.sourceStop!, epoch: journal.epoch } });
     });
     const epoch = (await t.store.dockerRecord(t.input.id)).dockerReplacement!.epoch;
+    t.relax();
     await t.resume();
     expect(await t.settled()).toMatchObject({ phase: 'completed' });
     expect((await t.store.dockerRecord(t.input.id)).dockerReplacement!.epoch).not.toBe(epoch);
@@ -331,7 +354,7 @@ describe('the step watch of a laptop plan move', () => {
   });
 
   it('keeps a finished move finished when only the retirement of its old terminal never returns', async () => {
-    const t = await fixture();
+    const t = await fixture(PATIENT);
     const hang = stuck();
     t.actor.retireSource = vi.fn(async () => hang.wait);
     await t.moves.begin(t.input, t.owner);
@@ -372,9 +395,9 @@ describe('the step watch of a laptop plan move', () => {
   });
 
   it('does not touch a move whose steps come back in time', async () => {
-    const t = await fixture();
+    const t = await fixture(PATIENT);
     t.actor.stopSource = vi.fn(async (_record, journal) => {
-      // Slower than the watch looks, faster than it gives up.
+      // Slower than the watch looks (every 20 ms), faster than it gives up.
       await delay(60);
       const before = journal.read();
       await journal.publish(before, { ...before, sourceStop: { ...t.f.closed.sourceStop!, epoch: journal.epoch } });
