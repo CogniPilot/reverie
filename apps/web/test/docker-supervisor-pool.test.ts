@@ -77,7 +77,22 @@ function world() {
   const deps = {
     company: {
       recoveryAction: () => ({ current: () => true, require: () => {} }),
-      store: { snapshot: () => ({ employees: [], retiredDockerEmployeeContinuations: [] }) },
+      store: {
+        snapshot: () => ({
+          employees: [],
+          // The layout of each employee's most recent laptop operation, as a rebuild reuses it.
+          retiredDockerEmployeeContinuations: [A, B, C].map((row) => ({
+            employeeId: row.id,
+            operationId: 'retired-' + row.id,
+            sessionId: row.sessionId,
+            sessionGeneration: 3,
+            scopeDigest: SCOPE,
+            template: { user: '1000:1000', scratchRoot: '/host/scratch/laptops', mounts: [] },
+            source: { phase: 'created' },
+            session: { phase: 'cleared' },
+          })),
+        }),
+      },
     },
     store: {
       record: (id: string) =>
@@ -131,7 +146,22 @@ function world() {
         state.records.has(id) ? { employeeId: id, request: { operationId: 'op-' + id } } : undefined,
       restore: async (_id: string, operationId: string) => ({ operationId, limits: give(state.limits) }),
     },
-    absent: {},
+    absent: {
+      previewRebuild: async (id: string, _template: unknown, authority: DockerContinuationAuthority) => {
+        took('rebuild-preview', id, authority);
+        return {
+          sessionId: session(id).sessionId,
+          sessionGeneration: 3,
+          scopeDigest: SCOPE,
+          runningLaptops: [],
+          allowedActions: ['rebuild'],
+        };
+      },
+      rebuild: async (id: string, input: unknown, authority: DockerContinuationAuthority) => {
+        took('rebuild', id, authority, input);
+        return { state: 'ready', operationId: 'new-' + id };
+      },
+    },
     storage: {
       stopped: async (row: { employeeId: string }, current: () => void) => {
         current();
@@ -450,5 +480,46 @@ describe('the stored home of a stopped laptop', () => {
     w.state.limits = refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     await expect(w.laptops.keepLimits(C, guard)).resolves.toEqual({ outcome: 'done', detail: 'not-running' });
     expect(w.state.remembered).toEqual([A.id, B.id]);
+  });
+});
+
+describe('the rebuild step and the stored home', () => {
+  const guard = () => {};
+  it('reads the stored home itself, last, and rebuilds when nothing is found against it', async () => {
+    for (const found of ['verified', 'not-stopped', 'unverifiable'] as const) {
+      const w = world();
+      w.state.stopped = found;
+      // Whatever it was told had been proved: the read is its own.
+      await expect(w.laptops.rebuild(A, guard, found === 'verified' ? ['stored-home'] : [])).resolves.toEqual({
+        outcome: 'done',
+        detail: 'rebuilt new-' + A.id,
+      });
+      expect(w.state.calls.map(([name]) => name)).toEqual(['rebuild-preview', 'stored-home', 'rebuild']);
+    }
+  });
+
+  it.each([
+    ['renumbered', 'the stored home has a new device number that nothing accepts'],
+    ['different', 'the stored home is not the directory the laptop was built on'],
+  ] as const)(
+    'replaces no laptop whose stored home is %s, by whatever path the rebuild was reached',
+    async (found, detail) => {
+      for (const proved of [[], ['stored-home'], ['laptop-held', 'agent-unreadable']] as const) {
+        const w = world();
+        w.state.stopped = found;
+        await expect(w.laptops.rebuild(A, guard, proved)).resolves.toEqual({ outcome: 'refused', detail });
+        expect(w.made('rebuild')).toEqual([]);
+      }
+    }
+  );
+
+  it('replaces no laptop whose stored home it could not read', async () => {
+    const w = world();
+    w.state.stopped = new CompanyError('Recovery permission or employee binding changed', 409);
+    await expect(w.laptops.rebuild(A, guard, ['stored-home'])).resolves.toEqual({
+      outcome: 'refused',
+      detail: 'the stored home could not be read',
+    });
+    expect(w.made('rebuild')).toEqual([]);
   });
 });

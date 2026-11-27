@@ -881,12 +881,17 @@ export class PlanMoveStore {
    * containers recorded are exactly the ones this same journal cursor names;
    * a caller cannot add one. The native journal is retained verbatim and
    * becomes immutable history, so no late actor can dispatch from it. Nothing
-   * is started, stopped or removed here. */
+   * is started, stopped or removed here.
+   *
+   * `note` is given when the office closed the move on the owner's standing
+   * rule instead of the owner in person: it says so and why, in the record's
+   * error text. It is description only and changes nothing else. */
   abandonOwnerDockerMove(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
     at: number,
-    current: () => void
+    current: () => void,
+    note?: string
   ): Promise<Readonly<PlanMoveRecord>> {
     const captured = DockerPlanMoveJournalState.parse(before),
       checked = DockerPlanMoveOwnerAbandonment.parse({
@@ -894,12 +899,13 @@ export class PlanMoveStore {
         reason: 'owner-abandoned',
         at,
         containers: dockerPlanMoveContainers(captured),
-      });
+      }),
+      said = z.string().min(1).max(1000).optional().parse(note);
     return this.dockerTransaction(id, captured, current, (record) => {
       if (record.restoredSource) throw Error('A restored source move has its own settlement');
       if (record.resourceIntent) throw Error('A resource transaction keeps its own recovery');
       record.phase = 'failed';
-      record.error = 'Abandoned by the owner. Rebuild the laptop to discard what this move left behind.';
+      record.error = said ?? 'Abandoned by the owner. Rebuild the laptop to discard what this move left behind.';
       record.dockerAbandonment = structuredClone(checked);
     });
   }

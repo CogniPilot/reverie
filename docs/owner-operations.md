@@ -77,22 +77,34 @@ audit log as `office supervisor` with one console line `[supervisor] …`.
 
 `GET /api/company` carries a `supervisor` object on each employee: `condition`,
 `sentence`, `code`, `since`, `last` (what it did and how that ended), `next`
-(what it will do and no earlier than when), `waitingFor`, and `needsHuman` (what
-a person or a managing agent has to do, with the route to call). The company
-card shows the short form and keeps the sentence in its tooltip.
+(what it will do and no earlier than when), `waitingFor`, `waitingUntil` (when
+that wait ends by itself, where it is known), and `needsHuman` (what a person or
+a managing agent has to do, with the route to call). The company card shows the
+short form and keeps the sentence in its tooltip.
 
-Steps, least destructive first, each bounded per episode (an episode ends after
-ten healthy minutes):
+No path of the supervisor ends for good. `needsHuman` is set in three cases
+only: the owner switched that kind of step off in the company settings; the
+office has nothing approved, or nothing on record, to act with (below); or a
+step belongs to another part of the office that still names a person. A wait says what it waits for,
+and `waitingUntil` says when it ends where a clock decides that.
+
+Steps, least destructive first, each bounded per round. A round ends after ten
+healthy minutes, and it also ends six hours after its last attempt: the counts
+are then cleared and the steps start again from the first one, for every path.
+While a used-up round waits for that, `waitingFor` reads “the next round of
+repair steps, which starts at …” and nobody is asked for anything.
 
 | Step | When | Bound |
 | --- | --- | --- |
 | Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min; once when only `continue` is offered and the request was refused with a code that only a fresh laptop settles |
 | Put approved limits back in place (the shared pool first, then the laptop's own) | a running laptop's read offers `repair-pool` or `repair` | the same 4 |
+| Give the owner's standing default limits | no laptop and no approved resource limits, with the standing defaults switched on | 2 |
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
-| Wake (attach a provider that already runs) | the terminal is not connected | 6; once when the terminal's input is also held for good and the wake was refused |
-| Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
-| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns | 2, and 2 per day |
+| Wake (attach a provider that already runs) | the terminal is not connected, or the session is not in a laptop | 6; once when the terminal's input is also held for good and the wake was refused |
+| Put the plan's sign-in back into the laptop | the agent shows the provider's sign-in screen | 3, spaced 1 to 5 min; once when the laptop then holds a usable sign-in, or has no sign-in folder of the plan |
+| Abandon a held plan move, or close one from before the laptop runtime | continuing did not help or is not offered, and the same error lasted 15 min (30 min when the cause lies outside the move) | 2 |
+| Rebuild the laptop, then start it | the operation cannot advance, an unused laptop was made for an earlier laptop image, a code the office does not recognize has stood for 30 minutes, the laptop has been starting for 15 minutes, the agent stays parked on a provider start-up screen ([below](#provider-start-up-screens)), or the laptop is gone while an earlier laptop operation is on record. At once when nothing runs in the laptop; otherwise between the agent's turns | 2, and 2 per day across rounds |
 
 One step belongs to no employee: the pool that all laptops share. The
 supervisor recovers it by itself after a host restart, before it rebuilds
@@ -108,8 +120,8 @@ problem was first seen, and then starts the fresh laptop. With
 `supervisorAutoRepair` off it sends the request once and then names that switch
 and the rebuild calls.
 
-An office terminal whose input is held for good is the one case in which the
-supervisor rebuilds a laptop its agent still runs in. The hold records an input
+An office terminal whose input is held for good was the first case in which
+the supervisor rebuilds a laptop its agent still runs in. The hold records an input
 that may have been sent and was never confirmed; neither a healthy laptop nor a
 new terminal client clears it, so every wake is refused, chat cannot reach the
 employee and the office can never type to that agent again. The supervisor
@@ -119,28 +131,148 @@ terminal must show the agent idle and its pane must have been silent for two
 minutes, and both are read again immediately before the rebuild is requested.
 The running laptop is discarded only when it is the one recorded laptop of that
 employee. While a turn is in progress, or while the office is not reading the
-pane (after an office restart it has no terminal on a held session), it waits;
-after thirty minutes `needsHuman` says so and names the calls, and the office
-still rebuilds by itself as soon as the turn has ended. An agent that ended its
-turn with work left running (a monitor, a background shell) is given those same
-thirty minutes for it, and is then rebuilt with that work still running. The
+pane, it waits and asks nobody. An agent that ended its
+turn with work left running (a monitor, a background shell) is given thirty
+minutes from when the problem was first seen, and is then rebuilt with that
+work still running. The
 home directory is
 kept and the fresh laptop is started as after any rebuild. With
 `supervisorAutoRepair` off it wakes once and then names that switch and the
 calls, including `confirmDiscardRunning`. A terminal that is not connected but
 still takes input is only woken, never rebuilt.
 
-It never answers a sign-in or an owner's decision screen, never approves limits
-or a laptop layout, never returns anyone to the office, and never rebuilds
-while it cannot read the laptop or, with that one exception, while an agent
-runs in the laptop. A rebuild
+The same rule serves every other laptop that only a rebuild settles while an
+agent runs in it, for example one whose limits helper failed for good or one
+that reports `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did
+not start runs in its terminal, which the office cannot take over). Such a
+laptop is rebuilt between the agent's turns and never in the middle of one:
+
+- A turn the office terminal shows in progress is waited for, however long it
+  lasts.
+- An idle pane must have been silent for two minutes. The step reads the pane
+  again itself immediately before the rebuild, and where the reason is a held
+  laptop it reads the laptop again too; a laptop that has finished meanwhile is
+  kept.
+- A read that cannot say what runs in the laptop is never taken for an empty
+  laptop. It is asked again for fifteen minutes; after that the laptop is
+  treated as one an agent runs in.
+- A pane the office cannot read at all has no turn to wait for. That is the
+  case after an office restart for a session whose input is held (the office
+  has no terminal on it), and for a process the office did not start. A read
+  inside the laptop is made first, and a laptop it shows to be empty is rebuilt
+  at once. Otherwise the laptop is rebuilt two hours after the problem was
+  first seen, and `waitingFor` names that time. Two hours is four times what an
+  ordinary turn is given; what an unusually long turn can lose is its
+  unfinished step, because the home directory and the conversation saved in it
+  are kept and the fresh laptop continues that conversation.
+- Only the one recorded laptop of the employee is ever discarded this way. A
+  second running laptop, or a running laptop that is not the recorded one, is
+  refused.
+
+A laptop code the office does not recognize is not acted on at once: it may be
+a state of a newer laptop runtime that settles by itself. The recorded request
+is sent again when the laptop offers that. When the code still stands after
+thirty minutes the laptop is treated as held, under every rule above. A laptop
+that has been starting, or between two states, for fifteen minutes without
+becoming healthy is treated the same way from that moment.
+
+The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
+daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
+next day the ladder goes on by itself. The rebuild of a laptop that was stopped
+from outside together with its storage holder, as after a host restart, is
+neither held back by this limit nor counted against it
+([after a host restart](#after-a-host-restart)).
+
+Every wait above that ends in a laptop being rebuilt (fifteen minutes of
+starting or of an unreadable laptop, thirty minutes of an unrecognized code or
+of work left running, two hours without a reading of the pane) counts only an
+unbroken run of that same state as this office process saw it. A start that
+follows a plan move, a start-up screen or the wait for the office's own restart
+begins its own fifteen minutes, and a state that cleared and came back is
+counted from its return. An office start begins all of these again at the
+first look: the office watched nothing while it was down, and every employee
+reads as starting for a minute while their terminal is attached again. What
+paces the steps (when a problem was first seen, the attempts, the day's
+rebuilds) is kept across an office start.
+
+It never types into a sign-in screen (what it does about one is described
+[below](#provider-start-up-screens)), never chooses limits
+or a laptop layout of its own, never returns anyone to the office, and never
+rebuilds a laptop in the middle of its agent's turn. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
-employee with none on record is rebuilt by hand once. A stopped or missing
+employee with none on record is given the standing default (below). A stopped or missing
 laptop is rebuilt while another laptop of the box runs. When none does, that is
 what a host restart looks like: the supervisor recovers the shared pool first,
 by itself, and the rebuild waits for that
-([after a host restart](#after-a-host-restart)). A code or a plan move error it
-does not recognize is reported and left alone.
+([after a host restart](#after-a-host-restart)). A plan move is never left alone, whatever its error says: see
+[a plan move that stopped part-way](#a-plan-move-that-stopped-part-way).
+
+### Standing defaults for limits and layout
+
+Two things about a laptop are approved by the owner for each employee: its
+resource limits (`PUT …/docker-policy`) and its layout (the `template` of a
+rebuild or reprovision request). An employee who had neither used to wait for
+the owner. The company setting `supervisorStandingDefaults` (absent means on)
+lets the office give such an employee what the owner already approved for the
+other employees of the same company, reduced so that nobody is given more than
+every one of them has:
+
+- Limits: all of them must be in the same shared pool with the same pool
+  limits. The employee's own limits are the smallest of each value (hard and
+  soft memory, swap, tasks, CPU weight) and the processors all of them may use.
+  They are saved through the store method behind the docker-policy route; the
+  setting and the derived values are read again inside that save.
+- Layout: all laptops that have a layout on record must run as the same user
+  and keep scratch space under the same root. The drives are the ones every one
+  of them has, read-only where any has it read-only. The choice among several
+  office networks and a sign-in folder outside the home belong to one employee
+  and are never copied. The layout is used for a rebuild and is recorded with
+  that rebuild, as an owner's layout is.
+
+The office makes up no number and no path. Where the others disagree on the
+pool, the user or the scratch root, or no other employee has anything
+approved, there is no default: `needsHuman` says so and names the call. With
+the setting switched off, `needsHuman` names the setting. Each use is in the
+audit log (`supervisor_apply_standing_limits`, or the rebuild's own entry).
+
+One state is left that the office cannot leave by itself: an employee who has
+never had a laptop in this office. Every laptop operation makes a laptop from
+the record of an earlier one, which fixes where the home directory is, and the
+employee's own office network is made by the host set-up. The supervisor says
+so, goes on reading, and starts a stopped laptop of that employee as soon as
+one exists.
+
+### The office restarting itself
+
+The laptop runtime is composed once, at start, from the fixed runtime
+configuration and the private instance key, which the office keeps open and
+compares on every use. Once either differs from what was read at start, every
+laptop route answers `DOCKER_CONTINUATION_RUNTIME_CHANGED`, the supervisor
+stops its passes, and nothing reads them again in place. A new office process
+does. The office therefore ends its own process, by its ordinary graceful
+shutdown, so that Docker starts it again; laptops keep running and are
+attached again as after any office restart. It does so only when all of this
+holds:
+
+- the change has stood, with nothing about it changing, for ten minutes;
+- a new process would accept the configuration that is in place and would read
+  the same instance key (with another key every laptop's credential would be
+  out of use, so the office never restarts itself into one);
+- the Engine reports the restart policy `always` or `unless-stopped` for the
+  office's own container. A container nothing would start again is never
+  taken down;
+- `supervisorAutoRepair` is not switched off;
+- it has not restarted itself within the last hour, nor twice within a day.
+  The record is `office-self-restart.json` in the office data directory,
+  written before the exit and read after it; a record that cannot be read
+  counts as a restart made at that moment.
+
+Meanwhile every employee's `waitingFor` says what the office waits for, with
+the time of the restart or the condition that keeps it from restarting. The
+restart is in the audit log as `supervisor_restart_office`. The office cannot
+see the host's update tool. An update stops the office container before it
+changes anything, and Docker does not restart a container it was told to stop,
+so a restart of this kind cannot run into one.
 
 Putting limits back is not changing them. A reload of the host's service
 manager resets the limits that only a helper wrote, and every laptop is then
@@ -167,15 +299,18 @@ spends no attempt of a repair step. `GET /api/company` shows the last check as
 and an audit entry `supervisor_keep_limits` are written when limits were put
 back, and once when a check starts to be refused.
 
-Two company settings switch it (`PUT /api/company/settings`, owner only; absent
-means on): `supervisorEnabled` (observe, continue, wake, record the pool's
-observation) and `supervisorAutoRepair` (abandon, rebuild, and recover the
-stopped pool). A third one, `acceptStorageRenumbering` (absent means off), is
-the owner's standing answer to a storage device change and is described
+Four company settings switch it (`PUT /api/company/settings`, owner only):
+`supervisorEnabled` (observe, continue, wake, put a sign-in back, record the
+pool's observation), `supervisorAutoRepair` (abandon, rebuild, give standing
+limits, restart the office, recover the stopped pool) and
+`supervisorStandingDefaults` (limits and layout for an employee who has none)
+are on when absent. `acceptStorageRenumbering` is off when absent: it is the
+owner's standing answer to a storage device change and is described
 [below](#the-stored-home-of-a-stopped-laptop). Its pacing state is
 `employee-supervisor.json` in the office data directory; deleting it only
 restarts the waits. The waits of the pool step are kept in memory, so an office
-restart starts them over; every recovery it issues is in the pool's own journal.
+restart starts them over, like the clocks above; every recovery it issues is in
+the pool's own journal.
 
 ### After a host restart
 
@@ -193,7 +328,15 @@ brings everyone back without the owner:
 2. No laptop is rebuilt yet. A rebuild retires the laptop record, and a fresh
    laptop cannot be set up while the pool's anchor is stopped. Every employee
    shows `waitingFor: the shared pool, which the office is recovering after a
-   host restart`, and no attempt of anyone's ladder is spent.
+   host restart`, and no attempt of anyone's ladder is spent. That holds on
+   every path that leads to a rebuild: a laptop that has been starting for
+   fifteen minutes, a code the office does not recognize after its thirty
+   minutes, a lost terminal whose input is held and a parked start-up screen
+   all meet the same wait once a read finds no laptop of the employee running.
+   While the pool is known to be down, no set-up request is sent again and no
+   fresh laptop is started either, and a held plan move is neither continued
+   nor closed: when the pool is back the move is continued as often as any
+   other, and closed after that if it is still held.
 3. The supervisor recovers the pool. It looks at the pool once a minute while no
    employee who should be in the office has an attached terminal, and never
    while one has. The first look only reads. One minute after the pool was first
@@ -210,6 +353,19 @@ brings everyone back without the owner:
    laptop is started, which resumes the saved conversation. Two steps are
    started per thirty-second pass, in the office's start-up order (employees on
    a local model first, who wait for no sign-in).
+
+The limit of two rebuilds per laptop per day does not apply to this rebuild and
+is not used up by it. The limit is for a laptop whose earlier rebuilds did not
+hold. A laptop that was stopped from outside did hold: the sign of it is that a
+read finds no laptop of the employee running and the laptop's storage holder is
+stopped as well. A holder runs nothing of the employee's and never stops with
+its laptop, so a laptop that crashed, was killed for memory or was stopped by
+hand leaves it running, and that rebuild is counted as before. Rebuilding a
+laptop that is stopped discards nothing that runs. So three or more host
+restarts in a day bring every employee back each time. `supervisor.last` of such a rebuild
+carries `uncounted`. Everything else a rebuild
+needs still holds for it: the layout, the pool, the stored home, the two
+attempts of a round and `supervisorAutoRepair`.
 
 A recovery that fails is tried again one minute later, then after 5, 15 and 60
 minutes, then every six hours for as long as the pool is down. Nothing here
@@ -234,11 +390,9 @@ the supervisor only looks and the console line names the calls.
 
 What this does not cover, stated plainly:
 
-- An employee with no owner-approved laptop layout on record is still rebuilt
-  by hand once; the supervisor names the calls.
-- The limit of two automatic rebuilds of one laptop per day counts these
-  rebuilds too. After a third host restart within a day the laptop waits until
-  the oldest of them is a day old.
+- A laptop whose set-up had not finished when the host went down has no
+  finished record whose holder says so. Its rebuild is counted against the
+  limit per day like any other.
 - A pool that cannot be read (its status is refused for a reason other than a
   stopped anchor) is never recovered cold. Rebuilds wait, the look is repeated
   every minute, and `supervisor.pool.detail` carries the code. A fresh laptop
@@ -294,12 +448,241 @@ filesystems. The owner's approval for one laptop
 before and takes precedence. The same rules serve a plan move that reads a
 stopped laptop.
 
+The policy asks for this read before it allows the rebuild (`stored-home`), the
+driver makes it, and the rebuild step makes it once more itself, last, whatever
+led to the rebuild. A stopped laptop that is reached by another rule (one the
+office could not read for two hours is rebuilt as a laptop an agent may run in)
+is therefore refused by the step on the same two findings.
+
 Nothing here is a final stop: a finding that holds a rebuild is read again every
 ten minutes, `needsHuman` says what was found and what settles it, and the
 laptop is rebuilt by the supervisor as soon as the recorded directory is there
 or the renumbering is accepted. What remains for the owner is a real change of
 disk: mounting the right filesystem, or deciding that the directory that is
 there now is the employee's home (rebuild by hand).
+
+### A plan move that stopped part-way
+
+A plan move that stops part-way is `recovery-required` and keeps its error. The
+supervisor never keeps such a move for the owner. Every held move is continued
+while that can help and is then closed, whatever stopped it and whatever its
+record offers. No sentence about a held move asks for a person.
+
+| What the move shows | What the office does | When |
+| --- | --- | --- |
+| Any error, and the record offers `continue-original` | Continues the original | 1, 3 and 8 minutes after the problem was first seen |
+| Still held on the same error after that | Abandons the move | 15 minutes after that error was first seen, and once more 5 minutes later if the first attempt was refused |
+| An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
+| A decision screen in the new session | The same: three continues, then abandon | The same |
+| The sign-in screen of a plan the office does not report as signed in | Waits and spends no continue; continues at once when the plan becomes signed in | Abandons 30 minutes after the problem was first seen |
+| An operation that only has to finish, or something every laptop shares (the pool's limits, the office's configuration) | Three continues | Abandons 30 minutes after the problem was first seen |
+| Any error, while the office's own look finds the shared pool down (its anchor stopped or a recovery open, as after a host restart) | Waits and spends no continue | Not abandoned while the pool is down; once it is back, three continues and then the abandon, as above |
+| No `continue-original` offered | No continue | Abandons after 15 minutes |
+| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
+| A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
+| A step of the move is running | Nothing | |
+
+No move is abandoned while a sign-in that the office placed for that employee
+is being placed or is less than three minutes old. The thirty minutes cover a
+sign-in the office places or refreshes itself and the repair of the pool's
+limits. A host restart is not left to those thirty minutes: while the pool is
+down a move is neither continued nor closed, however long the recovery takes
+([after a host restart](#after-a-host-restart)), because nothing was tried for
+it with a pool that works and no laptop could be rebuilt or started in its
+place either. A move whose error is a stopped storage holder
+(`DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`) is a step of the move itself: no
+other repair starts a holder again, so it is continued three times and then
+closed after the usual fifteen minutes, and the laptop is rebuilt.
+
+While a move waits out those thirty minutes, `waitingUntil` gives the time at
+which it is closed. A move that is still held after both steps were used,
+because the service refused to close it, is not left there: like every path,
+its round starts again six hours after its last attempt, with the three
+continues first and then the abandon.
+
+Continuing uses `supervisorEnabled`; abandoning and closing use
+`supervisorAutoRepair`. Each step is one audit entry
+(`supervisor_continue_move`, `supervisor_abandon_move`) with the move, the
+class of its error and the outcome. Asking twice is safe: a move that has ended
+is answered with `already closed` and nothing is written.
+
+**Paid steps.** A move launches the agent in the new laptop once, and records
+that launch before it issues it. The office never repeats it and never starts
+one. Continuing a move whose launch is on record only reads and verifies what
+exists; the journal refuses to hand such a move to a new actor. Abandoning
+takes no executor and no requester at all: it cannot issue, repeat or inspect a
+launch, and it keeps the launch record exactly as it was.
+
+**What abandoning changes.** It writes the move's journal and nothing else. The
+move is closed as `failed`; its sentence says that the office closed it on the
+owner's standing rule and what it had stopped with; the employee is no longer
+locked by it; the containers its journal named are recorded for the laptop
+rebuild. Nothing is started, stopped or removed by the abandonment itself.
+
+**Where the employee is afterwards** depends on how far the move had come. A
+move switches the employee's record to the new plan and the new session
+immediately before it launches the agent there.
+
+- The move stopped before that. The employee is still on the plan and the
+  session they came from. If the move had already stopped their laptop, the
+  ordinary steps above take over: the stopped laptop is rebuilt and started,
+  the home directory and the conversation saved in it are kept. That rebuild
+  also removes what the move left behind: its candidate laptop, the holder of
+  the stopped source and its helpers. A candidate that is still running holds
+  no agent, because the move starts the container before it launches one; the
+  supervisor's rebuild discards it once a read inside it, made immediately
+  before, finds no agent. A candidate in which anything runs, or which cannot
+  be read, is not discarded.
+- The move stopped after that, which is always the case when it stopped at a
+  sign-in or decision screen of the new session. The employee stays on the new
+  plan and the new session. Abandoning does not put them back: only a plan move
+  changes a plan, the office never starts one, and a session a move has
+  replaced is never revived. From then on they are an ordinary employee on
+  that plan, and the repairs that the held move stood in front of apply to
+  them: putting the plan's sign-in back, the start-up screens, the rebuild. The
+  handoff text the move had not typed yet is not typed. The stopped laptop of
+  the old plan is removed by the next rebuild, as after a move that finished.
+
+**A held move from before the laptop runtime** has no laptop journal. It gates
+no laptop, but it keeps its employee locked against every later plan move. The
+supervisor closes it and keeps the employee where they work now. When the
+employee already works on the session that move was creating and its source
+cleanup is durably recorded, it uses the owner's own adoption
+(`adopt-existing`, see [plan move recovery](plan-move-recovery.md)). Otherwise,
+or when the adoption's checks refuse, it closes the record as `failed` with the
+reason. Both change the journal only. This is done only for an employee who
+works in a laptop, and only with `supervisorAutoRepair` on; with it off such a
+record is not shown, as before. A record of a resource transaction keeps its
+own recovery and is not touched or shown. A closing step that was refused is not tried
+again for six hours, and in that time the record does not stand in front of
+the laptop's own repair.
+
+### Provider start-up screens
+
+An agent CLI can show screens before its composer: a theme chooser, security
+notes, a workspace-trust question, a permissions warning, a question about an
+API key, a sign-in screen. No employee is left on one of them for the owner.
+
+- **Screens with one answer** are answered by the office terminal itself while
+  the agent starts: the theme chooser, the security notes, the workspace-trust
+  question and the Bypass Permissions warning. One key is sent per read of the
+  screen, Enter only once the selection mark is on the accepted option, at
+  most six keys per screen.
+- **A decision has a standing answer**, the one that spends no money, buys or
+  enables no usage credits and widens no access. Claude's "Do you want to use
+  this API key?" is answered "No (recommended)": a key found in the
+  environment would be billed for every request. It is answered under the same
+  key rules. No setting exists for it, because the other answer is not safe.
+- **A sign-in screen is never typed into.** The office never types a
+  credential, a code or a password, and never presses a key on a screen it has
+  not positively identified. What it does instead is below.
+
+The supervisor reads each attached employee's screen once a minute, and on
+every pass while it shows a start-up screen. Three conditions cover them:
+
+- `waiting-first-run-screen`: the office terminal is still answering the
+  screen. Nothing else is done.
+- `needs-sign-in`: the agent shows the provider's sign-in screen. The
+  office first asks the plan sign-in reconciler to read every copy of that
+  plan's sign-in now and to put a usable one into the laptop
+  (`replace-sign-in`; it discards nothing, so it also runs with
+  `supervisorAutoRepair` off). A client reads its sign-in when it starts, so
+  once the laptop holds a usable sign-in and the screen is still there, the
+  placement is not repeated and the agent is started again. The same holds
+  when the laptop has no sign-in folder of the plan (a seat folder for another
+  plan, a provider whose sign-in the reconciler does not carry): only a new
+  laptop gets one, and a rebuild places the office's copy in it.
+- `stuck-first-run-screen`: a first-run screen the office terminal could not
+  answer (its six keys were spent, the layout is one it cannot read), or a
+  start-up screen it does not know at all. The agent is started again.
+
+Starting the agent again is a relaunch inside the laptop where an office has
+that step, and otherwise a rebuild of the laptop, which keeps the home
+directory and continues the saved conversation. Under the boxed laptop runtime
+the launch of an agent is made once per laptop and is never repeated, so here
+it is the rebuild: three minutes after the screen was first seen, at most
+twice per episode and twice per day, under `supervisorAutoRepair`.
+
+An agent on a start-up screen has not reached its composer, so it is in no
+turn and a rebuild discards no conversation. That is not taken from the
+screen's name. The rebuild runs under the rule of every laptop an agent may run
+in (above), with one more demand of its own, the first of these:
+
+- The office knows the screen by more than its words. Either the frame shows
+  the screen's own live widget (the selection mark on one of that screen's
+  options, or its prompt as the last thing on the screen), or the office
+  launched that pane itself and has not seen its composer since, and the frame
+  shows no composer now. A conversation that quotes a screen shows the same
+  words, so a screen known only by its words is never acted on: it is not even
+  reported as a start-up screen.
+- The office terminal shows the pane idle and silent for two minutes. A pane
+  that still changes is waited for. Work the pane says was left running is
+  given thirty minutes from the first sight of the screen.
+- The screen and the idle pane are read again from the pane immediately before
+  the step is issued, and once more by the step itself before the rebuild is
+  requested. The running laptop is discarded only when it is the one recorded
+  laptop of that employee.
+- No plan move is open for the employee. A move keeps its own recovery. Once a
+  held move is abandoned, an employee it left at a sign-in screen is an
+  ordinary employee at that screen, and these steps apply.
+
+When every step has been tried and the screen is still there, the office does
+not stop: like every path, its round starts again six hours after its last
+attempt, and `waitingFor` says when (the limit of two rebuilds per day stays).
+A screen the office is still answering itself is never treated as a laptop that
+has been starting for too long: the answering ends within five minutes, and the
+screen is then gone or the agent is started again.
+A screen the office does not answer is written to the office log once per
+launch as its shape: its last sixteen rows with links, addresses, paths, keys
+and every long run of letters and digits removed, so that a table row can be
+written for it (`[Session] … is parked at …`).
+
+**A plan that is signed in nowhere** is the one thing the office cannot repair:
+only the account holder can sign a plan in, on the Plans page. Everything
+short of that is done:
+
+- It rarely arises. Each copy of a Claude plan sign-in (the office's and every
+  laptop's) is renewed by its own client, and the reconciler carries a renewed
+  copy to every other holder within a minute, in both directions (seconds
+  around the moment a shared sign-in is renewed). A copy the provider refused
+  is never placed again. A rebuild places the office's current copy in the new
+  laptop.
+- It is known early. When two reads in a row found every holder of a plan
+  without a usable sign-in, one line is posted in the office room: the plan,
+  the employees who run on it, and that only the account holder can sign it
+  in. An agent that is running goes on until its next request. One more line
+  follows when a sign-in is held again. The notice state is kept in memory, so
+  an office restart repeats the line once for a plan that is still signed out.
+- The employee is not rebuilt for it: a new laptop would stop at the same
+  screen. The card reads "Needs a sign-in" and `needsHuman` says so. As soon
+  as the plan is signed in, the reconciler puts the sign-in into every laptop
+  and the supervisor starts the parked agents again, with nothing else to do.
+- An office that is merely signed out itself is not that case: while the
+  laptop still holds a sign-in that works, the agent is started again with it.
+
+The office does not renew a sign-in itself and does not move an employee to
+another plan by itself; see the gaps below.
+
+Current gaps: the reconciler carries Claude plan sign-ins only. A Codex laptop
+at its sign-in screen is repaired by the rebuild, which places the office's
+copy of `auth.json`, but its copies are not kept in step between rebuilds.
+The office holds a sign-in's refresh token inside its copy and never uses it:
+renewal is done by a provider client (a laptop's agent at its next request),
+not by the office. An employee whose plan is signed in nowhere is not moved to
+another plan automatically: a plan move launches a paid session on the
+destination plan and is admitted only for the owner's own request, and the
+supervisor can continue a held move but never choose a plan. The per-model
+limit fallback (`modelLimitFallback`) changes the model within the same plan
+and does not help a plan that is signed out. After an office restart the
+office has no record that it launched a pane, so a screen it can only know by
+its words is recognised again at that laptop's next launch; a sign-in screen
+is recognised at once, by its widget. The reconciler leaves the laptop of an
+employee with an open plan move alone: the move installed the account material
+it reserved in a folder of its own and verifies exactly that material, so a
+sign-in is not placed for a move that waits at a sign-in screen. A start-up screen that no table row
+names is recognised only for a CLI that declares both its composer mark and its
+composer glyph (Claude Code, Codex, OpenCode), because for any other the office
+cannot show that a pane is without a composer.
 
 ## Employee disk budget
 

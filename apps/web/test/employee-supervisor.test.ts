@@ -128,6 +128,8 @@ function world(
     histories?: Map<string, SupervisorHistory>;
     /** The office's answer to a limits check. Without it the office has no such port. */
     keepLimits?: (employee: SupervisedEmployee) => Promise<SupervisorActionResult | undefined>;
+    /** What the office says it is doing about not being ready. */
+    notReady?: () => string | undefined;
   } = {}
 ) {
   const state = {
@@ -168,6 +170,7 @@ function world(
   const ports: EmployeeSupervisorPorts = {
     now: () => state.now,
     ready: () => state.ready,
+    ...(options.notReady ? { notReady: options.notReady } : {}),
     employees: () => state.people.map((row) => row.employee),
     flags: () => state.flags,
     glance: (employee) => {
@@ -205,6 +208,7 @@ function world(
       : {}),
     actions: {
       'resend-continuation': act('resend-continuation'),
+      'apply-standing-limits': act('apply-standing-limits'),
       'start-continuation': act('start-continuation'),
       'continue-move': act('continue-move'),
       'reconnect-viewer': act('reconnect-viewer'),
@@ -269,7 +273,13 @@ describe('EmployeeSupervisor', () => {
       [630, 'rebuild-laptop'], // +2 min to settle, then the next rung
       [1530, 'rebuild-laptop'], // +15 min
     ]);
-    expect(w.report('a').needsHuman).toMatch(/Repeating the step and rebuilding did not help/);
+    // Every rung of this round is used. Nobody is asked: the report says when the steps start again.
+    expect(w.report('a').needsHuman).toBeUndefined();
+    expect(w.report('a')).toMatchObject({
+      waitingFor: expect.stringMatching(/^the next round of repair steps, which starts at .* UTC: this round's did not help$/),
+      waitingUntil: 10 * MINUTE + 1530_000 + 6 * 60 * MINUTE,
+    });
+    expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
     expect(w.state.reads.filter((read) => read === 'provider:a')).toHaveLength(2);
   });
 
@@ -336,7 +346,9 @@ describe('EmployeeSupervisor', () => {
       const at = office(target, w);
       await w.run(120);
       expect(at.map(([, action]) => action)).toEqual(['resend-continuation']);
-      expect(w.report('a').needsHuman).toMatch(/confirmDiscardRunning/);
+      // Not while the office has no reading of that agent's pane; it waits for one and asks nobody.
+      expect(w.report('a').waitingFor).toMatch(/^a reading of the agent's terminal/);
+      expect(w.report('a').needsHuman).toBeUndefined();
     });
 
     it('with automatic repairs switched off, sends the request once and then names the switch and the calls', async () => {
@@ -357,15 +369,68 @@ describe('EmployeeSupervisor', () => {
     });
   });
 
-  it('never rebuilds while an agent is running in the laptop, and says who has to decide', async () => {
+  it('does not rebuild a laptop an agent runs in while it has no reading of the pane, and asks nobody', async () => {
     const running = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
     running.provider = 'running';
     const w = world([running]);
-    await w.run(120);
+    await w.run(110);
     expect(w.state.acts).toEqual([]);
-    expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild' });
-    expect(w.report('a').needsHuman).toMatch(/would discard its conversation.*confirmDiscardRunning/);
-    expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
+    expect(w.report('a')).toMatchObject({
+      condition: 'held-needs-rebuild',
+      waitingFor: expect.stringMatching(/^a reading of the agent's terminal; if there is still none, the laptop is rebuilt at/),
+      waitingUntil: 10 * MINUTE + 30_000 + 120 * MINUTE,
+    });
+    expect(w.report('a').needsHuman).toBeUndefined();
+    expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
+    // Two hours after the problem was first seen there is still no reading: the laptop is rebuilt.
+    await w.run(15);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['laptop-held', 'agent-unreadable']]]);
+  });
+
+  it('rebuilds a laptop an agent runs in between that agent’s turns, and never in the middle of one', async () => {
+    const running = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    running.provider = 'running';
+    const turn = (value: 'working' | 'idle', idleSince?: number) => {
+      running.glance = {
+        ...running.glance,
+        session: { ...running.glance.session, turn: value, ...(idleSince === undefined ? {} : { idleSince }) },
+      };
+    };
+    turn('working');
+    const w = world([running]);
+    // Far past every bound: a turn the office can see is waited for, however long it takes.
+    await w.run(300);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ waitingFor: "the agent's current turn to end" });
+    expect(w.report('a').needsHuman).toBeUndefined();
+    // The turn ends. One silent minute is not enough; after two the laptop is rebuilt.
+    turn('idle', w.state.now);
+    await w.run(1);
+    expect(w.state.acts).toEqual([]);
+    await w.run(1.5);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['agent-between-turns', 'laptop-held']]]);
+    expect(w.state.audits.find((entry) => entry.action === 'supervisor_rebuild_laptop')!.detail).toMatchObject({
+      code: 'DOCKER_RESOURCE_HELPER_FAILED',
+      proved: ['agent-between-turns', 'laptop-held'],
+    });
+  });
+
+  it('looks at the terminal once more before such a rebuild, and does not issue it when a turn has just begun', async () => {
+    const running = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    running.provider = 'running';
+    const idle = { ...running.glance.session, turn: 'idle' as const, idleSince: 0 };
+    running.glance = { ...running.glance, session: idle };
+    const w = world([running]);
+    // The first look of a pass sees the pane idle; the look made last, before the step, sees a turn.
+    const glance = w.ports.glance;
+    let looks = 0;
+    w.ports.glance = (employee) => {
+      const seen = glance(employee);
+      return ++looks % 2 === 0 ? { ...seen, session: { ...seen.session, turn: 'working' as const } } : seen;
+    };
+    await w.run(20);
+    expect(w.state.acts).toEqual([]);
+    expect(w.state.stored.get('a')?.attempts['rebuild-laptop']).toBeUndefined();
   });
 
   it('does not keep asking an occupied laptop what runs in it, and still reads again before any rebuild', async () => {
@@ -378,7 +443,8 @@ describe('EmployeeSupervisor', () => {
     expect(reads()).toBeLessThanOrEqual(9);
     expect(reads()).toBeGreaterThanOrEqual(7);
     expect(w.state.acts).toEqual([]);
-    expect(w.report('a').needsHuman).toMatch(/needs the owner/);
+    expect(w.report('a').waitingFor).toMatch(/^a reading of the agent's terminal/);
+    expect(w.report('a').needsHuman).toBeUndefined();
     // The agent exits. A reading that found the laptop occupied is never what a rebuild is decided on.
     occupied.provider = 'exited';
     const before = reads();
@@ -387,15 +453,17 @@ describe('EmployeeSupervisor', () => {
     expect(reads()).toBe(before + 1);
   });
 
-  it('never rebuilds on a laptop it could not read, and asks for a person once that lasts', async () => {
+  it('never takes a laptop it could not read for an empty one, and asks nobody while that lasts', async () => {
     const unread = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
     unread.provider = 'unknown';
     const w = world([unread]);
     await w.run(10);
     expect(w.report('a').waitingFor).toBe('a confirmed read of what is running in the laptop');
     await w.run(10);
+    // Past fifteen minutes it is treated as a laptop an agent runs in: rebuilt between turns, or after two hours.
     expect(w.state.acts).toEqual([]);
-    expect(w.report('a').needsHuman).toMatch(/cannot read what is running/);
+    expect(w.report('a').waitingFor).toMatch(/^a reading of the agent's terminal; if there is still none/);
+    expect(w.report('a').needsHuman).toBeUndefined();
   });
 
   it('starts the fresh source a rebuild leaves behind', async () => {
@@ -477,29 +545,47 @@ describe('EmployeeSupervisor', () => {
       expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
     });
 
-    it('tells a person once when the turn has not ended after thirty minutes, and rebuilds when it has', async () => {
+    it('asks nobody when the turn has not ended after thirty minutes, and rebuilds when it has', async () => {
       const stuck = heldTerminal(person('a'), 'working');
       const w = office(stuck);
       await w.run(29);
       expect(w.report('a').needsHuman).toBeUndefined();
       await w.run(60);
       expect(w.state.acts).toEqual(['reconnect-viewer:a']);
-      expect(w.report('a').needsHuman).toMatch(/after 30 minutes it still cannot see that it has.*confirmDiscardRunning/);
-      expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
+      expect(w.report('a').waitingFor).toBe("the agent's current turn to end");
+      expect(w.report('a').needsHuman).toBeUndefined();
       heldTerminal(stuck, 'idle', w.state.now);
       await w.run(3);
       expect(w.state.acts).toEqual(['reconnect-viewer:a', 'rebuild-laptop:a', 'start-continuation:a']);
-      expect(w.state.logs.filter((line) => line.includes('no longer needs a person'))).toHaveLength(1);
+      expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
     });
 
-    it('never rebuilds on a pane it is not reading', async () => {
+    it('never takes a pane it is not reading for an idle one, and rebuilds after two hours without a reading', async () => {
       const w = office(heldTerminal(person('a'), 'unknown'));
       await w.run(20);
       expect(w.state.acts).toEqual(['reconnect-viewer:a']);
-      expect(w.report('a').waitingFor).toBe("a reading of the agent's terminal");
-      await w.run(20);
+      expect(w.report('a').waitingFor).toMatch(/^a reading of the agent's terminal; if there is still none, the laptop is rebuilt at/);
+      await w.run(95);
       expect(w.state.acts).toEqual(['reconnect-viewer:a']);
-      expect(w.report('a').needsHuman).toMatch(/cannot see that it has/);
+      expect(w.report('a').needsHuman).toBeUndefined();
+      // As after an office restart, which leaves no terminal object for a held session: the wait has an end.
+      await w.run(10);
+      expect(w.state.proved.slice(0, 2)).toEqual([
+        ['reconnect-viewer', []],
+        ['rebuild-laptop', ['terminal-input-held', 'agent-unreadable']],
+      ]);
+      expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
+    });
+
+    it('rebuilds a held laptop at once when a read inside it finds no agent, whatever the pane', async () => {
+      const empty = heldTerminal(person('a'), 'unknown');
+      empty.provider = 'exited';
+      const w = office(empty);
+      await w.run(5);
+      expect(w.state.proved.slice(0, 2)).toEqual([
+        ['reconnect-viewer', []],
+        ['rebuild-laptop', []],
+      ]);
     });
 
     it('with automatic repairs switched off nudges once, then names the switch and the calls', async () => {
@@ -568,7 +654,12 @@ describe('EmployeeSupervisor', () => {
       const w = office(lost);
       await w.run(120);
       expect(w.state.acts).toEqual(Array(6).fill('reconnect-viewer:a'));
-      expect(w.report('a').needsHuman).toMatch(/could not reconnect the terminal/);
+      expect(w.report('a').waitingFor).toMatch(/^the next round of repair steps/);
+      expect(w.report('a').needsHuman).toBeUndefined();
+      // Six hours after the last nudge the round starts again, and still nothing is rebuilt.
+      await w.run(6 * 60);
+      expect(w.state.acts.length).toBeGreaterThan(6);
+      expect(w.state.acts.every((act) => act === 'reconnect-viewer:a')).toBe(true);
     });
   });
 
@@ -698,14 +789,14 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.acts).toEqual(['resend-continuation:a']);
   });
 
-  it('reads a laptop that waits for a person only every two minutes, and never acts on a kept reading', async () => {
+  it('reads a laptop it has no step for only every two minutes, and never acts on a kept reading', async () => {
     const waiting = hold(person('a'), 'DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED');
     const w = world([waiting], { limits: { ...LIMITS, idleReadMs: 120_000 } });
     await w.run(10);
     // 20 passes in ten minutes, one read per two minutes.
     expect(w.state.reads.filter((read) => read === 'laptop:a')).toHaveLength(5);
-    expect(w.report('a')).toMatchObject({ condition: 'needs-owner' });
-    // The owner approves the limits: the hold becomes one the supervisor can continue.
+    expect(w.report('a')).toMatchObject({ condition: 'laptop-not-started' });
+    // The hold becomes one the supervisor can continue.
     const before = w.state.reads.filter((read) => read === 'laptop:a').length;
     waiting.reading = { state: 'held', phase: 'resources-issued', code: 'DOCKER_RESOURCE_HELPER_RETRY_PENDING', allowedActions: ['observe', 'continue'] };
     await w.run(4);
@@ -824,7 +915,7 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.acts).toHaveLength(1);
   });
 
-  it('asks whether the plan is signed in and never answers the screen', async () => {
+  it('asks whether the plan is signed in, and starts nothing again for a screen it cannot prove', async () => {
     const waiting = person('a');
     waiting.glance = {
       ...waiting.glance,
@@ -835,8 +926,72 @@ describe('EmployeeSupervisor', () => {
     await w.run(60);
     expect(w.state.acts).toEqual([]);
     expect(w.state.reads).toContain('plan:plan-a');
+    expect(w.state.reads).not.toContain('laptop:a');
     expect(w.report('a')).toMatchObject({ condition: 'needs-sign-in', sentence: "A is waiting at Claude's sign-in screen." });
-    expect(w.report('a').needsHuman).toMatch(/the plan “Plan A” is signed in at the office/);
+  });
+
+  it('rebuilds a laptop whose agent is parked on a proved sign-in screen, after one more look at its terminal', async () => {
+    const parked = person('a');
+    const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false, proof: 'widget' as const };
+    parked.glance = { ...parked.glance, session: { ...parked.glance.session, startupScreen: screen, turn: 'idle', idleSince: 1 } };
+    const w = world([parked]);
+    w.state.signedIn = true;
+    /** The time of every look at the terminal. */
+    const looks: number[] = [];
+    const glance = w.ports.glance;
+    w.ports.glance = (employee) => {
+      looks.push(w.state.now);
+      return glance(employee);
+    };
+    await w.run(2);
+    expect(w.state.acts).toEqual([]); // a rebuild waits three minutes from the first sight of the problem
+    await w.run(2);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['agent-parked-at-screen']]]);
+    // What runs in the laptop is not asked: an agent does, and the pane says it is parked.
+    expect(w.state.reads).not.toContain('provider:a');
+    // The step was decided on a second look at the terminal in the same pass, like every rebuild of a laptop an
+    // agent may run in. No other pass looked twice.
+    const twice = [...new Set(looks)].filter((at) => looks.filter((value) => value === at).length === 2);
+    expect(twice).toHaveLength(1);
+    expect(looks.filter((value) => value === twice[0])).toHaveLength(2);
+    expect(w.state.audits.at(-1)).toMatchObject({
+      action: 'supervisor_rebuild_laptop',
+      detail: { condition: 'needs-sign-in', proved: ['agent-parked-at-screen'] },
+    });
+    expect(w.state.logs.filter((line) => line.includes('needs a person'))).toEqual([]);
+  });
+
+  it('does not rebuild when the look taken before the step no longer shows the agent parked', async () => {
+    const parked = person('a');
+    const screen = { label: "Claude's theme chooser", kind: 'first-run' as const, answering: false, proof: 'launch' as const };
+    const plain = parked.glance.session;
+    const session = { ...plain, startupScreen: screen, turn: 'idle' as const, idleSince: 1 };
+    parked.glance = { ...parked.glance, session };
+    const w = world([parked]);
+    const glance = w.ports.glance;
+    // Between the pass's look and the second one the screen cleared: the agent reached its composer after all.
+    let last = -1;
+    w.ports.glance = (employee) => {
+      const second = last === w.state.now;
+      last = w.state.now;
+      const seen = glance(employee);
+      return second ? { ...seen, session: { ...plain, turn: 'idle', idleSince: 1 } } : seen;
+    };
+    await w.run(10);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a').needsHuman).toBeUndefined();
+    // And the same when the pane began to change instead.
+    last = -1;
+    w.ports.glance = (employee) => {
+      const second = last === w.state.now;
+      last = w.state.now;
+      const seen = glance(employee);
+      return second ? { ...seen, session: { ...session, turn: 'working', idleSince: undefined } } : seen;
+    };
+    await w.run(10);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'stuck-first-run-screen', waitingFor: "the agent's current turn to end" });
   });
 
   it('skips a step this office has no port for', async () => {
@@ -1065,5 +1220,384 @@ describe('EmployeeSupervisorStore', () => {
       store.save(new Map([['c', { ...history, since: 3000 }]])),
     ]);
     expect([...store.load().keys()]).toEqual(['c']);
+  });
+});
+
+describe('employee supervisor: a plan move that stopped part-way never waits for the owner', () => {
+  const SIGN_IN =
+    "Stan's new session is waiting at Claude's sign-in screen. The office never answers a sign-in prompt; sign in " +
+    'the plan at the office, then continue.';
+  /** Every step with the minute it ran at, counted from the first pass. */
+  const record = (w: ReturnType<typeof world>, closes: (action: SupervisorAction) => void) => {
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      at.push([(w.state.now - 10 * MINUTE) / MINUTE, action]);
+      closes(action);
+      return action === 'abandon-move' ? { outcome: 'done', detail: 'abandoned' } : { outcome: 'refused' };
+    };
+    return at;
+  };
+  /** Run minute by minute and collect every sentence that asked for a person. */
+  const quiet = async (w: ReturnType<typeof world>, minutes: number, id = 'a') => {
+    const asked: string[] = [];
+    for (let minute = 0; minute < minutes; minute++) {
+      await w.run(1);
+      const said = w.report(id)?.needsHuman;
+      if (said) asked.push(said);
+    }
+    return asked;
+  };
+
+  it('abandons a move whose plan is not signed in after thirty minutes, and reads the plan the move goes to', async () => {
+    const stuck = heldMove(person('a'), SIGN_IN);
+    const w = world([stuck]);
+    w.state.signedIn = false;
+    const at = record(w, (action) => {
+      if (action === 'abandon-move') stuck.move = undefined;
+    });
+    expect(await quiet(w, 29)).toEqual([]);
+    expect(at).toEqual([]);
+    expect(w.report('a')).toMatchObject({
+      condition: 'move-held-retryable',
+      code: 'move-sign-in',
+      waitingFor: "the move's new plan to be signed in at the office",
+    });
+    expect(w.state.reads).toContain('plan:plan-b');
+    expect(await quiet(w, 10)).toEqual([]);
+    expect(at).toEqual([[30.5, 'abandon-move']]);
+    expect(w.state.audits.at(-1)).toMatchObject({
+      admin: 'office supervisor',
+      action: 'supervisor_abandon_move',
+      detail: { id: 'a', moveId: 'move-a', code: 'move-sign-in', outcome: 'done', attempt: 1 },
+    });
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+  });
+
+  it('continues that move as soon as the plan is signed in', async () => {
+    const stuck = heldMove(person('a'), SIGN_IN);
+    const w = world([stuck]);
+    w.state.signedIn = false;
+    const at = record(w, () => {});
+    await w.run(10);
+    expect(at).toEqual([]);
+    w.state.signedIn = true;
+    await w.run(1);
+    expect(at).toEqual([[10.5, 'continue-move']]);
+  });
+
+  it.each([
+    ['a decision screen', "Stan's new session is waiting at Claude's usage-credit offer. That choice is the owner's; answer it in the session's terminal, then continue.", 15.5],
+    ['an error the office does not recognize', 'The original Docker journal changed', 15.5],
+    ['no recorded error', undefined, 15.5],
+    ['a hold of the shared pool', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED', 30.5],
+  ] as Array<[string, string | undefined, number]>)('continues a move held at %s three times and then abandons it', async (_title, error, minute) => {
+    const stuck = heldMove(person('a'), error as string);
+    const w = world([stuck]);
+    const at = record(w, (action) => {
+      if (action === 'abandon-move') stuck.move = undefined;
+    });
+    expect(await quiet(w, 40)).toEqual([]);
+    expect(at).toEqual([
+      [1.5, 'continue-move'],
+      [3.5, 'continue-move'],
+      [8.5, 'continue-move'],
+      [minute, 'abandon-move'],
+    ]);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+  });
+
+  it.each([
+    ['a move of the retired runtime', { docker: false, allowedActions: ['settle'] }],
+    ['a move that offers no step at all', { allowedActions: [] }],
+    ['a move that offers only abandon', { allowedActions: ['abandon'] }],
+  ])('closes %s after fifteen minutes without a continue', async (_title, patch) => {
+    const stuck = heldMove(person('a'), 'x');
+    stuck.move = { ...stuck.move!, ...patch };
+    const w = world([stuck]);
+    const at = record(w, (action) => {
+      if (action === 'abandon-move') stuck.move = undefined;
+    });
+    expect(await quiet(w, 20)).toEqual([]);
+    expect(at).toEqual([[15.5, 'abandon-move']]);
+  });
+
+  it('abandons once: a move that is closed is not asked for again, and the laptop it left is looked after', async () => {
+    const stuck = heldMove(hold(person('a'), 'DOCKER_CONTINUATION_CONTAINER_STOPPED'), 'x');
+    stuck.provider = 'absent';
+    const w = world([stuck]);
+    const at = record(w, (action) => {
+      if (action === 'abandon-move') stuck.move = undefined;
+    });
+    await w.run(40);
+    expect(at.filter(([, action]) => action === 'abandon-move')).toHaveLength(1);
+    // With the move closed the stopped laptop is what remains, and the ordinary rebuild takes it.
+    expect(at.map(([, action]) => action)).toContain('rebuild-laptop');
+    expect(w.state.reads).toContain('laptop:a');
+  });
+
+  it('says until when it waits for a sign-in', async () => {
+    const stuck = heldMove(person('a'), SIGN_IN);
+    const w = world([stuck]);
+    w.state.signedIn = false;
+    await w.run(5);
+    // First seen at the first pass, half a minute in; closed thirty minutes after that.
+    expect(w.report('a')).toMatchObject({
+      waitingFor: "the move's new plan to be signed in at the office",
+      waitingUntil: 10 * MINUTE + 30_000 + 30 * MINUTE,
+    });
+    expect(w.report('a').needsHuman).toBeUndefined();
+  });
+
+  it('starts a move the service refused to close again six hours after its last attempt, and closes it once', async () => {
+    const stuck = heldMove(person('a'), 'The original Docker journal changed');
+    const w = world([stuck]);
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      const minute = (w.state.now - 10 * MINUTE) / MINUTE;
+      at.push([minute, action]);
+      // The service refuses everything in the first round and accepts the abandon in the second.
+      if (action !== 'abandon-move' || minute < 360) return { outcome: 'refused', detail: 'refused' };
+      stuck.move = undefined;
+      return { outcome: 'done', detail: 'abandoned' };
+    };
+    expect(await quiet(w, 60)).toEqual([]);
+    expect(at).toEqual([
+      [1.5, 'continue-move'],
+      [3.5, 'continue-move'],
+      [8.5, 'continue-move'],
+      [15.5, 'abandon-move'],
+      [20.5, 'abandon-move'],
+    ]);
+    expect(w.report('a')).toMatchObject({
+      condition: 'move-held-dead-end',
+      waitingUntil: 10 * MINUTE + 20.5 * MINUTE + 6 * 60 * MINUTE,
+    });
+    expect(w.report('a').waitingFor).toMatch(/the next round of repair steps/);
+    expect(await quiet(w, 6 * 60)).toEqual([]);
+    expect(at.slice(5)).toEqual([
+      [380.5, 'continue-move'],
+      [382.5, 'continue-move'],
+      [387.5, 'continue-move'],
+      [390.5, 'abandon-move'],
+    ]);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+  });
+
+  it('acts on nothing while a step of the move is running', async () => {
+    const stuck = heldMove(person('a'), 'x');
+    stuck.move = { ...stuck.move!, busy: true };
+    const w = world([stuck]);
+    await w.run(60);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'move-in-progress' });
+    expect(w.report('a').needsHuman).toBeUndefined();
+  });
+});
+
+describe('EmployeeSupervisor: no path ends for good', () => {
+  const needed = (w: ReturnType<typeof world>) => w.state.logs.filter((line) => line.includes('needs a person'));
+
+  it('gives an employee with no approved limits the owner’s standing default, then starts the laptop', async () => {
+    const bare = person('a');
+    bare.glance = {
+      ...bare.glance,
+      session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' },
+      laptop: {
+        record: null,
+        bound: false,
+        policyApproved: false,
+        templateOnRecord: false,
+        poolAlive: true,
+        standing: { enabled: true, limits: true, layout: true },
+      },
+    };
+    const w = world([bare]);
+    w.state.respond = async (action) => {
+      if (action === 'apply-standing-limits')
+        bare.glance = { ...bare.glance, laptop: { ...bare.glance.laptop, policyApproved: true } };
+      if (action === 'start-continuation') bare.glance = person('a').glance;
+      return { outcome: 'done', detail: action === 'apply-standing-limits' ? 'standing limits 0123456789ab' : 'ready' };
+    };
+    await w.run(1);
+    // Nothing is read from the Engine for an employee who has no limits yet.
+    expect(w.state.reads.filter((read) => read.startsWith('source') || read.startsWith('laptop'))).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'laptop-not-started', next: { action: 'apply-standing-limits' } });
+    await w.run(4);
+    expect(w.state.acts).toEqual(['apply-standing-limits:a', 'start-continuation:a']);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+    expect(needed(w)).toEqual([]);
+    expect(w.state.audits.map((entry) => [entry.admin, entry.action, entry.detail.outcome])).toEqual([
+      ['office supervisor', 'supervisor_apply_standing_limits', 'done'],
+      ['office supervisor', 'supervisor_start_continuation', 'done'],
+    ]);
+  });
+
+  it('leaves the limits alone and names the switch when the owner switched the standing defaults off', async () => {
+    const bare = person('a');
+    bare.glance = {
+      ...bare.glance,
+      laptop: {
+        record: null,
+        bound: false,
+        policyApproved: false,
+        templateOnRecord: false,
+        standing: { enabled: false, limits: true, layout: true },
+      },
+    };
+    const w = world([bare]);
+    await w.run(30);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a').needsHuman).toMatch(/^The standing defaults are switched off \(company setting supervisorStandingDefaults\)\./);
+  });
+
+  it('starts its steps again six hours after a round that did not help, and still rebuilds only twice a day', async () => {
+    const failing = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    const w = world([failing]);
+    const at: number[] = [];
+    // Every rebuild is carried out, and the laptop is held again afterwards.
+    w.state.respond = async () => {
+      at.push((w.state.now - 10 * MINUTE) / MINUTE);
+      return { outcome: 'done', detail: 'rebuilt' };
+    };
+    await w.run(60);
+    expect(at).toEqual([3.5, 18.5]);
+    expect(w.report('a')).toMatchObject({
+      condition: 'held-needs-rebuild',
+      waitingFor: expect.stringMatching(/^the next round of repair steps, which starts at/),
+      waitingUntil: 10 * MINUTE + 18.5 * MINUTE + 6 * 60 * MINUTE,
+    });
+    expect(w.report('a').needsHuman).toBeUndefined();
+    // The new round finds the day's two rebuilds used: it waits for the limit, and says until when.
+    await w.run(6 * 60);
+    expect(at).toHaveLength(2);
+    expect(w.report('a')).toMatchObject({
+      waitingFor: expect.stringMatching(/^the daily limit on rebuilds of one laptop \(2\)/),
+      waitingUntil: 10 * MINUTE + 3.5 * MINUTE + 24 * 60 * MINUTE,
+    });
+    expect(w.state.stored.get('a')!.attempts).toEqual({});
+    // The next day it goes on by itself.
+    await w.run(18 * 60);
+    expect(at.length).toBeGreaterThanOrEqual(3);
+    expect(at[2]).toBeGreaterThanOrEqual(24 * 60 + 3.5);
+    expect(needed(w)).toEqual([]);
+    // Never more than two in any twenty-four hours.
+    for (const [index, time] of at.entries()) if (index >= 2) expect(time - at[index - 2]!).toBeGreaterThanOrEqual(24 * 60);
+  });
+
+  it('says on every employee what the office is doing while it is not ready, and checks nothing meanwhile', async () => {
+    let waiting: string | undefined;
+    const w = world([hold(person('a'), 'DOCKER_RESOURCE_HELPER_RETRY_PENDING', ['observe', 'continue']), person('b')], {
+      notReady: () => waiting,
+    });
+    await w.run(0.5);
+    expect(w.report('a').next).toMatchObject({ action: 'resend-continuation' });
+    w.state.ready = false;
+    waiting = 'the office to restart itself at 1970-01-01 01:00 UTC and read its configuration again';
+    const reads = w.state.reads.length;
+    await w.run(5);
+    expect(w.state.reads).toHaveLength(reads);
+    expect(w.state.acts).toEqual([]);
+    for (const id of ['a', 'b']) {
+      expect(w.report(id).waitingFor).toBe(waiting);
+      expect(w.report(id).next).toBeUndefined();
+      expect(w.report(id).checkedAt).toBe(w.state.now);
+    }
+    // Ready again: the ladder goes on where it was.
+    w.state.ready = true;
+    waiting = undefined;
+    await w.run(0.5);
+    expect(w.state.acts).toEqual(['resend-continuation:a']);
+  });
+
+  it('remembers an attempt of the limits step across an office restart', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'supervisor-round-')), 'employee-supervisor.json');
+    const history: SupervisorHistory = {
+      fingerprint: 'no-policy',
+      since: 1000,
+      attempts: { 'apply-standing-limits': { count: 1, lastAt: 2000 } },
+      rebuilds: [],
+      lastAction: { action: 'apply-standing-limits', at: 2000, outcome: 'refused', detail: 'no standing default limits to give' },
+    };
+    await new EmployeeSupervisorStore(file).save(new Map([['a', history]]));
+    expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
+  });
+});
+
+describe('EmployeeSupervisor: an office start does not carry over what an earlier office watched', () => {
+  const HOUR = 60 * MINUTE;
+  /** The office starts ten hours in; whatever is in the store was written before it went down. */
+  const START = 10 * HOUR;
+  const started = (target: Person, history: SupervisorHistory) => {
+    const w = world([target], { histories: new Map([[target.employee.id, history]]) });
+    w.state.now = START;
+    return w;
+  };
+
+  it('gives an employee who is being attached again fifteen minutes, whatever the saved clock says', async () => {
+    // Starting since the first hour, by the saved history. A read inside the laptop would find no agent yet.
+    const starting = hold(person('a'), 'DOCKER_CONTINUATION_BUSY');
+    const w = started(starting, {
+      fingerprint: '',
+      since: 0,
+      transitSince: HOUR,
+      transitOf: 'starting',
+      attempts: {},
+      rebuilds: [],
+    });
+    await w.run(14.5);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'starting' });
+    expect(w.state.reads.filter((read) => read === 'provider:a')).toEqual([]);
+    // Fifteen minutes after it was first seen starting by this office, and three more for the rebuild.
+    await w.run(3);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild', next: { action: 'rebuild-laptop' } });
+    await w.run(1);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+  });
+
+  it('gives a laptop whose pane cannot be read its two hours again, and still acts on a read made now', async () => {
+    const saved: SupervisorHistory = {
+      fingerprint: 'code:DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED',
+      since: HOUR,
+      watchSince: HOUR,
+      attempts: { 'reconnect-viewer': { count: 1, lastAt: 9 * HOUR } },
+      rebuilds: [],
+      lastAction: { action: 'reconnect-viewer', at: 9 * HOUR, outcome: 'refused', detail: 'start-unconfirmed' },
+    };
+    // Held for nine hours by the saved history; the office has no terminal object for it after its start.
+    const w = started(heldTerminal(person('a'), 'unknown'), saved);
+    await w.run(110);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({
+      since: HOUR,
+      waitingFor: expect.stringMatching(/^a reading of the agent's terminal; if there is still none, the laptop is rebuilt at/),
+      waitingUntil: START + 30_000 + 2 * HOUR,
+    });
+    // It was asked what runs in the laptop, so the wait is not blind to an empty one.
+    expect(w.state.reads.filter((read) => read === 'provider:a').length).toBeGreaterThan(0);
+    await w.run(11);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['terminal-input-held', 'agent-unreadable']]]);
+
+    const empty = heldTerminal(person('a'), 'unknown');
+    empty.provider = 'exited';
+    const now = started(empty, saved);
+    await now.run(1);
+    expect(now.state.proved).toEqual([['rebuild-laptop', []]]);
+  });
+
+  it('writes its clocks to the store and reads them back as a file', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'supervisor-clocks-')), 'employee-supervisor.json');
+    const history: SupervisorHistory = {
+      fingerprint: 'code:X',
+      since: 1000,
+      transitSince: 3000,
+      transitOf: 'starting',
+      watchSince: 2000,
+      attempts: {},
+      rebuilds: [],
+    };
+    await new EmployeeSupervisorStore(file).save(new Map([['a', history]]));
+    expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
   });
 });

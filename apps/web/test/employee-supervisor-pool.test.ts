@@ -411,6 +411,38 @@ describe('EmployeeSupervisor: the shared pool after a host restart', () => {
   });
 });
 
+describe('EmployeeSupervisor: several host restarts in one day', () => {
+  it('brings everyone back after each of four restarts, and counts none of those rebuilds against the daily limit', async () => {
+    const w = box([person('a'), person('b')]);
+    for (let restart = 1; restart <= 4; restart++) {
+      await w.run(40 * MINUTE);
+      for (const id of ['a', 'b']) expect(w.report(id).condition, `${id} after restart ${restart}`).toBe('healthy');
+      // The host goes down again: every laptop, every storage holder and the anchor are stopped.
+      for (const row of w.state.people) row.laptop = 'stopped';
+      w.state.anchor = 'stopped';
+    }
+    const rebuilds = w.state.acts.filter((line) => line.includes('rebuild-laptop'));
+    expect(rebuilds).toHaveLength(8);
+    expect(w.state.steps.filter((line) => line.endsWith(':recover-pool:done'))).toHaveLength(4);
+    for (const id of ['a', 'b']) {
+      expect(w.state.histories.get(id)?.rebuilds ?? []).toEqual([]);
+      expect(w.state.logs.join('\n')).not.toMatch(/daily limit/);
+    }
+    // The audit entry of such a rebuild says that nothing was running and what was read first.
+    const audit = w.state.audits.find((entry) => entry.action === 'supervisor_rebuild_laptop')!;
+    expect(audit.detail).toMatchObject({ outcome: 'done', proved: ['stored-home'] });
+  });
+
+  it('still counts the rebuild of a laptop that stopped by itself while its storage holder runs', async () => {
+    const w = box([person('a', 'attached'), person('b')]);
+    w.state.anchor = 'running';
+    w.state.people[1]!.hold = { code: 'DOCKER_CONTINUATION_CONTAINER_STOPPED', allowedActions: ['observe'] };
+    await w.run(10 * MINUTE);
+    expect(w.state.acts.filter((line) => line.includes('rebuild-laptop:b'))).toHaveLength(1);
+    expect(w.state.histories.get('b')?.rebuilds).toHaveLength(1);
+  });
+});
+
 describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
   it('rebuilds onto a verified home and onto one it cannot compare, after reading it once', async () => {
     const w = box([person('a'), person('b')]);

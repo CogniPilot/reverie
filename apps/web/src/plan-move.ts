@@ -897,12 +897,20 @@ export class PlanMoves {
    * containers the move's own journal named are recorded for the owner's laptop
    * rebuild. Journal DATA only: nothing is started, stopped or removed, and no
    * other employee's record is read or written. A move that is still working
-   * (or only waiting for idle, which `cancel` covers) is refused. */
+   * (or only waiting for idle, which `cancel` covers) is refused.
+   *
+   * The office supervisor calls the same method on the owner's standing rule
+   * (company setting `supervisorAutoRepair`), with its own guard as
+   * `authorized` and a `note` that says so and why; the note becomes the
+   * closed record's sentence. It needs no executor and no requester: nothing
+   * here can issue, repeat or inspect a provider launch, so a move whose paid
+   * dispatch is on record is closed with that record kept as it is. */
   async abandonHeldDockerMove(
     id: string,
     employeeId: string,
     owner: string | undefined,
-    authorized: () => void = () => {}
+    authorized: () => void = () => {},
+    note?: string
   ): Promise<PlanMoveRecord> {
     await this.init();
     authorized();
@@ -954,7 +962,7 @@ export class PlanMoves {
         saved =
           disk.phase === 'failed' && disk.dockerAbandonment?.reason === 'owner-abandoned'
             ? disk
-            : await store.abandonOwner(id, disk.dockerReplacement, Date.now(), current);
+            : await store.abandonOwner(id, disk.dockerReplacement, Date.now(), current, note);
       } catch (error) {
         if (error instanceof PlanMoveError) throw error;
         throw new PlanMoveError(
@@ -991,6 +999,79 @@ export class PlanMoves {
         ? [{ moveId: row.id, containers: structuredClone(row.dockerAbandonment.containers) }]
         : []
     );
+  }
+
+  /** The candidate laptop that each abandoned Docker move of one employee had created, exactly as that move's
+   * journal kept its record. DATA only: this journal proves nothing about a container. A caller that wants to know
+   * whether such a laptop is empty reads the laptop itself. A move that never created a candidate names none. */
+  async abandonedCandidateRecords(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: DockerEmployeeContinuationRecord }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      row.phase === 'failed' &&
+      row.dockerAbandonment?.reason === 'owner-abandoned' &&
+      row.dockerReplacement?.work?.destination
+        ? [{ moveId: row.id, record: structuredClone(row.dockerReplacement.work) }]
+        : []
+    );
+  }
+
+  /** The office closes one held move of the retired runtime: a record with no laptop journal and no resource
+   * transaction. Under the laptop runtime such a record gates no laptop and owns no session; it only keeps its
+   * employee locked against every later plan move and viewer repair. The standing rule is to keep the employee
+   * where they work now: the record is closed as failed with its reason and the lock is released. Journal DATA
+   * only: no session is started, stopped, rebound or adopted, and no other record is changed.
+   *
+   * `authorized` is the caller's guard, checked again before the write. It must also hold that the employee works
+   * in a laptop of the laptop runtime: under the retired runtime a held move may still own a session that has to
+   * be inspected, and this method is not for that. A move that has already finished is answered with its record,
+   * so a repeat changes nothing. A resource transaction keeps its own recovery actor and is refused. */
+  async settleRetiredMove(
+    id: string,
+    employeeId: string,
+    owner: string | undefined,
+    authorized: () => void,
+    note: string
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    authorized();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner || record.employeeId !== employeeId)
+      throw new PlanMoveError('Unknown move', 404);
+    if (record.dockerReplacement)
+      throw new PlanMoveError('A laptop plan move is abandoned through its own journal', 409);
+    if (record.resourceIntent || record.resourcePhase || record.resourceOwnerScope !== undefined || record.purpose)
+      throw new PlanMoveError('Resource transactions require their own verified recovery actor', 409);
+    if (this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError('This move is still working on a step; wait until it is held for recovery', 409);
+    if (['completed', 'failed'].includes(record.phase)) return this.view(record);
+    if (record.phase !== 'recovery-required')
+      throw new PlanMoveError('Only a move that is held for recovery can be closed', 409);
+    this.intents.add(id);
+    const held = { phase: record.phase, error: record.error };
+    try {
+      authorized();
+      record.phase = 'failed';
+      record.error = note.slice(0, 1000);
+      try {
+        await this.save();
+      } catch {
+        // Whatever reached the disk, this process keeps the hold; a restart reads the durable record.
+        record.phase = held.phase;
+        if (held.error === undefined) delete record.error;
+        else record.error = held.error;
+        throw new PlanMoveError('The move journal did not confirm the closure, so the move is still held', 409);
+      }
+      this.releaseLock(employeeId);
+      this.intents.delete(id);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
   }
 
   /** The laptop record that each finished Docker move of one employee replaced, exactly as that move's seed kept

@@ -1,7 +1,7 @@
 /** Retained private instance key. Files and directory stay open; pathname
  * replacement, permission drift, malformed bytes and failed closure revoke it. */
 import fs from 'node:fs';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 const record = z
   .object({
@@ -118,6 +118,62 @@ export class DockerRuntimeKey {
     } catch {
       this.#closed = true;
       return false;
+    }
+  }
+  /** Changes whenever the directory or the key file changes on disk. A name for a state, never an authority. */
+  stamp(): string {
+    const of = (path: string) => {
+      try {
+        const s = fs.lstatSync(path);
+        return [s.dev, s.ino, s.uid, s.gid, s.mode, s.nlink, s.size, s.mtimeMs, s.ctimeMs].join(':');
+      } catch {
+        return 'unreadable';
+      }
+    };
+    return of(this.directory) + '|' + of(this.directory + '/worker-identity.json');
+  }
+  /**
+   * Whether a new office process would read this same instance and key from disk: the directory and the file pass
+   * the checks of a start, and the file holds exactly the identity this process was given. Reads only and creates
+   * nothing. It says nothing about this object, which stays revoked once `current()` has failed.
+   */
+  sameOnDisk(): boolean {
+    const uid = process.getuid?.();
+    let file: number | undefined;
+    try {
+      const dir = fs.lstatSync(this.directory);
+      if (!dir.isDirectory() || dir.uid !== uid || (dir.mode & 0o077) !== 0) return false;
+      file = fs.openSync(
+        this.directory + '/worker-identity.json',
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
+      );
+      const stat = fs.fstatSync(file);
+      if (!stat.isFile() || stat.uid !== uid || (stat.mode & 0o077) !== 0 || stat.nlink !== 1 || stat.size > 1024)
+        return false;
+      const body = Buffer.alloc(stat.size);
+      if (fs.readSync(file, body, 0, body.length, 0) !== body.length) return false;
+      const text = body.toString('utf8'),
+        value = record.parse(JSON.parse(text));
+      const key = Buffer.from(value.key, 'hex');
+      try {
+        return (
+          JSON.stringify(value) === text &&
+          value.instanceId === this.instanceId &&
+          key.length === this.key.length &&
+          timingSafeEqual(key, this.key)
+        );
+      } finally {
+        key.fill(0);
+      }
+    } catch {
+      return false;
+    } finally {
+      if (file !== undefined)
+        try {
+          fs.closeSync(file);
+        } catch {
+          /* a read-only handle */
+        }
     }
   }
   close(): void {

@@ -87,6 +87,18 @@ it('puts the office supervisor’s reading on the card, with what it will do nex
   needsHuman:'An agent is running in a laptop of this employee. That needs the owner.'});
  expect(needs.reason.textContent).toBe('Needs you');
  expect(needs.reason.title).toContain("Alex's laptop container cannot be found (held-needs-rebuild). An agent is running in a laptop of this employee. That needs the owner.");
+ // A start-up screen is the office's own to clear: the card says what it is doing, and asks for a person only for
+ // the one thing it cannot do, signing a plan in.
+ const stuck=await shown({condition:'stuck-first-run-screen',sentence:"Alex is stuck at Claude's theme chooser, which the office could not answer.",
+  code:'first-run-screen',next:{action:'rebuild-laptop',at:1}});
+ expect(stuck.reason.textContent).toBe('Stuck at start-up; restarting');
+ const signIn=await shown({condition:'needs-sign-in',sentence:"Alex is waiting at Claude's sign-in screen.",code:'sign-in-screen',
+  next:{action:'replace-sign-in',at:1}});
+ expect(signIn.reason.textContent).toBe('At a sign-in screen; repairing');
+ const signedOut=await shown({condition:'needs-sign-in',sentence:"Alex is waiting at Claude's sign-in screen.",code:'plan-signed-out',
+  needsHuman:'The plan “Max” is not signed in at the office. Only the account holder can sign a plan in (Plans).'});
+ expect(signedOut.reason.textContent).toBe('Needs a sign-in');
+ expect(signedOut.reason.title).toContain('Only the account holder can sign a plan in (Plans).');
  // A sentence and a tooltip only: the card gains no control.
  expect([next.controls,needs.controls]).toEqual([plain.controls,plain.controls]);
  // A healthy reading and a condition this page does not know leave the card as it was.

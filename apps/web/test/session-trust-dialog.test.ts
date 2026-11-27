@@ -26,6 +26,7 @@ import {
   TRUST_KEY_UP,
   TRUST_DIALOG_MAX_ATTEMPTS,
 } from '../src/session-trust-dialog.js';
+import { FirstRunScan, FIRST_RUN_MAX_MS, readStartupScreen } from '../src/session-first-run-screens.js';
 
 /** Verbatim from the wire: note the `\x1b[C` where every space should be. */
 const RAW_DIALOG_CHUNK =
@@ -257,5 +258,30 @@ describe('Session trust-dialog auto-accept', () => {
       vi.advanceTimersByTime(2000);
     }
     expect(writes).toEqual([]);
+  });
+});
+
+describe('the trust dialog as proof that an agent is parked on it', () => {
+  // A session that stays on a start-up screen is started again, and that discards the pane. So the supervisor
+  // acts only on a frame that shows the dialog's own widget, never on its words.
+  const scan = () => {
+    const armed = new FirstRunScan();
+    armed.arm(0);
+    armed.attached(); // a pane the office only attached to: the frame is all the evidence there is
+    armed.due(FIRST_RUN_MAX_MS + 1);
+    return armed;
+  };
+  const at = (text: string) => readStartupScreen(text, scan(), FIRST_RUN_MAX_MS + 2, { composerMark: 'shift+tab' });
+
+  it('reads both verbatim captures as the live widget, wherever the highlight sits', () => {
+    for (const screen of [RENDERED_DIALOG, RENDERED_DIALOG_2_1_252, RENDERED_DIALOG_2_1_252_ON_YES])
+      expect(at(screen)).toMatchObject({ id: 'claude-workspace-trust', kind: 'first-run', shown: 'widget' });
+  });
+
+  it('proves nothing from the wire bytes of the dialog or from a working session', () => {
+    // The raw repaint carries the words and no selection mark: named, and never a reason to start anything again.
+    expect(at(RAW_DIALOG_CHUNK)).toMatchObject({ id: 'claude-workspace-trust', shown: 'words' });
+    expect(at(RENDERED_MAIN_UI)).toBeNull();
+    expect(at(`${RENDERED_DIALOG_2_1_252}\n${RENDERED_MAIN_UI}`)).toBeNull();
   });
 });

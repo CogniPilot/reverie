@@ -2,17 +2,25 @@ import { describe, it, expect } from 'vitest';
 import {
   EMPTY_SUPERVISOR_HISTORY,
   SUPERVISOR_HELD_INPUT_PATH,
+  SUPERVISOR_LIMITS_PATH,
+  SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_PATHS,
   SUPERVISOR_POLICY,
+  SUPERVISOR_STALLED_PATH,
   assessEmployee,
   classifyEmployee,
   classifyMoveError,
   issueSupervisorAttempt,
+  readParkedScreen,
+  ladderRestartAt,
   readSupervisedTerminal,
+  readTerminalTurn,
   recordSupervisorAttempt,
+  resumeSupervisorHistory,
   settleSupervisorAttempt,
   rollSupervisorHistory,
   supervisorCodeKind,
+  type SupervisedScreenTerminal,
   type SupervisedTerminal,
   type SupervisorAction,
   type SupervisorCondition,
@@ -98,8 +106,8 @@ describe('employee supervisor: classification', () => {
     ['a move that is working', move(undefined, { phase: 'starting' }), 'move-in-progress'],
     ['a held move whose step is in flight', move('x', { busy: true }), 'move-in-progress'],
     ['a held move', move('The original Docker move flight changed'), 'move-held-retryable', /stopped part-way/],
-    ['a held move of the retired runtime', move('x', { docker: false }), 'needs-owner'],
-    ['a held move with no continue step', move('x', { allowedActions: [] }), 'needs-owner'],
+    ['a held move of the retired runtime', move('x', { docker: false }), 'move-held-retryable', /before the laptop runtime/],
+    ['a held move with no continue step', move('x', { allowedActions: [] }), 'move-held-retryable'],
     [
       'a session parked on a sign-in screen',
       observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
@@ -114,12 +122,13 @@ describe('employee supervisor: classification', () => {
     [
       'a session on a first-run screen the office gave up on',
       observed({ session: { startupScreen: { label: "Claude's theme chooser", kind: 'first-run', answering: false } } }),
-      'needs-owner',
+      'stuck-first-run-screen',
     ],
     [
-      'a session on a screen that is the owner’s choice',
+      // No row of the table reports a decision any more. A reading that still says so is no reason to ask the owner.
+      'a session on a screen once left to the owner',
       observed({ session: { startupScreen: { label: 'a permissions prompt', kind: 'decision', answering: false } } }),
-      'needs-owner',
+      'stuck-first-run-screen',
     ],
     ['a laptop set-up that is still running', held('DOCKER_CONTINUATION_BUSY'), 'starting'],
     ['a laptop read that a busy box could not finish in time', held('DOCKER_RESOURCE_PROBE_DEADLINE'), 'starting'],
@@ -173,7 +182,7 @@ describe('employee supervisor: classification', () => {
     ],
     ['a disconnected terminal', observed({ session: { viewerHealth: 'disconnected' } }), 'viewer-lost'],
     ['an office with no session object', observed({ session: { available: false } }), 'viewer-lost'],
-    ['no approved limits on a set-up', held('DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED'), 'needs-owner'],
+    ['no approved limits on a set-up', held('DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED'), 'laptop-not-started'],
     ['the shared pool helper', held('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED'), 'needs-owner'],
     ['an unverified shared pool with nothing to re-send', held('DOCKER_CONTINUATION_POOL_UNCONFIRMED'), 'needs-owner'],
     [
@@ -189,15 +198,23 @@ describe('employee supervisor: classification', () => {
     [
       'no laptop and no approved limits',
       observed({ laptop: { record: null, bound: false, restoration: undefined, policyApproved: false } }),
-      'needs-owner',
+      'laptop-not-started',
     ],
     [
-      'no laptop at all',
-      observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'absent' } }),
+      'no laptop at all, and no record of an earlier one',
+      observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'absent', templateOnRecord: false } }),
       'unknown',
+      /found no laptop to start from/,
     ],
-    ['a code nobody has listed', held('DOCKER_CONTINUATION_SOMETHING_NEW'), 'unknown', /does not recognize/],
-    ['a code that is not a code', held('rm -rf /'), 'unknown'],
+    [
+      'no laptop, with an earlier laptop operation on record',
+      observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'absent' } }),
+      'held-needs-rebuild',
+    ],
+    ['a code nobody has listed', held('DOCKER_CONTINUATION_SOMETHING_NEW'), 'held-needs-rebuild', /does not recognize/],
+    ['a code that is not a code', held('rm -rf /'), 'held-needs-rebuild'],
+    ['something the office did not start in the laptop terminal', held('DOCKER_CONTINUATION_FOREIGN_PROVIDER'), 'held-needs-rebuild', /cannot take it over/],
+    ['an office whose laptop configuration changed under it', held('DOCKER_CONTINUATION_RUNTIME_CHANGED'), 'starting', /restarts itself/],
     [
       'an employee outside a laptop who is connected',
       observed({ boxed: false, laptop: { record: null, bound: false, restoration: undefined } }),
@@ -206,7 +223,8 @@ describe('employee supervisor: classification', () => {
     [
       'an employee outside a laptop who is not connected',
       observed({ boxed: false, session: { available: false }, laptop: { record: null, bound: false, restoration: undefined } }),
-      'unknown',
+      'viewer-lost',
+      /the office wakes it/,
     ],
   ];
   it.each(cases)('%s', (_title, input, condition, sentence) => {
@@ -221,19 +239,17 @@ describe('employee supervisor: classification', () => {
     const seen = new Set(cases.map(([, input]) => classifyEmployee(input).condition));
     // `move-held-dead-end` is `move-held-retryable` once its ladder reaches the abandon rung (see the ladder tests).
     const all: SupervisorCondition[] = [
-      'healthy', 'starting', 'waiting-first-run-screen', 'needs-sign-in', 'needs-owner', 'provider-exited',
+      'healthy', 'starting', 'waiting-first-run-screen', 'stuck-first-run-screen', 'needs-sign-in', 'needs-owner',
+      'provider-exited',
       'viewer-lost', 'held-retryable', 'held-needs-rebuild', 'laptop-not-started', 'move-in-progress',
       'move-held-retryable', 'owner-stopped', 'unknown',
     ];
     expect([...seen].sort()).toEqual([...all].sort());
   });
 
-  it('never gives an unknown condition a ladder', () => {
+  it('gives no ladder to a condition that is not a laptop or move it can work on', () => {
     for (const condition of ['unknown', 'needs-owner', 'owner-stopped', 'healthy', 'starting'] as const)
       expect(SUPERVISOR_PATHS[condition]).toBeUndefined();
-    const result = assessEmployee(held('DOCKER_CONTINUATION_SOMETHING_NEW'), since(0, 'x'), ON, 99 * MINUTE);
-    expect(result.next.action).toBeNull();
-    expect(result.needsHuman).toMatch(/docker-policy/);
   });
 
   it('recognizes every resource helper code the recovery guidance describes', () => {
@@ -265,13 +281,20 @@ describe('employee supervisor: classification', () => {
     expect(supervisorCodeKind('DOCKER_CONTINUATION_LOCAL_MODEL_x; rm')).toBeUndefined();
   });
 
-  it('names the plan and says where to sign in', () => {
+  it('asks for a sign-in only when the office itself is signed out of the plan, and names the plan', () => {
     const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false };
     const unsigned = classifyEmployee(observed({ planSignedIn: false, session: { startupScreen: screen } }));
-    expect(unsigned.needsHuman).toMatch(/Sign in the plan “Max 20x” at the office/);
-    const signed = classifyEmployee(observed({ planSignedIn: true, session: { startupScreen: screen } }));
-    expect(signed.condition).toBe('needs-sign-in');
-    expect(signed.needsHuman).toMatch(/signed in at the office, but this laptop's own sign-in folder does not have it/);
+    expect(unsigned).toMatchObject({ condition: 'needs-sign-in', code: 'plan-signed-out' });
+    expect(unsigned.needsHuman).toMatch(/^The plan “Max 20x” is not signed in at the office\./);
+    expect(unsigned.needsHuman).toMatch(/Only the account holder can sign a plan in \(Plans\)/);
+    expect(unsigned.needsHuman).not.toMatch(/terminal/);
+    // Signed in at the office, or not known yet: the office repairs it and asks nobody.
+    for (const planSignedIn of [true, undefined]) {
+      const signed = classifyEmployee(observed({ planSignedIn, session: { startupScreen: screen } }));
+      expect(signed).toMatchObject({ condition: 'needs-sign-in', code: 'sign-in-screen' });
+      expect(signed.needsHuman).toBeUndefined();
+      expect(signed.fingerprint).toBe(unsigned.fingerprint);
+    }
   });
 
   it('keeps how an exited agent ended in its sentence', () => {
@@ -375,10 +398,14 @@ describe('employee supervisor: ladder', () => {
     it.each(['exited', 'absent', 'no-laptop'] as const)('is automatic when the agent is %s', (kind) => {
       expect(provider(kind).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
     });
-    it('is never automatic while an agent runs in the laptop', () => {
+    it('is not asked for while an agent runs in a laptop whose pane the office is not reading', () => {
       const result = provider('running');
-      expect(result.next.action).toBeNull();
-      expect(result.needsHuman).toMatch(/would discard its conversation.*confirmDiscardRunning/);
+      expect(result.next).toMatchObject({
+        action: null,
+        waitingFor: "a reading of the agent's terminal; if there is still none, the laptop is rebuilt at 1970-01-01 02:00 UTC",
+        at: 120 * MINUTE,
+      });
+      expect(result.needsHuman).toBeUndefined();
     });
     it('treats an unreadable laptop as unknown, not as empty', () => {
       const result = provider('unknown');
@@ -397,16 +424,26 @@ describe('employee supervisor: ladder', () => {
         ON,
         60 * MINUTE
       );
-      expect(twice.next.action).toBeNull();
-      expect(twice.needsHuman).toMatch(/Rebuilding did not help/);
+      // Both tries of this round are used. The ladder does not end: it says when it starts again.
+      expect(twice.next).toMatchObject({
+        action: null,
+        at: MINUTE + 6 * 60 * MINUTE,
+        waitingFor: "the next round of repair steps, which starts at 1970-01-01 06:01 UTC: this round's did not help",
+      });
+      expect(twice.needsHuman).toBeUndefined();
       const today = assessEmployee(
         { ...failed, laptop: { ...failed.laptop, provider: 'exited' } },
         { ...history, rebuilds: [60 * MINUTE, 120 * MINUTE] },
         ON,
         180 * MINUTE
       );
-      expect(today.next.action).toBeNull();
-      expect(today.needsHuman).toMatch(/already rebuilt this laptop 2 times today/);
+      // The limit per day is a pause that says when it lifts.
+      expect(today.next).toMatchObject({
+        action: null,
+        at: 25 * 60 * MINUTE,
+        waitingFor: expect.stringMatching(/^the daily limit on rebuilds of one laptop \(2\): .* may run at 1970-01-02 01:00 UTC$/),
+      });
+      expect(today.needsHuman).toBeUndefined();
       const nextDay = assessEmployee(
         { ...failed, laptop: { ...failed.laptop, provider: 'exited' } },
         { ...history, rebuilds: [60 * MINUTE, 120 * MINUTE] },
@@ -456,39 +493,6 @@ describe('employee supervisor: ladder', () => {
       const history = rollSupervisorHistory(since(0, 'move:move-1:something else'), classifyEmployee(composer), 14 * MINUTE);
       expect(history.since).toBe(14 * MINUTE);
     });
-    it('is never abandoned for a reason the office does not recognize', () => {
-      const odd = move('The original Docker journal changed');
-      const result = assessEmployee(
-        odd,
-        since(0, classifyEmployee(odd).fingerprint, { attempts: tried('continue-move', 3, MINUTE) }),
-        ON,
-        60 * MINUTE
-      );
-      expect(result.next.action).toBeNull();
-      expect(result.needsHuman).toMatch(/does not abandon a move for a reason it does not recognize/);
-    });
-    it('is never abandoned while it waits for a sign-in', () => {
-      const error = describeStartupScreen("Stan's new session", { label: "Claude's sign-in screen", kind: 'credential', answering: false });
-      const waiting = assessEmployee(move(error), since(0, 'x'), ON, 60 * MINUTE);
-      expect(waiting).toMatchObject({ condition: 'needs-sign-in', next: { action: null } });
-      expect(waiting.needsHuman).toMatch(/Sign in the plan “Max 20x”/);
-      // Once the office reports the plan signed in, the move is continued, and still never abandoned for it.
-      const signed = { ...move(error), planSignedIn: true };
-      expect(assessEmployee(signed, since(0, 'x'), ON, 60 * MINUTE).next.action).toBe('continue-move');
-      const spent = assessEmployee(signed, since(0, 'x', { attempts: tried('continue-move', 3, 0) }), ON, 60 * MINUTE);
-      expect(spent.next.action).toBeNull();
-      expect(spent.needsHuman).toBeTruthy();
-    });
-    it('is left alone when its record does not offer abandon', () => {
-      const result = assessEmployee(
-        move('DOCKER_RESOURCE_HELPER_FAILED', { allowedActions: ['continue-original'] }),
-        since(0, 'x', { attempts: tried('continue-move', 3, 0) }),
-        ON,
-        60 * MINUTE
-      );
-      expect(result.next.action).toBeNull();
-      expect(result.needsHuman).toMatch(/cannot be abandoned here/);
-    });
   });
 
   describe('switches', () => {
@@ -533,29 +537,38 @@ describe('employee supervisor: ladder', () => {
     }
   });
 
-  it('reports a start that never finishes', () => {
+  it('treats a start that never finishes as a hold, and asks nobody', () => {
     const starting = held('DOCKER_CONTINUATION_BUSY');
     const history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(starting), 1000);
-    expect(assessEmployee(starting, history, ON, 1000 + 14 * MINUTE).needsHuman).toBeUndefined();
-    expect(assessEmployee(starting, history, ON, 1000 + 15 * MINUTE).needsHuman).toMatch(/has not changed for a while/);
+    const early = assessEmployee(starting, history, ON, 1000 + 14 * MINUTE);
+    expect(early).toMatchObject({ condition: 'starting', next: { action: null } });
+    expect(early.needsHuman).toBeUndefined();
+    // Fifteen minutes on, the rebuild is considered, with its usual wait counted from that moment.
+    const stalled = assessEmployee(starting, history, ON, 1000 + 15 * MINUTE);
+    expect(stalled).toMatchObject({
+      condition: 'held-needs-rebuild',
+      next: { action: 'rebuild-laptop', at: 1000 + 18 * MINUTE, preconditions: ['no-agent-running'] },
+    });
+    expect(stalled.needsHuman).toBeUndefined();
   });
 
-  it('nudges a lost terminal and then asks for a person, never for a rebuild', () => {
+  it('nudges a lost terminal, never rebuilds for it, and starts the nudges again six hours on', () => {
     const lost = observed({ laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' } } });
     const fp = classifyEmployee(lost).fingerprint;
     expect(assessEmployee(lost, since(0, fp), ON, 0).next).toMatchObject({ action: 'reconnect-viewer', at: 45_000 });
     const spent = assessEmployee(lost, since(0, fp, { attempts: tried('reconnect-viewer', 6, 0) }), ON, 60 * MINUTE);
-    expect(spent.next.action).toBeNull();
-    expect(spent.needsHuman).toMatch(/could not reconnect the terminal/);
+    expect(spent.next).toMatchObject({ action: null, at: 6 * 60 * MINUTE });
+    expect(spent.next.waitingFor).toMatch(/^the next round of repair steps, which starts at 1970-01-01 06:00 UTC/);
+    expect(spent.needsHuman).toBeUndefined();
     expect(SUPERVISOR_PATHS['viewer-lost']).not.toContain('rebuild-laptop');
   });
 
-  it('starts a fresh laptop source and gives up after three tries', () => {
+  it('starts a fresh laptop source, three tries a round', () => {
     const fresh = observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped' } });
     expect(assessEmployee(fresh, since(0, 'source-stopped'), ON, MINUTE).next.action).toBe('start-continuation');
     const spent = assessEmployee(fresh, since(0, 'source-stopped', { attempts: tried('start-continuation', 3, 0) }), ON, 60 * MINUTE);
-    expect(spent.next.action).toBeNull();
-    expect(spent.needsHuman).toMatch(/would not start/);
+    expect(spent.next).toMatchObject({ action: null, at: 6 * 60 * MINUTE });
+    expect(spent.needsHuman).toBeUndefined();
   });
 
   it('orders every path from the least to the most destructive step', () => {
@@ -678,14 +691,24 @@ describe('employee supervisor: laptops the office cannot judge alone', () => {
     expect(gone(false, 'absent').next.action).toBe('rebuild-laptop');
   });
 
-  it('asks for a person once a laptop has been unreadable for fifteen minutes', () => {
+  it('treats a laptop that has been unreadable for fifteen minutes as one an agent runs in', () => {
     const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
     const unread = { ...failed, laptop: { ...failed.laptop, provider: 'unknown' as const } };
     const history = since(MINUTE, classifyEmployee(failed).fingerprint);
-    expect(assessEmployee(unread, history, ON, 15 * MINUTE).needsHuman).toBeUndefined();
+    expect(assessEmployee(unread, history, ON, 15 * MINUTE).next).toMatchObject({
+      action: null,
+      waitingFor: 'a confirmed read of what is running in the laptop',
+    });
+    // Never as an empty one: from here on the rebuild waits for the agent to be between turns.
     const stuck = assessEmployee(unread, history, ON, 16 * MINUTE);
-    expect(stuck.next.action).toBeNull();
-    expect(stuck.needsHuman).toMatch(/cannot read what is running in this laptop/);
+    expect(stuck.next).toMatchObject({ action: null, at: 121 * MINUTE });
+    expect(stuck.next.waitingFor).toMatch(/^a reading of the agent's terminal; if there is still none, the laptop is rebuilt at/);
+    expect(stuck.needsHuman).toBeUndefined();
+    const idle = { ...unread, session: { ...unread.session, turn: 'idle' as const, idleSince: 10 * MINUTE } };
+    expect(assessEmployee(idle, history, ON, 16 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['agent-between-turns', 'laptop-held'],
+    });
   });
 });
 
@@ -770,10 +793,9 @@ describe('employee supervisor: last night', () => {
       preconditions: [],
     });
     // The same limits as every other rebuild: never beside a running laptop, an unread one or a dead pool.
-    expect(assessEmployee(withProvider('running'), history, ON, 3 * MINUTE)).toMatchObject({
-      next: { action: null },
-      needsHuman: expect.stringMatching(/confirmDiscardRunning/),
-    });
+    const occupied = assessEmployee(withProvider('running'), history, ON, 3 * MINUTE);
+    expect(occupied.next).toMatchObject({ action: null, at: 120 * MINUTE });
+    expect(occupied.needsHuman).toBeUndefined();
     expect(assessEmployee(withProvider('unknown'), history, ON, 3 * MINUTE).next).toMatchObject({
       action: null,
       waitingFor: 'a confirmed read of what is running in the laptop',
@@ -783,9 +805,9 @@ describe('employee supervisor: last night', () => {
       waitingFor: expect.stringMatching(/the shared pool/),
     });
     const spent = { attempts: tried('rebuild-laptop', 2, 0) };
-    expect(assessEmployee(withProvider('no-laptop'), since(0, seen.fingerprint, spent), ON, 60 * MINUTE)).toMatchObject({
-      next: { action: null },
-      needsHuman: expect.stringMatching(/Rebuilding did not help/),
+    expect(assessEmployee(withProvider('no-laptop'), since(0, seen.fingerprint, spent), ON, 60 * MINUTE).next).toMatchObject({
+      action: null,
+      at: 6 * 60 * MINUTE,
     });
     // Repairs switched off, or no layout on record: nothing is replaced and the owner is given the two calls.
     const calls = /POST \/api\/company\/employees\/:id\/docker-rebuild\/preview, then \/apply/;
@@ -812,15 +834,22 @@ describe('employee supervisor: last night', () => {
     expect(assessEmployee(rebuilt, after, ON, 5 * MINUTE).next).toMatchObject({ action: 'start-continuation' });
   });
 
-  it('a laptop at a sign-in screen whose plan is signed in at the office is reported, never answered', () => {
+  it('a laptop at a sign-in screen whose plan is signed in at the office is rebuilt, and nobody is asked', () => {
     const screen = observed({
       planSignedIn: true,
-      session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } },
+      session: {
+        startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'widget' },
+        turn: 'idle',
+        idleSince: 0,
+      },
     });
-    const result = assessEmployee(screen, since(0, classifyEmployee(screen).fingerprint), ON, 600 * MINUTE);
-    expect(result).toMatchObject({ condition: 'needs-sign-in', next: { action: null } });
+    const result = assessEmployee(screen, since(0, classifyEmployee(screen).fingerprint), ON, 10 * MINUTE);
+    expect(result).toMatchObject({
+      condition: 'needs-sign-in',
+      next: { action: 'rebuild-laptop', preconditions: ['agent-parked-at-screen'] },
+    });
     expect(result.sentence).toBe("Stan is waiting at Claude's sign-in screen.");
-    expect(result.needsHuman).toMatch(/the plan “Max 20x” is signed in at the office/);
+    expect(result.needsHuman).toBeUndefined();
   });
 
   it('a local-model agent that exited at launch keeps its evidence and is rebuilt', () => {
@@ -887,11 +916,21 @@ describe('employee supervisor: limits a reload of the service manager reset', ()
       const leaf = running(code, ['observe', 'repair']);
       const first = assessEmployee(leaf, since(0, 'code:' + code), ON, MINUTE);
       expect(first).toMatchObject({ condition: 'held-needs-rebuild', next: { action: 'resend-continuation' } });
-      // Once that never helped, a laptop with a running agent is the owner's to rebuild, never the supervisor's.
+      // Once that never helped, a laptop with a running agent is rebuilt between that agent's turns, and only then.
       const spent = tried('resend-continuation', SUPERVISOR_POLICY.ladder['resend-continuation'].maxAttempts, 0);
       const after = assessEmployee(leaf, since(0, 'code:' + code, { attempts: spent }), ON, 99 * MINUTE);
       expect(after.next.action).toBeNull();
-      expect(after.needsHuman).toContain('confirmDiscardRunning');
+      expect(after.needsHuman).toBeUndefined();
+      const working = { ...leaf, session: { ...leaf.session, turn: 'working' as const } };
+      expect(assessEmployee(working, since(0, 'code:' + code, { attempts: spent }), ON, 99 * MINUTE).next).toMatchObject({
+        action: null,
+        waitingFor: "the agent's current turn to end",
+      });
+      const idle = { ...leaf, session: { ...leaf.session, turn: 'idle' as const, idleSince: 90 * MINUTE } };
+      expect(assessEmployee(idle, since(0, 'code:' + code, { attempts: spent }), ON, 99 * MINUTE).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['agent-between-turns', 'laptop-held'],
+      });
     }
   );
 
@@ -961,7 +1000,8 @@ describe('employee supervisor: a set-up made for an image the office no longer u
     const history = refused(30_000, CODE);
     const occupied = assessEmployee(outdated('running'), history, ON, 5 * MINUTE);
     expect(occupied.next.action).toBeNull();
-    expect(occupied.needsHuman).toContain('confirmDiscardRunning');
+    expect(occupied.next.waitingFor).toMatch(/^a reading of the agent's terminal/);
+    expect(occupied.needsHuman).toBeUndefined();
     const unread = assessEmployee(outdated('unknown'), history, ON, 5 * MINUTE);
     expect(unread.next).toMatchObject({ action: null, waitingFor: 'a confirmed read of what is running in the laptop' });
   });
@@ -1049,6 +1089,8 @@ describe('employee supervisor: a terminal the office can never type into again',
   const refusedOnce = (patch: Partial<SupervisorHistory> = {}) =>
     recordSupervisorAttempt(since(T0, FINGERPRINT, patch), 'reconnect-viewer', T0 + 45_000, 'refused', 'start-unconfirmed');
   const at = (minutes: number) => T0 + minutes * MINUTE;
+  /** A time as the policy writes it into a sentence. */
+  const stamp = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
 
   it('says what is wrong in one sentence and keeps the code and the clock of the lost terminal', () => {
     expect(classifyEmployee(heldInput())).toEqual({
@@ -1081,9 +1123,10 @@ describe('employee supervisor: a terminal the office can never type into again',
     const plain = assessEmployee(lost(), refusedOnce(), ON, at(1));
     expect(plain.next).toMatchObject({ action: 'reconnect-viewer', at: T0 + 45_000 + 30_000, preconditions: [] });
     const spent = assessEmployee(lost(), since(T0, FINGERPRINT, { attempts: tried('reconnect-viewer', 6, T0) }), ON, at(60));
-    expect(spent.next.action).toBeNull();
-    expect(spent.needsHuman).toMatch(/could not reconnect the terminal/);
+    expect(spent.next).toMatchObject({ action: null, at: T0 + 6 * 60 * MINUTE });
+    expect(spent.needsHuman).toBeUndefined();
     // Not even while what the pane shows was reported for some other reason.
+    expect(classifyEmployee(lost({ session: { turn: 'idle', idleSince: T0 } })).condition).toBe('viewer-lost');
     const stray = assessEmployee(lost({ session: { turn: 'idle', idleSince: T0 } }), refusedOnce(), ON, at(60));
     expect(stray.next.action).toBe('reconnect-viewer');
   });
@@ -1123,6 +1166,7 @@ describe('employee supervisor: a terminal the office can never type into again',
     const left = (now: number) => assessEmployee(heldInput({ background: true }), refusedOnce(), ON, now);
     expect(left(at(10)).next).toEqual({
       action: null,
+      at: at(30),
       waitingFor: 'the work the agent left running to finish',
       preconditions: [],
     });
@@ -1136,28 +1180,68 @@ describe('employee supervisor: a terminal the office can never type into again',
   });
 
   it('never takes a pane it is not reading for an idle one', () => {
-    const waits = (session: Patch['session']) => assessEmployee(heldInput(session), refusedOnce(), ON, at(10)).next;
-    const unread = { action: null, waitingFor: "a reading of the agent's terminal", preconditions: [] };
+    // An agent runs in the laptop, as a read inside it said, and the office has no reading of its pane.
+    const waits = (session: Patch['session'], now = at(10)) =>
+      assessEmployee(heldInput(session, { provider: 'running' }), refusedOnce(), ON, now).next;
+    const unread = {
+      action: null,
+      at: at(120),
+      waitingFor: `a reading of the agent's terminal; if there is still none, the laptop is rebuilt at ${stamp(at(120))}`,
+      preconditions: [],
+    };
     expect(waits({ turn: 'unknown', idleSince: undefined })).toEqual(unread);
     expect(waits({ turn: undefined, idleSince: undefined })).toEqual(unread);
-    // Idle, but nothing says since when.
-    expect(waits({ idleSince: undefined })).toMatchObject({ action: null, waitingFor: expect.stringMatching(/stay quiet/) });
+    // Idle, but nothing says since when: that is no reading either.
+    expect(waits({ idleSince: undefined })).toEqual(unread);
+    expect(waits({ turn: 'unknown', idleSince: undefined }, at(120) - 1)).toEqual(unread);
   });
 
-  it('tells a person when the turn has not ended after thirty minutes, and still rebuilds once it has', () => {
+  it('asks what runs in a laptop whose pane it cannot read, and rebuilds an empty one at once', () => {
+    const blind = (laptop: Patch['laptop'] = {}) =>
+      assessEmployee(heldInput({ turn: 'unknown', idleSince: undefined }, laptop), refusedOnce(), ON, at(10));
+    // The read inside the laptop is asked for first.
+    expect(blind().next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
+    // Nothing runs there: nothing can be lost, and nothing more has to be proved.
+    for (const provider of ['exited', 'absent'] as const)
+      expect(blind({ provider, poolAlive: true }).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+    // A finished laptop that is stopped: the home its replacement would be bound to is read first.
+    expect(blind({ provider: 'no-laptop', poolAlive: true }).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['stored-home'],
+    });
+    // An agent runs there, or the read cannot say: unknown is never taken for empty.
+    for (const provider of ['running', 'unknown'] as const) expect(blind({ provider }).next.action).toBeNull();
+  });
+
+  it('rebuilds a laptop whose pane cannot be read two hours after the problem was first seen', () => {
+    const blind = (now: number, session: Patch['session'] = { turn: 'unknown', idleSince: undefined }) =>
+      assessEmployee(heldInput(session, { provider: 'running' }), refusedOnce(), ON, now);
+    expect(blind(at(120) - 1).next.action).toBeNull();
+    expect(blind(at(120)).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['terminal-input-held', 'agent-unreadable'],
+    });
+    expect(blind(at(120)).needsHuman).toBeUndefined();
+    // A turn the office can see is never cut short by that bound, however long it lasts.
+    expect(blind(at(600), { turn: 'working', idleSince: undefined }).next).toEqual({
+      action: null,
+      waitingFor: "the agent's current turn to end",
+      preconditions: [],
+    });
+    expect(SUPERVISOR_POLICY.blindRebuildMs).toBe(120 * MINUTE);
+  });
+
+  it('asks nobody when the turn has not ended after thirty minutes, and rebuilds once it has', () => {
     const working = heldInput({ turn: 'working', idleSince: undefined });
-    expect(assessEmployee(working, refusedOnce(), ON, at(30) - 1).needsHuman).toBeUndefined();
-    const overdue = assessEmployee(working, refusedOnce(), ON, at(30));
-    expect(overdue.next).toEqual({ action: null, preconditions: [] });
-    expect(overdue.needsHuman).toBe(
-      "The office rebuilds this laptop only after the agent's current turn has ended, and after 30 minutes it still " +
-        'cannot see that it has. It goes on waiting and rebuilds as soon as the turn ends. To rebuild now instead: POST ' +
-        '/api/company/employees/:id/docker-rebuild/preview, then /apply with confirmDiscardRunning (that ends whatever ' +
-        'the agent is doing), then continue it.'
-    );
-    // The same is said of a pane nobody reads, and of one that never stays quiet.
-    for (const session of [{ turn: 'unknown' as const, idleSince: undefined }, { idleSince: at(89) }])
-      expect(assessEmployee(heldInput(session), refusedOnce(), ON, at(90)).needsHuman).toMatch(/cannot see that it has/);
+    for (const now of [at(30) - 1, at(30), at(90)]) {
+      const waiting = assessEmployee(working, refusedOnce(), ON, now);
+      expect(waiting.next).toEqual({ action: null, waitingFor: "the agent's current turn to end", preconditions: [] });
+      expect(waiting.needsHuman).toBeUndefined();
+    }
+    // A pane that never stays quiet is waited for in the same way.
+    const restless = assessEmployee(heldInput({ idleSince: at(89) }), refusedOnce(), ON, at(90));
+    expect(restless.next).toMatchObject({ action: null, waitingFor: expect.stringMatching(/stay quiet/) });
+    expect(restless.needsHuman).toBeUndefined();
     // Hours later the turn ends: the office rebuilds on its own.
     const ended = assessEmployee(heldInput({ idleSince: at(200) }), refusedOnce(), ON, at(203));
     expect(ended.next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
@@ -1188,16 +1272,18 @@ describe('employee supervisor: a terminal the office can never type into again',
     expect(noLayout.next.action).toBeNull();
     expect(noLayout.needsHuman).toMatch(/No owner-approved laptop layout.*confirmDiscardRunning/);
     const today = assessEmployee(heldInput(), refusedOnce({ rebuilds: [T0 - 60 * MINUTE, T0 - 30 * MINUTE] }), ON, at(10));
-    expect(today.next.action).toBeNull();
-    expect(today.needsHuman).toMatch(/already rebuilt this laptop 2 times today.*confirmDiscardRunning/);
+    expect(today.next).toMatchObject({ action: null, at: T0 + 23 * 60 * MINUTE });
+    expect(today.next.waitingFor).toMatch(/^the daily limit on rebuilds of one laptop \(2\)/);
+    expect(today.needsHuman).toBeUndefined();
     // Fifteen minutes between two rebuilds, and two per episode.
     const once = recordSupervisorAttempt(refusedOnce(), 'rebuild-laptop', at(3), 'refused', 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED');
     expect(assessEmployee(heldInput(), once, ON, at(4)).next).toMatchObject({ action: 'rebuild-laptop', at: at(18) });
     const twice = recordSupervisorAttempt(once, 'rebuild-laptop', at(18), 'refused', 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED');
     expect(assessEmployee(heldInput(), twice, ON, at(20)).next).toMatchObject({ action: null, waitingFor: 'the outcome of the last attempt' });
     const spent = assessEmployee(heldInput(), twice, ON, at(60));
-    expect(spent.next.action).toBeNull();
-    expect(spent.needsHuman).toMatch(/^The office could not rebuild the laptop on its own\. Rebuild the laptop: .*confirmDiscardRunning/);
+    expect(spent.next).toMatchObject({ action: null, at: at(18) + 6 * 60 * MINUTE });
+    expect(spent.next.waitingFor).toMatch(/^the next round of repair steps, which starts at/);
+    expect(spent.needsHuman).toBeUndefined();
     expect(assessEmployee({ ...heldInput(), busy: 'laptop-operation' }, refusedOnce(), ON, at(10)).next).toMatchObject({
       action: null,
       waitingFor: 'another laptop operation that is running',
@@ -1215,7 +1301,7 @@ describe('employee supervisor: a terminal the office can never type into again',
     expect(assessEmployee(heldInput({ idleSince: at(5) }), given, ON, at(7)).next).toMatchObject({ action: 'rebuild-laptop', at: at(3) });
   });
 
-  it('opens the exception for nothing else: a held input beside another problem keeps the ordinary rule', () => {
+  it('judges a held input beside another problem by that problem: the rule between turns, and its own proofs', () => {
     const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
     const result = assessEmployee(
       { ...failed, session: { ...failed.session, inputHeld: true, turn: 'idle', idleSince: 0 }, laptop: { ...failed.laptop, provider: 'running' } },
@@ -1223,8 +1309,8 @@ describe('employee supervisor: a terminal the office can never type into again',
       ON,
       at(60)
     );
-    expect(result.next.action).toBeNull();
-    expect(result.needsHuman).toMatch(/would discard its conversation.*That needs the owner/);
+    expect(result.next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['agent-between-turns', 'laptop-held'] });
+    expect(result.needsHuman).toBeUndefined();
     // And the steps of this one path run from the least to the most destructive, the repair behind the switch.
     expect(SUPERVISOR_HELD_INPUT_PATH).toEqual(['reconnect-viewer', 'rebuild-laptop']);
     expect(SUPERVISOR_HELD_INPUT_PATH.map((action) => SUPERVISOR_POLICY.ladder[action].tier)).toEqual(['retry', 'repair']);
@@ -1289,6 +1375,1078 @@ describe('employee supervisor: a terminal the office can never type into again',
   });
 });
 
+describe('employee supervisor: an agent parked on a start-up screen the office could not answer', () => {
+  const stuck = (patch: Partial<SupervisorObservation['session']> = {}, label = "Claude's theme chooser") =>
+    observed({
+      session: {
+        startupScreen: { label, kind: 'first-run', answering: false, proof: 'launch' },
+        turn: 'idle',
+        idleSince: 0,
+        ...patch,
+      },
+    });
+  const seen = (at: number, input = stuck()) => since(at, classifyEmployee(input).fingerprint);
+  const RELAUNCH: SupervisorFlags = { ...ON, relaunchAvailable: true };
+
+  it('is a condition of its own with a path, and is never left to the owner', () => {
+    const result = classifyEmployee(stuck());
+    expect(result).toMatchObject({
+      condition: 'stuck-first-run-screen',
+      code: 'first-run-screen',
+      sentence: "Stan is stuck at Claude's theme chooser, which the office could not answer.",
+    });
+    expect(result.needsHuman).toBeUndefined();
+    expect(SUPERVISOR_PATHS['stuck-first-run-screen']).toEqual(['relaunch-provider', 'rebuild-laptop']);
+    // A screen the table does not know at all is the same condition, under the name the terminal gives it.
+    expect(classifyEmployee(stuck({}, 'a start-up screen the office does not know'))).toMatchObject({
+      condition: 'stuck-first-run-screen',
+      sentence: 'Stan is stuck at a start-up screen the office does not know, which the office could not answer.',
+    });
+  });
+
+  it('is rebuilt three minutes after it was first seen, on proof that the agent is parked', () => {
+    expect(assessEmployee(stuck(), seen(MINUTE), ON, 3 * MINUTE).next).toEqual({
+      action: 'rebuild-laptop',
+      at: 4 * MINUTE,
+      preconditions: ['agent-parked-at-screen'],
+    });
+    // What runs in the laptop is not asked: an agent does. The proof is the pane, read again by the driver and the step.
+    expect(assessEmployee(stuck(), seen(MINUTE), ON, 10 * MINUTE).next.preconditions).not.toContain('no-agent-running');
+  });
+
+  it('is relaunched inside its laptop first where the office can do that', () => {
+    expect(assessEmployee(stuck(), seen(MINUTE), RELAUNCH, 3 * MINUTE).next).toEqual({
+      action: 'relaunch-provider',
+      at: MINUTE + 30_000,
+      preconditions: ['agent-parked-at-screen'],
+    });
+    const relaunched = { ...seen(MINUTE), attempts: tried('relaunch-provider', 2, 5 * MINUTE) };
+    expect(assessEmployee(stuck({ idleSince: 6 * MINUTE }), relaunched, RELAUNCH, 10 * MINUTE).next.action).toBe('rebuild-laptop');
+  });
+
+  // The waits are those of every laptop an agent may run in (`betweenTurnsGate`): one rule, not a second one.
+  it.each([
+    ['the pane is still changing', { turn: 'working' as const, idleSince: undefined }, "the agent's current turn to end"],
+    ['the pane went quiet a minute ago', { idleSince: 9 * MINUTE }, "the agent's terminal to stay quiet a little longer"],
+    ['the pane says work was left running', { background: true }, 'the work the agent left running to finish'],
+  ])('waits and asks nobody while %s', (_title, session, waitingFor) => {
+    for (const flags of [ON, RELAUNCH]) {
+      const result = assessEmployee(stuck(session), seen(MINUTE), flags, 10 * MINUTE);
+      expect(result.next).toMatchObject({ action: null, waitingFor });
+      expect(result.needsHuman).toBeUndefined();
+    }
+  });
+
+  it('asks what runs in the laptop when the pane shows no turn at all, and then waits the long wait of an unread pane', () => {
+    const unread = stuck({ turn: 'unknown', idleSince: undefined });
+    // First a read inside the laptop: an empty laptop has nothing to lose.
+    expect(assessEmployee(unread, seen(MINUTE), ON, 10 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['no-agent-running'],
+    });
+    const empty = { ...unread, laptop: { ...unread.laptop, provider: 'exited' as const } };
+    expect(assessEmployee(empty, seen(MINUTE), ON, 10 * MINUTE).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+    // An agent runs there and the pane cannot be read: two hours, and the screen is still what the step proves.
+    const occupied = { ...unread, laptop: { ...unread.laptop, provider: 'running' as const } };
+    const waiting = assessEmployee(occupied, seen(MINUTE), ON, 10 * MINUTE);
+    expect(waiting.next).toMatchObject({ action: null, at: MINUTE + SUPERVISOR_POLICY.blindRebuildMs });
+    expect(waiting.needsHuman).toBeUndefined();
+    expect(assessEmployee(occupied, seen(MINUTE), ON, MINUTE + SUPERVISOR_POLICY.blindRebuildMs).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['agent-parked-at-screen', 'agent-unreadable'],
+    });
+    // A relaunch never goes ahead on a read of the laptop alone.
+    expect(assessEmployee(unread, seen(MINUTE), RELAUNCH, 10 * MINUTE).next).toMatchObject({
+      action: null,
+      waitingFor: "a reading of the agent's terminal",
+    });
+  });
+
+  it('is never taken for a laptop that has been starting too long while the office is still answering the screen', () => {
+    const answering = observed({ session: { startupScreen: { label: "Claude's theme chooser", kind: 'first-run', answering: true, proof: 'widget' }, turn: 'idle', idleSince: 0 } });
+    // The laptop was starting for twenty minutes before the screen showed: the stalled rule would be due.
+    const history = { ...EMPTY_SUPERVISOR_HISTORY, transitSince: MINUTE };
+    const result = assessEmployee(answering, history, RELAUNCH, 30 * MINUTE);
+    expect(result).toMatchObject({ condition: 'waiting-first-run-screen', next: { action: null, waitingFor: 'the office to finish answering the start-up screen' } });
+    expect(result.needsHuman).toBeUndefined();
+    // And a screen the office gave up on is its own problem with its own clock, not a stalled start.
+    const stuckNow = assessEmployee(stuck(), rollSupervisorHistory(history, classifyEmployee(stuck()), 30 * MINUTE), ON, 30 * MINUTE);
+    expect(stuckNow).toMatchObject({ condition: 'stuck-first-run-screen', next: { action: 'rebuild-laptop', at: 33 * MINUTE, preconditions: ['agent-parked-at-screen'] } });
+  });
+
+  it('takes no step for a screen without proof, or beside a plan move', () => {
+    const words = observed({ session: { startupScreen: { label: "Claude's theme chooser", kind: 'first-run', answering: false }, turn: 'idle', idleSince: 0 } });
+    const moving = { ...stuck(), move: { id: 'm', docker: true, phase: 'approval', busy: false, allowedActions: [] } };
+    for (const input of [words, moving])
+      for (const now of [MINUTE, 10 * MINUTE, 120 * MINUTE])
+        expect(assessEmployee(input, seen(MINUTE, input), RELAUNCH, now).next.action).toBeNull();
+  });
+
+  it('never says to answer it in a terminal, whatever was tried', () => {
+    let history = seen(MINUTE);
+    const said: string[] = [];
+    for (let now = MINUTE; now <= 8 * 60 * MINUTE; now += MINUTE) {
+      history = rollSupervisorHistory(history, classifyEmployee(stuck()), now);
+      const result = assessEmployee(stuck({ idleSince: now - 5 * MINUTE }), history, ON, now);
+      if (result.needsHuman) said.push(result.needsHuman);
+      if (result.next.action && (result.next.at ?? 0) <= now)
+        history = recordSupervisorAttempt(history, result.next.action, now, 'refused', 'DOCKER_REPROVISION_SOURCE_UNCONFIRMED');
+    }
+    // Nobody is asked for anything at any point, and the wait between rounds names when the next one starts.
+    expect(said).toEqual([]);
+    const between = assessEmployee(stuck({ idleSince: 0 }), history, ON, history.lastAction!.at + 30 * MINUTE);
+    expect(between.next.waitingFor).toMatch(/the next round of repair steps, which starts at /);
+    expect(between.next.at).toBe(ladderRestartAt(history));
+    // Two rebuilds, six hours, and two more: the steps are given back, the screen is never given up on.
+    expect(history.attempts['rebuild-laptop']!.count).toBeGreaterThanOrEqual(1);
+    expect(history.lastAction!.at).toBeGreaterThan(6 * 60 * MINUTE);
+  });
+
+  it('is still answered by the office while its scan is open, and that is no problem to work on', () => {
+    const answering = observed({ session: { startupScreen: { label: "Claude's API key question", kind: 'first-run', answering: true, proof: 'widget' } } });
+    expect(classifyEmployee(answering)).toMatchObject({ condition: 'waiting-first-run-screen', fingerprint: '' });
+    expect(assessEmployee(answering, EMPTY_SUPERVISOR_HISTORY, RELAUNCH, 10 * MINUTE).next.action).toBeNull();
+  });
+});
+
+describe('employee supervisor: reading a parked start-up screen off the office terminal', () => {
+  const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false, shown: 'widget' as const };
+  const terminal = (patch: Partial<SupervisedScreenTerminal> = {}): SupervisedScreenTerminal => ({
+    pid: 7,
+    status: 'idle',
+    runtimeHealth: 'healthy',
+    isWorking: false,
+    lastActivityAt: 5000,
+    lastPromptTime: 0,
+    paneStartedAt: 1000,
+    startupScreen: () => screen,
+    ...patch,
+  });
+
+  it('reports the screen with its proof, and leaves the turn to the one reading every laptop is judged by', () => {
+    expect(readParkedScreen(terminal())).toEqual({
+      startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'widget' },
+    });
+    expect(readParkedScreen(terminal({ startupScreen: () => ({ ...screen, shown: 'launch' }) }))).toEqual({
+      startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'launch' },
+    });
+    // What the pane shows of a turn is `readTerminalTurn`'s to say, for a parked screen as for a held input.
+    expect(readTerminalTurn(terminal())).toEqual({ turn: 'idle', idleSince: 5000 });
+  });
+
+  it.each([
+    ['there is no terminal', undefined],
+    ['the terminal cannot name a screen', terminal({ startupScreen: undefined })],
+    ['the pane shows no start-up screen', terminal({ startupScreen: () => null })],
+    ['the screen is known only by its words', terminal({ startupScreen: () => ({ ...screen, shown: 'words' }) })],
+    ['the reading does not say how it is known', terminal({ startupScreen: () => ({ label: 'x', kind: 'credential', answering: false }) })],
+    ['the pane cannot be read', terminal({ startupScreen: () => { throw new Error('tmux gone'); } })],
+    ['the terminal has no process', terminal({ pid: null })],
+    ['the terminal lost its client', terminal({ runtimeHealth: 'disconnected' })],
+    ['the terminal is being reconnected', terminal({ viewerInputHeld: true })],
+    ['a start or stop of the pane is running', terminal({ paneLifecycleInFlight: true })],
+    ['the pane exited', terminal({ paneExit: { code: 0 } })],
+    ['the agent is working', terminal({ status: 'busy', isWorking: true })],
+    ['the office does not track its work', terminal({ isWorking: undefined })],
+  ])('reports nothing when %s', (_title, input) => {
+    expect(readParkedScreen(input)).toEqual({});
+  });
+
+  it('does not read the pane at all while the agent works', () => {
+    let reads = 0;
+    const counting = terminal({ status: 'busy', startupScreen: () => (reads++, screen) });
+    readParkedScreen(counting);
+    expect(reads).toBe(0);
+  });
+});
+
+describe('employee supervisor: a plan move that stopped part-way never waits for the owner', () => {
+  const START = 1_000 * MINUTE;
+  const signInScreen = describeStartupScreen("Stan's new session", {
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+  });
+  const decisionScreen = describeStartupScreen("Stan's new session", {
+    label: "Claude's usage-credit offer",
+    kind: 'decision',
+    answering: false,
+  });
+  /**
+   * Tick every 30 s as the office does. Every step ends as `outcome`; a move that was closed is gone at the next
+   * tick. Returns each step with the minute it ran at, and every sentence that asked for a person on the way.
+   */
+  function timeline(seen: SupervisorObservation, minutes: number, outcome: 'done' | 'refused' = 'refused') {
+    let history = EMPTY_SUPERVISOR_HISTORY,
+      now = START,
+      current = seen;
+    const actions: Array<[number, string]> = [],
+      asked: string[] = [];
+    for (; now <= START + minutes * MINUTE; now += 30_000) {
+      history = rollSupervisorHistory(history, classifyEmployee(current), now);
+      const result = assessEmployee(current, history, ON, now);
+      if (result.needsHuman) asked.push(result.needsHuman);
+      const next = result.next;
+      if (!next.action || (next.at ?? 0) > now) continue;
+      actions.push([(now - START) / MINUTE, next.action]);
+      const closed = next.action === 'abandon-move' && outcome === 'done';
+      history = recordSupervisorAttempt(history, next.action, now, closed || next.action !== 'abandon-move' ? outcome : 'refused');
+      if (closed) current = observed();
+    }
+    return { actions, asked, history, condition: classifyEmployee(current).condition };
+  }
+  const continues: Array<[number, string]> = [
+    [1, 'continue-move'],
+    [3, 'continue-move'],
+    [8, 'continue-move'],
+  ];
+
+  it('asks nobody for anything, whatever stopped the move and whatever its record offers', () => {
+    const cases: SupervisorObservation[] = [
+      move('x', { docker: false, allowedActions: ['settle'] }),
+      move(signInScreen),
+      { ...move(signInScreen), planSignedIn: true },
+      move(decisionScreen),
+      move('x', { allowedActions: [] }),
+      move('x', { allowedActions: ['continue-original'] }),
+      move('x', { allowedActions: ['abandon'] }),
+      move(undefined),
+      move('The original Docker journal changed'),
+      move('DOCKER_CONTINUATION_BUSY'),
+      move('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED'),
+      move('DOCKER_RESOURCE_HELPER_FAILED'),
+      move(new PlanMoveComposerNotReady().message),
+    ];
+    for (const seen of cases) {
+      const first = classifyEmployee(seen);
+      expect(first, JSON.stringify(seen.move)).toMatchObject({ condition: 'move-held-retryable' });
+      expect(first.needsHuman).toBeUndefined();
+      const run = timeline(seen, 45, 'done');
+      expect(run.asked, JSON.stringify(seen.move)).toEqual([]);
+      expect(run.actions.at(-1)?.[1], JSON.stringify(seen.move)).toBe('abandon-move');
+      expect(run.condition).toBe('healthy');
+    }
+  });
+
+  it('closes a move of the retired runtime after the fifteen minutes, and never continues it', () => {
+    const retired = move('The server restarted during this move; inspect both sessions before retrying', {
+      docker: false,
+      allowedActions: ['settle'],
+    });
+    expect(classifyEmployee(retired)).toMatchObject({ condition: 'move-held-retryable', code: 'move-retired' });
+    expect(timeline(retired, 30, 'done').actions).toEqual([[15, 'abandon-move']]);
+    // Even a record that claims to offer a continue is not continued: only a laptop move has one.
+    const odd = move('x', { docker: false, allowedActions: ['continue-original'] });
+    expect(timeline(odd, 30, 'done').actions).toEqual([[15, 'abandon-move']]);
+  });
+
+  it('waits thirty minutes for a plan that is not signed in, spends no continue on it, and then abandons', () => {
+    const waiting = move(signInScreen);
+    expect(classifyEmployee(waiting)).toMatchObject({ condition: 'move-held-retryable', code: 'move-sign-in' });
+    const history = since(START, classifyEmployee(waiting).fingerprint);
+    const early = assessEmployee(waiting, history, ON, START + 29 * MINUTE);
+    expect(early.next).toMatchObject({ action: null, waitingFor: "the move's new plan to be signed in at the office" });
+    expect(early.needsHuman).toBeUndefined();
+    expect(assessEmployee(waiting, history, ON, START + 30 * MINUTE)).toMatchObject({
+      condition: 'move-held-dead-end',
+      next: { action: 'abandon-move' },
+    });
+    expect(timeline(waiting, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+    // The office does not know whether the plan is signed in: the same wait and the same end.
+    expect(timeline({ ...waiting, planSignedIn: undefined }, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+  });
+
+  it('continues a move at a sign-in screen as soon as the plan is signed in, and abandons it when that does not help', () => {
+    const signed = { ...move(signInScreen), planSignedIn: true };
+    const history = since(START, classifyEmployee(signed).fingerprint);
+    expect(assessEmployee(signed, history, ON, START + 20 * MINUTE).next.action).toBe('continue-move');
+    expect(timeline(signed, 45).actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
+  });
+
+  it('does not abandon while a sign-in the office placed is running or has just been placed', () => {
+    const waiting = move(signInScreen);
+    const fingerprint = classifyEmployee(waiting).fingerprint;
+    const at = START + 40 * MINUTE;
+    const placing = (outcome: 'issued' | 'done' | 'refused', ago: number) =>
+      assessEmployee(
+        waiting,
+        since(START, fingerprint, { lastAction: { action: 'replace-sign-in', at: at - ago, outcome } }),
+        ON,
+        at
+      ).next;
+    expect(placing('issued', 10 * MINUTE)).toMatchObject({
+      action: null,
+      waitingFor: 'the sign-in the office placed to take effect',
+    });
+    expect(placing('done', MINUTE).action).toBeNull();
+    // Its watch time has passed, or nothing was placed: the move is closed.
+    expect(placing('done', 3 * MINUTE).action).toBe('abandon-move');
+    expect(placing('refused', MINUTE).action).toBe('abandon-move');
+  });
+
+  it('continues a move at a decision screen three times and then abandons it', () => {
+    const decision = move(decisionScreen);
+    expect(classifyEmployee(decision)).toMatchObject({ condition: 'move-held-retryable', code: 'move-owner-decision' });
+    expect(timeline(decision, 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
+  });
+
+  it('closes a move that offers no continue step without trying one', () => {
+    for (const allowedActions of [[], ['abandon']])
+      expect(timeline(move('x', { allowedActions }), 45, 'done').actions).toEqual([[15, 'abandon-move']]);
+  });
+
+  it('asks the service to abandon even when the record does not offer it, and spends an attempt on the refusal', () => {
+    const run = timeline(move('x', { allowedActions: ['continue-original'] }), 45);
+    expect(run.actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
+    expect(run.history.attempts['abandon-move']).toMatchObject({ count: 2 });
+  });
+
+  it('continues an error it does not recognize as often as any other and then abandons the move', () => {
+    for (const error of [undefined, 'Docker move unavailable', 'The original Docker journal changed'])
+      expect(timeline(move(error), 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
+  });
+
+  it('gives a move that is held by something outside itself thirty minutes before it abandons', () => {
+    for (const error of ['DOCKER_CONTINUATION_BUSY', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']) {
+      const outside = move(error);
+      expect(timeline(outside, 45, 'done').actions).toEqual([...continues, [30, 'abandon-move']]);
+      const waiting = assessEmployee(
+        outside,
+        since(START, classifyEmployee(outside).fingerprint, { attempts: tried('continue-move', 3, START + 8 * MINUTE) }),
+        ON,
+        START + 20 * MINUTE
+      );
+      expect(waiting.next.action).toBeNull();
+      expect(waiting.next.waitingFor).toBeTruthy();
+      expect(waiting.needsHuman).toBeUndefined();
+    }
+  });
+
+  it('asks nobody once both rungs are used up, and says when the next round starts', () => {
+    const stuck = move('x');
+    const used = since(START, classifyEmployee(stuck).fingerprint, {
+      attempts: { ...tried('continue-move', 3, START), ...tried('abandon-move', 2, START + 20 * MINUTE) },
+    });
+    const result = assessEmployee(stuck, used, ON, START + 60 * MINUTE);
+    expect(result.next).toMatchObject({ action: null, at: START + 20 * MINUTE + 6 * 60 * MINUTE });
+    expect(result.next.waitingFor).toMatch(/the next round of repair steps/);
+    expect(result.needsHuman).toBeUndefined();
+    // At that time the counts are cleared and the same move is continued again, then abandoned.
+    const next = START + 20 * MINUTE + 6 * 60 * MINUTE;
+    const rolled = rollSupervisorHistory(used, classifyEmployee(stuck), next);
+    expect(rolled.attempts).toEqual({});
+    expect(rolled.since).toBe(START);
+    expect(assessEmployee(stuck, rolled, ON, next).next).toMatchObject({ action: 'continue-move' });
+  });
+
+  it('goes round again every six hours while the service refuses to close the move, and never asks anyone', () => {
+    const run = timeline(move('The original Docker journal changed'), 13 * 60);
+    const round: Array<[number, string]> = [...continues, [15, 'abandon-move'], [20, 'abandon-move']];
+    const later = (from: number): Array<[number, string]> => [
+      [from, 'continue-move'],
+      [from + 2, 'continue-move'],
+      [from + 7, 'continue-move'],
+      [from + 10, 'abandon-move'],
+      [from + 15, 'abandon-move'],
+    ];
+    // The second round starts six hours after the first one's last attempt, the third six hours after the second's.
+    expect(run.actions).toEqual([...round, ...later(20 + 360), ...later(20 + 360 + 15 + 360)]);
+    expect(run.asked).toEqual([]);
+  });
+
+  it('closes the move in a later round when the service accepts then, and closes it only once', () => {
+    let history = EMPTY_SUPERVISOR_HISTORY,
+      current = move('x');
+    const closes: number[] = [];
+    for (let now = START; now <= START + 8 * 60 * MINUTE; now += 30_000) {
+      history = rollSupervisorHistory(history, classifyEmployee(current), now);
+      const next = assessEmployee(current, history, ON, now).next;
+      if (!next.action || (next.at ?? 0) > now) continue;
+      // The first round is refused throughout; the second round's abandon is accepted.
+      const accepted = next.action === 'abandon-move' && now > START + 6 * 60 * MINUTE;
+      history = recordSupervisorAttempt(history, next.action, now, accepted ? 'done' : 'refused');
+      if (accepted) {
+        closes.push((now - START) / MINUTE);
+        current = observed();
+      }
+    }
+    expect(closes).toEqual([390]);
+    expect(classifyEmployee(current).condition).toBe('healthy');
+  });
+
+  it('starts the same ladder again once its attempt counts are cleared, for the same move and the same error', () => {
+    const stuck = move('x');
+    const cleared = since(START, classifyEmployee(stuck).fingerprint);
+    // The problem is as old as before; only the counts are gone.
+    expect(assessEmployee(stuck, cleared, ON, START + 6 * 60 * MINUTE).next).toMatchObject({
+      action: 'continue-move',
+      at: START + MINUTE,
+    });
+    const again = { ...cleared, attempts: tried('continue-move', 3, START + 6 * 60 * MINUTE) };
+    expect(assessEmployee(stuck, again, ON, START + 6 * 60 * MINUTE + 4 * MINUTE).next).toMatchObject({
+      action: 'abandon-move',
+      at: START + 15 * MINUTE,
+    });
+  });
+
+  it('leaves both steps to the owner’s switches', () => {
+    const stuck = move('x');
+    const history = since(START, classifyEmployee(stuck).fingerprint, { attempts: tried('continue-move', 3, START) });
+    const off = assessEmployee(stuck, history, { ...ON, autoRepair: false }, START + 60 * MINUTE);
+    expect(off.next.action).toBeNull();
+    expect(off.needsHuman).toMatch(/supervisorAutoRepair/);
+    expect(assessEmployee(stuck, since(START, 'x'), { ...ON, enabled: false }, START + 60 * MINUTE).next.action).toBeNull();
+  });
+
+  it('never acts beside a move that is working, and leaves a finished move alone', () => {
+    for (const patch of [{ busy: true }, { phase: 'checking' }, { phase: 'stopping' }]) {
+      const working = move('x', patch);
+      expect(classifyEmployee(working).condition).toBe('move-in-progress');
+      expect(assessEmployee(working, since(START, ''), ON, START + 600 * MINUTE).next.action).toBeNull();
+    }
+    for (const phase of ['completed', 'failed'])
+      expect(classifyEmployee(move('x', { phase })).condition).toBe('healthy');
+  });
+});
+
+describe('employee supervisor: no path ends for good', () => {
+  const HOUR = 60 * MINUTE;
+  /** A time as the policy writes it into a sentence. */
+  const stamp = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const FAILED = 'code:DOCKER_RESOURCE_HELPER_FAILED';
+  const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
+  const withLaptop = (base: SupervisorObservation, laptop: Patch['laptop'], session: Patch['session'] = {}) =>
+    ({ ...base, session: { ...base.session, ...session }, laptop: { ...base.laptop, ...laptop } }) as SupervisorObservation;
+  /** Nothing runs in the laptop and another laptop of the office does, so a rebuild has nothing left to prove. */
+  const empty = (base: SupervisorObservation) => withLaptop(base, { provider: 'exited', poolAlive: true });
+
+  describe('a ladder that has used every rung', () => {
+    const last = 40 * MINUTE;
+    const spent = since(0, FAILED, {
+      attempts: { ...tried('resend-continuation', 4, 10 * MINUTE), ...tried('rebuild-laptop', 2, last) },
+      rebuilds: [25 * MINUTE],
+    });
+
+    it('says when it starts again and asks nobody', () => {
+      expect(ladderRestartAt(spent)).toBe(last + 6 * HOUR);
+      expect(ladderRestartAt(EMPTY_SUPERVISOR_HISTORY)).toBeUndefined();
+      const waiting = assessEmployee(empty(failed), spent, ON, 2 * HOUR);
+      expect(waiting.next).toEqual({
+        action: null,
+        at: last + 6 * HOUR,
+        waitingFor: `the next round of repair steps, which starts at ${stamp(last + 6 * HOUR)}: this round's did not help`,
+        preconditions: [],
+      });
+      expect(waiting.needsHuman).toBeUndefined();
+      expect(SUPERVISOR_POLICY.ladderRestartMs).toBe(6 * HOUR);
+    });
+
+    it('starts again at that moment and not before, with the problem, its clock and the day’s rebuilds kept', () => {
+      const seen = classifyEmployee(empty(failed));
+      expect(rollSupervisorHistory(spent, seen, last + 6 * HOUR - 1).attempts).toEqual(spent.attempts);
+      const again = rollSupervisorHistory(spent, seen, last + 6 * HOUR);
+      expect(again).toMatchObject({ fingerprint: FAILED, since: 0, attempts: {}, rebuilds: [25 * MINUTE] });
+      expect(assessEmployee(empty(failed), again, ON, last + 6 * HOUR).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: [],
+      });
+    });
+
+    it('holds for every path, whoever owns its rungs: the rule lives in the history alone', () => {
+      const paths: Array<[SupervisorObservation, SupervisorAction[]]> = [
+        [observed({ laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' } } }), ['reconnect-viewer']],
+        [observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped' } }), ['start-continuation']],
+        [held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), ['relaunch-provider', 'rebuild-laptop']],
+        [move('DOCKER_RESOURCE_HELPER_FAILED'), ['continue-move', 'abandon-move']],
+        [
+          observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
+          ['replace-sign-in'],
+        ],
+      ];
+      for (const [seen, actions] of paths) {
+        const base = classifyEmployee(seen);
+        const attempts = Object.assign(
+          {},
+          ...actions.map((action) => tried(action, SUPERVISOR_POLICY.ladder[action].maxAttempts, HOUR))
+        ) as SupervisorHistory['attempts'];
+        const history = since(0, base.fingerprint, { attempts });
+        expect([base.condition, rollSupervisorHistory(history, base, 7 * HOUR - 1).attempts]).toEqual([base.condition, attempts]);
+        expect([base.condition, rollSupervisorHistory(history, base, 7 * HOUR).attempts]).toEqual([base.condition, {}]);
+      }
+    });
+
+    it('keeps the limit of rebuilds per day across rounds', () => {
+      const seen = classifyEmployee(empty(failed));
+      const twoToday = { ...spent, rebuilds: [25 * MINUTE, last] };
+      const again = rollSupervisorHistory(twoToday, seen, last + 6 * HOUR);
+      expect(again.attempts).toEqual({});
+      // A new round, but the day is not over: the rebuild waits for the limit, and says until when.
+      expect(assessEmployee(empty(failed), again, ON, last + 6 * HOUR).next).toMatchObject({
+        action: null,
+        at: 25 * MINUTE + 24 * HOUR,
+        waitingFor: expect.stringMatching(/^the daily limit on rebuilds of one laptop \(2\)/),
+      });
+    });
+  });
+
+  describe('the limit of rebuilds per day', () => {
+    it('is a pause: the next day the ladder goes on by itself', () => {
+      const today = since(0, FAILED, { rebuilds: [HOUR, 2 * HOUR] });
+      const paused = assessEmployee(empty(failed), today, ON, 3 * HOUR);
+      expect(paused.next).toEqual({
+        action: null,
+        at: 25 * HOUR,
+        waitingFor:
+          'the daily limit on rebuilds of one laptop (2): the earlier ones did not hold, and the next one may run at ' +
+          stamp(25 * HOUR),
+        preconditions: [],
+      });
+      expect(paused.needsHuman).toBeUndefined();
+      const tomorrow = rollSupervisorHistory(today, classifyEmployee(empty(failed)), 25 * HOUR);
+      expect(tomorrow.rebuilds).toEqual([2 * HOUR]);
+      expect(assessEmployee(empty(failed), tomorrow, ON, 25 * HOUR).next.action).toBe('rebuild-laptop');
+    });
+  });
+
+  describe('a laptop code the office does not recognize', () => {
+    const odd = held('DOCKER_CONTINUATION_SOMETHING_NEW');
+    const history = since(0, 'code:DOCKER_CONTINUATION_SOMETHING_NEW');
+
+    it('is watched for thirty minutes and asks nobody', () => {
+      const result = assessEmployee(odd, history, ON, 29 * MINUTE);
+      expect(result).toMatchObject({ condition: 'held-needs-rebuild', code: 'DOCKER_CONTINUATION_SOMETHING_NEW' });
+      expect(result.next).toEqual({
+        action: null,
+        at: 30 * MINUTE,
+        waitingFor: `the code to clear by itself; if it still stands, the laptop is treated as held at ${stamp(30 * MINUTE)}`,
+        preconditions: [],
+      });
+      expect(result.needsHuman).toBeUndefined();
+      // Not even a laptop that is known to be empty is rebuilt before that.
+      expect(assessEmployee(empty(odd), history, ON, 29 * MINUTE).next.action).toBeNull();
+      expect(SUPERVISOR_POLICY.unrecognizedAfterMs).toBe(30 * MINUTE);
+    });
+
+    it('is then a hold under every rule of a rebuild', () => {
+      expect(assessEmployee(odd, history, ON, 30 * MINUTE).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['no-agent-running'],
+      });
+      expect(assessEmployee(empty(odd), history, ON, 30 * MINUTE).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+      const working = withLaptop(odd, { provider: 'running' }, { turn: 'working' });
+      expect(assessEmployee(working, history, ON, 30 * HOUR).next).toMatchObject({
+        action: null,
+        waitingFor: "the agent's current turn to end",
+      });
+      const off = assessEmployee(empty(odd), history, { ...ON, autoRepair: false }, 30 * MINUTE);
+      expect(off.next.action).toBeNull();
+      expect(off.needsHuman).toMatch(/^Automatic repairs are switched off \(company setting supervisorAutoRepair\)\./);
+    });
+
+    it('is first answered with the request again when the laptop itself offers that', () => {
+      const offered = held('DOCKER_CONTINUATION_SOMETHING_NEW', { allowedActions: ['observe', 'continue'] });
+      expect(assessEmployee(offered, history, ON, MINUTE).next).toMatchObject({ action: 'resend-continuation', at: 20_000 });
+    });
+  });
+
+  describe('something the office did not start in the laptop terminal', () => {
+    const foreign = held('DOCKER_CONTINUATION_FOREIGN_PROVIDER');
+    const history = since(0, 'code:DOCKER_CONTINUATION_FOREIGN_PROVIDER');
+
+    it('is a hold the rebuild settles, asked of nobody', () => {
+      const result = assessEmployee(foreign, history, ON, 3 * MINUTE);
+      expect(result).toMatchObject({
+        condition: 'held-needs-rebuild',
+        next: { action: 'rebuild-laptop', at: 3 * MINUTE, preconditions: ['no-agent-running'] },
+      });
+      expect(result.needsHuman).toBeUndefined();
+      // What was left there has ended: nothing can be lost.
+      expect(assessEmployee(empty(foreign), history, ON, 3 * MINUTE).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+    });
+
+    it('is rebuilt between that process’s turns when the office can see its pane, and after two hours when it cannot', () => {
+      // First seen one second in: a problem with no clock at all is never called overdue.
+      const seen = since(1000, 'code:DOCKER_CONTINUATION_FOREIGN_PROVIDER');
+      const running = (session: Patch['session'], now: number) =>
+        assessEmployee(withLaptop(foreign, { provider: 'running' }, session), seen, ON, now).next;
+      expect(running({ turn: 'working' }, 50 * HOUR)).toMatchObject({ action: null, waitingFor: "the agent's current turn to end" });
+      expect(running({ turn: 'idle', idleSince: 9 * MINUTE }, 10 * MINUTE)).toMatchObject({ action: null });
+      expect(running({ turn: 'idle', idleSince: 8 * MINUTE }, 10 * MINUTE)).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['agent-between-turns', 'laptop-held'],
+      });
+      // The office never attached a terminal to what it did not start: there is no reading at all.
+      expect(running({}, 2 * HOUR)).toMatchObject({ action: null, at: 2 * HOUR + 1000 });
+      expect(running({}, 2 * HOUR + 1000)).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['laptop-held', 'agent-unreadable'],
+      });
+    });
+
+    it('still does not let a plan move be abandoned for it', () => {
+      expect(classifyMoveError('DOCKER_CONTINUATION_FOREIGN_PROVIDER')).toBe('owner');
+      expect(supervisorCodeKind('DOCKER_CONTINUATION_FOREIGN_PROVIDER')).toBe('owner');
+    });
+  });
+
+  describe('an office whose laptop configuration changed while it was running', () => {
+    const changed = held('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+
+    it('is a wait for the office’s own restart: no laptop step, no stall, nobody asked', () => {
+      const history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(changed), 0);
+      for (const now of [MINUTE, 16 * MINUTE, 30 * HOUR]) {
+        const result = assessEmployee(withLaptop(changed, { provider: 'exited', poolAlive: true }), history, ON, now);
+        expect(result).toMatchObject({ condition: 'starting', code: 'DOCKER_CONTINUATION_RUNTIME_CHANGED' });
+        expect(result.next).toEqual({
+          action: null,
+          waitingFor: 'the office to restart itself and read its laptop configuration again',
+          preconditions: [],
+        });
+        expect(result.needsHuman).toBeUndefined();
+      }
+    });
+  });
+
+  describe('a laptop that never finishes starting', () => {
+    const starting = held('DOCKER_CONTINUATION_BUSY');
+    const history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(starting), 0);
+
+    it('is sent its request again when it offers that, then rebuilt, counted from the fifteenth minute', () => {
+      expect(SUPERVISOR_STALLED_PATH).toEqual(['resend-continuation', 'rebuild-laptop']);
+      const offered = held('DOCKER_CONTINUATION_BUSY', { allowedActions: ['observe', 'continue'] });
+      expect(assessEmployee(offered, history, ON, 15 * MINUTE)).toMatchObject({
+        condition: 'starting',
+        next: { action: 'resend-continuation', at: 15 * MINUTE + 20_000 },
+      });
+      expect(assessEmployee(empty(starting), history, ON, 15 * MINUTE)).toMatchObject({
+        condition: 'held-needs-rebuild',
+        next: { action: 'rebuild-laptop', at: 18 * MINUTE, preconditions: [] },
+      });
+    });
+
+    it('is not rebuilt while it still becomes healthy in between', () => {
+      const healthy = rollSupervisorHistory(history, classifyEmployee(observed()), 10 * MINUTE);
+      const again = rollSupervisorHistory(healthy, classifyEmployee(starting), 11 * MINUTE);
+      expect(assessEmployee(starting, again, ON, 20 * MINUTE).next.action).toBeNull();
+    });
+  });
+
+  describe('an employee with no approved resource limits', () => {
+    const bare = (standing?: { enabled: boolean; limits: boolean; layout: boolean }) =>
+      observed({
+        session: { available: false },
+        laptop: { record: null, bound: false, restoration: undefined, policyApproved: false, ...(standing ? { standing } : {}) },
+      });
+    const history = since(0, 'no-policy');
+
+    it('is given the owner’s standing default, one minute after that was first seen', () => {
+      expect(SUPERVISOR_LIMITS_PATH).toEqual(['apply-standing-limits']);
+      const result = assessEmployee(bare({ enabled: true, limits: true, layout: false }), history, ON, 30_000);
+      expect(result).toMatchObject({
+        condition: 'laptop-not-started',
+        code: 'no-policy',
+        next: { action: 'apply-standing-limits', at: MINUTE, preconditions: [] },
+      });
+      expect(result.needsHuman).toBeUndefined();
+      // A set-up that reports the same thing takes the same path.
+      const reported = withLaptop(held('DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED'), {
+        policyApproved: false,
+        standing: { enabled: true, limits: true, layout: true },
+      });
+      expect(assessEmployee(reported, since(0, 'code:DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED'), ON, MINUTE).next.action).toBe(
+        'apply-standing-limits'
+      );
+    });
+
+    it('with limits in place, has its stopped laptop started by the next reading', () => {
+      const approved = observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped' } });
+      const seen = classifyEmployee(approved);
+      const next = rollSupervisorHistory(recordSupervisorAttempt(history, 'apply-standing-limits', MINUTE, 'done'), seen, 2 * MINUTE);
+      expect(assessEmployee(approved, next, ON, 3 * MINUTE).next.action).toBe('start-continuation');
+    });
+
+    it('names the owner’s switch when he switched the standing defaults off, and that is the only refusal', () => {
+      const off = assessEmployee(bare({ enabled: false, limits: true, layout: true }), history, ON, 5 * MINUTE);
+      expect(off.next.action).toBeNull();
+      expect(off.needsHuman).toBe(
+        'The standing defaults are switched off (company setting supervisorStandingDefaults). Approve the resource ' +
+          'limits: PUT /api/company/employees/:id/docker-policy, then continue the laptop.'
+      );
+      const repairsOff = assessEmployee(bare({ enabled: true, limits: true, layout: true }), history, { ...ON, autoRepair: false }, 5 * MINUTE);
+      expect(repairsOff.next.action).toBeNull();
+      expect(repairsOff.needsHuman).toMatch(/^Automatic repairs are switched off \(company setting supervisorAutoRepair\)\. Approve the resource limits/);
+    });
+
+    it('makes up no number: with no limits approved for anyone it says what is missing', () => {
+      for (const standing of [{ enabled: true, limits: false, layout: false }, undefined]) {
+        const none = assessEmployee(bare(standing), history, ON, 5 * MINUTE);
+        expect(none.next.action).toBeNull();
+        expect(none.needsHuman).toMatch(/^No employee of this office has approved resource limits, so the office has no approved value/);
+      }
+    });
+
+    it('is a repair that is tried twice a round', () => {
+      expect(SUPERVISOR_POLICY.ladder['apply-standing-limits']).toMatchObject({ tier: 'repair', maxAttempts: 2 });
+      const spent = since(0, 'no-policy', { attempts: tried('apply-standing-limits', 2, MINUTE) });
+      expect(assessEmployee(bare({ enabled: true, limits: true, layout: true }), spent, ON, HOUR).next).toMatchObject({
+        action: null,
+        at: MINUTE + 6 * HOUR,
+      });
+    });
+  });
+
+  describe('a laptop with no layout of its own on record', () => {
+    const noLayout = (standing?: { enabled: boolean; limits: boolean; layout: boolean }) =>
+      withLaptop(empty(failed), { templateOnRecord: false, ...(standing ? { standing } : {}) });
+    const history = since(0, FAILED);
+
+    it('is rebuilt with the layout the other laptops share', () => {
+      const result = assessEmployee(noLayout({ enabled: true, limits: true, layout: true }), history, ON, 3 * MINUTE);
+      expect(result.next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+      expect(result.needsHuman).toBeUndefined();
+    });
+
+    it('names the owner’s switch, or says that no laptop of the office has a layout at all', () => {
+      const off = assessEmployee(noLayout({ enabled: false, limits: true, layout: true }), history, ON, 3 * MINUTE);
+      expect(off.next.action).toBeNull();
+      expect(off.needsHuman).toMatch(
+        /^No laptop layout is on record for this employee\. The standing defaults are switched off \(company setting supervisorStandingDefaults\)\. Rebuild the laptop: /
+      );
+      for (const standing of [{ enabled: true, limits: true, layout: false }, undefined]) {
+        const none = assessEmployee(noLayout(standing), history, ON, 3 * MINUTE);
+        expect(none.next.action).toBeNull();
+        expect(none.needsHuman).toMatch(/^No owner-approved laptop layout is on record for this employee, and no other laptop of this office has one/);
+      }
+    });
+  });
+
+  describe('an employee whose session is not in a laptop', () => {
+    const outside = observed({ boxed: false, session: { available: false }, laptop: { record: null, bound: false, restoration: undefined } });
+
+    it('is woken, as the owner’s Wake does, six times a round', () => {
+      const result = assessEmployee(outside, since(0, 'not-boxed'), ON, MINUTE);
+      expect(result).toMatchObject({ condition: 'viewer-lost', code: 'not-boxed', next: { action: 'reconnect-viewer', at: 45_000 } });
+      expect(result.needsHuman).toBeUndefined();
+      const spent = since(0, 'not-boxed', { attempts: tried('reconnect-viewer', 6, HOUR) });
+      expect(assessEmployee(outside, spent, ON, 2 * HOUR).next).toMatchObject({ action: null, at: 7 * HOUR });
+      // No laptop step is ever taken for it, held input or not.
+      const heldInput = { ...outside, session: { ...outside.session, inputHeld: true } };
+      expect(assessEmployee(heldInput, spent, ON, 2 * HOUR).next.action).toBeNull();
+      expect(assessEmployee(heldInput, since(0, 'not-boxed'), ON, MINUTE).next.action).toBe('reconnect-viewer');
+    });
+  });
+
+  describe('an employee with no laptop', () => {
+    const gone = (templateOnRecord: boolean) =>
+      observed({
+        session: { available: false },
+        laptop: { record: null, bound: false, restoration: undefined, source: 'unknown', templateOnRecord },
+      });
+
+    it('has one made again by the rebuild when an earlier laptop operation is on record', () => {
+      const result = assessEmployee(gone(true), since(0, 'no-laptop'), ON, 3 * MINUTE);
+      expect(result).toMatchObject({
+        condition: 'held-needs-rebuild',
+        code: 'no-laptop',
+        next: { action: 'rebuild-laptop', at: 3 * MINUTE, preconditions: ['no-agent-running'] },
+      });
+      expect(result.needsHuman).toBeUndefined();
+    });
+
+    it('says exactly what is missing for an employee who never had one, and goes on reading', () => {
+      const result = assessEmployee(gone(false), since(0, 'no-laptop'), ON, 3 * MINUTE);
+      expect(result).toMatchObject({ condition: 'unknown', code: 'no-laptop', next: { action: null } });
+      expect(result.needsHuman).toMatch(/^This employee has never had a laptop in this office, and the office has no operation that makes a first one/);
+      // The moment a stopped laptop of this employee exists, it is started.
+      const made = observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped', templateOnRecord: false } });
+      expect(assessEmployee(made, since(0, 'source-stopped'), ON, MINUTE).next.action).toBe('start-continuation');
+    });
+  });
+
+  describe('never in the middle of a turn', () => {
+    /** Every problem below was first seen one second in. */
+    const T = 1000;
+    const reasons: Array<[string, SupervisorObservation, SupervisorHistory]> = [
+      ['a failed limits helper', failed, since(T, FAILED)],
+      ['a code the office does not recognize', held('DOCKER_CONTINUATION_SOMETHING_NEW'), since(T, 'code:DOCKER_CONTINUATION_SOMETHING_NEW')],
+      ['something the office did not start', held('DOCKER_CONTINUATION_FOREIGN_PROVIDER'), since(T, 'code:DOCKER_CONTINUATION_FOREIGN_PROVIDER')],
+      ['an agent that is not confirmed', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), since(T, 'code:DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED')],
+      [
+        'a start that never finishes',
+        held('DOCKER_CONTINUATION_BUSY'),
+        rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(held('DOCKER_CONTINUATION_BUSY')), T),
+      ],
+      [
+        'a held terminal input',
+        observed({
+          session: { inputHeld: true },
+          laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' } },
+        }),
+        recordSupervisorAttempt(since(T, 'code:DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED'), 'reconnect-viewer', 46_000, 'refused'),
+      ],
+    ];
+
+    it.each(reasons)('%s: a turn the office can see is waited for, however long it lasts', (_title, seen, history) => {
+      for (const provider of ['running', 'unknown'] as const)
+        for (const now of [HOUR, 3 * HOUR, 5 * HOUR]) {
+          const result = assessEmployee(withLaptop(seen, { provider }, { turn: 'working' }), history, ON, now);
+          expect([provider, now, result.next]).toEqual([
+            provider,
+            now,
+            { action: null, waitingFor: "the agent's current turn to end", preconditions: [] },
+          ]);
+          expect(result.needsHuman).toBeUndefined();
+        }
+    });
+
+    it.each(reasons)('%s: an idle pane must have been silent for two minutes', (_title, seen, history) => {
+      const idle = (idleSince: number) =>
+        assessEmployee(withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince }), history, ON, HOUR).next;
+      expect(idle(HOUR - 2 * MINUTE + 1)).toMatchObject({ action: null, waitingFor: "the agent's terminal to stay quiet a little longer" });
+      expect(idle(HOUR - 2 * MINUTE).action).toBe('rebuild-laptop');
+      expect(SUPERVISOR_OCCUPIED_PROOFS.some((proof) => idle(HOUR - 2 * MINUTE).preconditions.includes(proof))).toBe(true);
+    });
+
+    it.each(reasons)('%s: work left running is given thirty minutes from when the problem was first seen', (_title, seen, history) => {
+      const left = (now: number) =>
+        assessEmployee(withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true }), history, ON, now).next;
+      const from = history.since > 0 ? history.since : history.transitSince! + 15 * MINUTE;
+      expect(left(from + 30 * MINUTE - 1)).toMatchObject({ action: null });
+      expect(left(from + 31 * MINUTE).action).toBe('rebuild-laptop');
+    });
+
+    it('reads what a pane shows of the turn whether or not the terminal’s input is held', () => {
+      const pane: SupervisedTerminal = { pid: 7, status: 'idle', isWorking: false, lastActivityAt: 500, lastPromptTime: 300, paneStartedAt: 100 };
+      expect(readTerminalTurn(pane)).toEqual({ turn: 'idle', idleSince: 500 });
+      expect(readTerminalTurn({ ...pane, watching: 'a monitor' })).toEqual({ turn: 'idle', idleSince: 500, background: true });
+      expect(readTerminalTurn({ ...pane, isWorking: true })).toEqual({ turn: 'working' });
+      expect(readTerminalTurn({ ...pane, status: 'busy' })).toEqual({ turn: 'working' });
+      for (const unread of [undefined, { ...pane, pid: null }, { ...pane, runtimeHealth: 'disconnected' }, { ...pane, paneExit: {} }, { pid: 7 }])
+        expect(readTerminalTurn(unread)).toEqual({ turn: 'unknown' });
+      expect(readSupervisedTerminal(pane)).toEqual({});
+    });
+  });
+
+  describe('the clocks behind every bound count unbroken runs that this office has watched', () => {
+    const STEP = 30_000;
+    /** Nothing here starts at time zero: a problem with no clock at all is never called overdue. */
+    const T = 1000;
+    type Assessment = ReturnType<typeof assessEmployee>;
+    /** One observation every thirty seconds from `from` up to, not including, `to`. */
+    const watch = (history: SupervisorHistory, seen: SupervisorObservation, from: number, to: number) => {
+      for (let now = from; now < to; now += STEP) history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+      return history;
+    };
+    /** How long after `from` the first pass comes at which `hit` holds, while `seen` is observed every thirty seconds. */
+    const until = (history: SupervisorHistory, seen: SupervisorObservation, from: number, hit: (result: Assessment) => boolean) => {
+      for (let now = from; now < from + 8 * HOUR; now += STEP) {
+        history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+        if (hit(assessEmployee(seen, history, ON, now))) return now - from;
+      }
+      return undefined;
+    };
+    const starting = held('DOCKER_CONTINUATION_BUSY');
+    const stalled = (result: Assessment) => result.condition !== 'starting' || result.next.action !== null;
+    const rebuilds = (result: Assessment) => result.next.action === 'rebuild-laptop';
+    const odd = held('DOCKER_CONTINUATION_SOMETHING_NEW');
+    /** An agent runs in the held laptop and the office has no reading of its pane. */
+    const unread = withLaptop(failed, { provider: 'running' });
+
+    describe('a laptop that is starting', () => {
+      it('after hours of running normally, is stalled fifteen minutes after it was first seen starting and not before', () => {
+        const healthy = watch(EMPTY_SUPERVISOR_HISTORY, observed(), T, T + 3 * HOUR);
+        expect(healthy.transitSince).toBeUndefined();
+        const from = T + 3 * HOUR;
+        expect(assessEmployee(starting, rollSupervisorHistory(healthy, classifyEmployee(starting), from), ON, from)).toMatchObject({
+          condition: 'starting',
+          next: { action: null },
+        });
+        expect(until(healthy, starting, from, stalled)).toBe(15 * MINUTE);
+        // And the rebuild keeps its own three minutes from that moment.
+        const seen = watch(healthy, starting, from, from + 15 * MINUTE + STEP);
+        expect(assessEmployee(starting, seen, ON, from + 15 * MINUTE).next).toMatchObject({
+          action: 'rebuild-laptop',
+          at: from + 18 * MINUTE,
+          preconditions: ['no-agent-running'],
+        });
+      });
+
+      it.each<[string, SupervisorObservation]>([
+        ['was stopped by the owner', observed({ desiredRunning: false })],
+        ['was out of the office', observed({ onVacation: true })],
+        ['was being moved to another plan', move(undefined, { phase: 'starting' })],
+        ['was being moved to another session', observed({ bindingMigration: true })],
+        ['was at a start-up screen the office was answering', observed({ session: { startupScreen: { label: 'a chooser', kind: 'first-run', answering: true } } })],
+        ['waited for the office to restart itself', held('DOCKER_CONTINUATION_RUNTIME_CHANGED')],
+      ])('that for two hours before %s is not stalled for that time', (_title, before) => {
+        const earlier = watch(EMPTY_SUPERVISOR_HISTORY, before, T, T + 2 * HOUR);
+        const from = T + 2 * HOUR;
+        const first = rollSupervisorHistory(earlier, classifyEmployee(starting), from);
+        expect(first).toMatchObject({ transitSince: from, transitOf: 'starting' });
+        expect(assessEmployee(starting, first, ON, from)).toMatchObject({ condition: 'starting', next: { action: null } });
+        expect(until(earlier, starting, from, stalled)).toBe(15 * MINUTE);
+      });
+
+      it('starts its fifteen minutes again with each new stretch: a flapping read never adds up', () => {
+        // Ten minutes starting, one healthy minute, starting again.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 10 * MINUTE);
+        history = watch(history, observed(), T + 10 * MINUTE, T + 11 * MINUTE);
+        expect(until(history, starting, T + 11 * MINUTE, stalled)).toBe(15 * MINUTE);
+        // Fourteen minutes starting, then a plan move for a minute, then starting again.
+        history = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 14 * MINUTE);
+        history = watch(history, observed({ bindingMigration: true }), T + 14 * MINUTE, T + 15 * MINUTE);
+        expect(until(history, starting, T + 15 * MINUTE, stalled)).toBe(15 * MINUTE);
+        // Five minutes starting and half a minute healthy, over and over for three hours: never stalled.
+        history = EMPTY_SUPERVISOR_HISTORY;
+        for (let now = T; now < T + 3 * HOUR; now += STEP) {
+          const seen = Math.floor((now - T) / STEP) % 11 === 10 ? observed() : starting;
+          history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+          expect([now, stalled(assessEmployee(starting, history, ON, now))]).toEqual([now, false]);
+        }
+      });
+
+      it('that is seen without a break is stalled after fifteen minutes whatever the wait is called', () => {
+        // Two different waits of the same starting laptop are one run.
+        const history = watch(EMPTY_SUPERVISOR_HISTORY, held('DOCKER_CONTINUATION_UNCONFIRMED'), T, T + 10 * MINUTE);
+        expect(until(history, starting, T + 10 * MINUTE, stalled)).toBe(5 * MINUTE);
+      });
+    });
+
+    describe('an office start', () => {
+      it('keeps what paces the ladder and drops every clock of what was watched', () => {
+        const saved: SupervisorHistory = {
+          fingerprint: FAILED,
+          since: 5000,
+          healthySince: 6000,
+          transitSince: 7000,
+          transitOf: 'starting',
+          watchSince: 5000,
+          attempts: tried('rebuild-laptop', 1, 8000),
+          rebuilds: [8000],
+          lastAction: { action: 'rebuild-laptop', at: 8000, outcome: 'refused', detail: 'x' },
+        };
+        expect(resumeSupervisorHistory(saved)).toEqual({
+          fingerprint: FAILED,
+          since: 5000,
+          attempts: tried('rebuild-laptop', 1, 8000),
+          rebuilds: [8000],
+          lastAction: { action: 'rebuild-laptop', at: 8000, outcome: 'refused', detail: 'x' },
+        });
+        expect(resumeSupervisorHistory(EMPTY_SUPERVISOR_HISTORY)).toEqual(EMPTY_SUPERVISOR_HISTORY);
+      });
+
+      it('does not make an employee who is being attached again look stalled for the time the office was down', () => {
+        // Starting for ten minutes when the office went down; it is back three hours later.
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 10 * MINUTE);
+        const up = T + 3 * HOUR;
+        // What the saved clock would say, which is why it is not used:
+        expect(until(saved, starting, up, stalled)).toBe(0);
+        expect(until(resumeSupervisorHistory(saved), starting, up, stalled)).toBe(15 * MINUTE);
+        // A file an earlier office wrote, with a clock that names no condition, is not trusted either.
+        expect(until({ ...EMPTY_SUPERVISOR_HISTORY, transitSince: T }, starting, up, stalled)).toBe(15 * MINUTE);
+      });
+
+      it('does not count the time the office was down as healthy time', () => {
+        const spent = since(T, FAILED, { attempts: tried('rebuild-laptop', 2, T), healthySince: T + MINUTE });
+        const up = T + 3 * HOUR;
+        expect(rollSupervisorHistory(spent, classifyEmployee(observed()), up).attempts).toEqual({});
+        const resumed = rollSupervisorHistory(resumeSupervisorHistory(spent), classifyEmployee(observed()), up);
+        expect(resumed).toMatchObject({ healthySince: up, attempts: tried('rebuild-laptop', 2, T) });
+      });
+    });
+
+    describe('a code the office does not recognize', () => {
+      const held30 = (history: SupervisorHistory, from: number) => until(history, odd, from, rebuilds);
+
+      it('is watched for thirty minutes from when that code was first seen, whatever was seen before', () => {
+        expect(held30(EMPTY_SUPERVISOR_HISTORY, T)).toBe(30 * MINUTE);
+        // Two hours of another problem first.
+        expect(held30(watch(EMPTY_SUPERVISOR_HISTORY, failed, T, T + 2 * HOUR), T + 2 * HOUR)).toBe(30 * MINUTE);
+        // Two hours of a plan move first.
+        expect(held30(watch(EMPTY_SUPERVISOR_HISTORY, observed({ bindingMigration: true }), T, T + 2 * HOUR), T + 2 * HOUR)).toBe(30 * MINUTE);
+      });
+
+      it('must stand without a break: a code that cleared and came back is watched for thirty minutes again', () => {
+        // Twenty minutes, five healthy minutes (the same episode: the problem keeps when it was first seen), back.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 20 * MINUTE);
+        history = watch(history, observed(), T + 20 * MINUTE, T + 25 * MINUTE);
+        const back = rollSupervisorHistory(history, classifyEmployee(odd), T + 25 * MINUTE);
+        expect(back).toMatchObject({ since: T, watchSince: T + 25 * MINUTE });
+        expect(held30(history, T + 25 * MINUTE)).toBe(30 * MINUTE);
+        // The same when it read as starting for a minute in between.
+        history = watch(watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 29 * MINUTE), starting, T + 29 * MINUTE, T + 30 * MINUTE);
+        expect(held30(history, T + 30 * MINUTE)).toBe(30 * MINUTE);
+      });
+
+      it('is watched for thirty minutes again after an office start, however long it stood before', () => {
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 29 * MINUTE);
+        const up = T + 4 * HOUR;
+        const first = rollSupervisorHistory(resumeSupervisorHistory(saved), classifyEmployee(odd), up);
+        expect(first).toMatchObject({ since: T, watchSince: up });
+        expect(assessEmployee(odd, first, ON, up).next).toMatchObject({ action: null, at: up + 30 * MINUTE });
+        expect(held30(resumeSupervisorHistory(saved), up)).toBe(30 * MINUTE);
+      });
+    });
+
+    describe('a laptop whose pane the office cannot read', () => {
+      const heldInput = observed({
+        session: { inputHeld: true },
+        laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }, provider: 'running' },
+      });
+
+      it('is rebuilt two hours after that problem was first seen in an unbroken run', () => {
+        expect(until(EMPTY_SUPERVISOR_HISTORY, unread, T, rebuilds)).toBe(2 * HOUR);
+        // Ninety minutes, five healthy minutes, and the problem is back: two hours from then, not twenty-five minutes.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, unread, T, T + 90 * MINUTE);
+        history = watch(history, observed(), T + 90 * MINUTE, T + 95 * MINUTE);
+        expect(until(history, unread, T + 95 * MINUTE, rebuilds)).toBe(2 * HOUR);
+        // Another problem for three hours first: two hours from the first sight of this one.
+        expect(until(watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 3 * HOUR), unread, T + 3 * HOUR, rebuilds)).toBe(2 * HOUR);
+      });
+
+      it('is not rebuilt at the first look after an office start: the two hours start again there', () => {
+        // The problem stood for five hours before the office went down, so the saved history is far past the bound.
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, unread, T, T + 5 * HOUR);
+        const up = T + 6 * HOUR;
+        const first = rollSupervisorHistory(resumeSupervisorHistory(saved), classifyEmployee(unread), up);
+        expect(first).toMatchObject({ since: T, watchSince: up });
+        expect(assessEmployee(unread, first, ON, up).next).toMatchObject({
+          action: null,
+          at: up + 2 * HOUR,
+          waitingFor: `a reading of the agent's terminal; if there is still none, the laptop is rebuilt at ${stamp(up + 2 * HOUR)}`,
+        });
+        expect(until(resumeSupervisorHistory(saved), unread, up, rebuilds)).toBe(2 * HOUR);
+      });
+
+      it('holds the same for a held terminal input, the laptop that has no terminal object after an office start', () => {
+        const FINGERPRINT = classifyEmployee(heldInput).fingerprint;
+        const saved = recordSupervisorAttempt(since(T, FINGERPRINT, { watchSince: T }), 'reconnect-viewer', T + 45_000, 'refused');
+        // Back three hours later, within the same round of steps: the one nudge is not repeated.
+        const up = T + 3 * HOUR;
+        // Used as it was saved, the bound would be met at the first look:
+        expect(until(saved, heldInput, up, rebuilds)).toBe(0);
+        const resumed = resumeSupervisorHistory(saved);
+        expect(until(resumed, heldInput, up, rebuilds)).toBe(2 * HOUR);
+        // A read inside the laptop that finds no agent is still acted on at once: that is a read, made now.
+        const empty = withLaptop(heldInput, { provider: 'exited', poolAlive: true });
+        expect(until(resumed, empty, up, rebuilds)).toBe(0);
+      });
+
+      it('measures the two shorter waits the same way', () => {
+        const up = T + 6 * HOUR;
+        // A read that cannot say what runs in the laptop: fifteen minutes before it counts as an agent.
+        const unknown = withLaptop(failed, { provider: 'unknown' }, { turn: 'idle', idleSince: 0 });
+        const savedUnknown = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, unknown, T, T + 5 * HOUR));
+        expect(until(savedUnknown, unknown, up, rebuilds)).toBe(15 * MINUTE);
+        // Work the agent left running: thirty minutes.
+        const left = withLaptop(failed, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true });
+        const savedLeft = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, left, T, T + 5 * HOUR));
+        expect(until(savedLeft, left, up, rebuilds)).toBe(30 * MINUTE);
+      });
+    });
+  });
+});
+
 describe('employee supervisor: after a host restart', () => {
   const HOUR = 60 * MINUTE;
   /** A finished laptop as every one reads after the host restarted: its storage holder is not running. */
@@ -1349,10 +2507,11 @@ describe('employee supervisor: after a host restart', () => {
     });
     // Another laptop that is attached says the same as the office's own look.
     expect(assess({ provider: 'no-laptop', poolAlive: true }).next.preconditions).toEqual(['stored-home']);
+    // Read, and nothing found against it: the step is told that it was asked for, and reads it again itself.
     for (const storedHome of ['verified', 'unchecked'] as const)
       expect(assess({ provider: 'no-laptop', pool: 'up', storedHome }).next).toMatchObject({
         action: 'rebuild-laptop',
-        preconditions: [],
+        preconditions: ['stored-home'],
       });
   });
 
@@ -1412,6 +2571,180 @@ describe('employee supervisor: after a host restart', () => {
     const off = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 10 * MINUTE, { ...ON, autoRepair: false });
     expect(off.next.action).toBeNull();
     expect(off.needsHuman).toMatch(/supervisorAutoRepair.*docker-rebuild/);
+  });
+
+  describe('the limit of rebuilds per day', () => {
+    const DAY = 24 * HOUR;
+    // Two rebuilds earlier today, both counted.
+    const capped = (at: number) => since(0, 'code:DOCKER_CONTINUATION_STORAGE_UNCONFIRMED', { rebuilds: [at - 3 * HOUR, at - HOUR] });
+    const now = 30 * HOUR;
+    const ready = { provider: 'no-laptop' as const, pool: 'up' as const, storedHome: 'verified' as const };
+
+    it('does not hold back a laptop that was stopped together with its storage holder, as after a host restart', () => {
+      const third = assessEmployee(restarted(ready), capped(now), ON, now);
+      expect(third.next).toMatchObject({ action: 'rebuild-laptop', uncounted: true, preconditions: ['stored-home'] });
+      expect(third.next.waitingFor).toBeUndefined();
+      // Before the read that says whether anything runs, the limit is not asked either: the read is.
+      expect(assessEmployee(restarted({ pool: 'up' }), capped(now), ON, now).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['no-agent-running'],
+      });
+    });
+
+    it('still holds for a laptop that stopped by itself, and for one that runs', () => {
+      // The laptop stopped and its holder still runs: the laptop did not hold.
+      const alone = { ...restarted(ready) };
+      const crashed = {
+        ...alone,
+        laptop: { ...alone.laptop, continuation: { ...alone.laptop.continuation!, code: 'DOCKER_CONTINUATION_CONTAINER_STOPPED' } },
+      };
+      const stopped = assessEmployee(crashed, { ...capped(now), fingerprint: 'code:DOCKER_CONTINUATION_CONTAINER_STOPPED' }, ON, now);
+      expect(stopped.next).toMatchObject({ action: null, at: now - 3 * HOUR + DAY });
+      expect(stopped.next.waitingFor).toMatch(/^the daily limit on rebuilds of one laptop \(2\)/);
+      // The holder is stopped but a laptop of the employee runs: a rebuild would discard it, and that is counted.
+      for (const provider of ['running', 'unknown'] as const) {
+        const occupied = assessEmployee(restarted({ ...ready, provider }), capped(now), ON, now);
+        expect(occupied.next.action, provider).toBeNull();
+        expect(occupied.next.waitingFor, provider).toMatch(/^the daily limit on rebuilds of one laptop \(2\)/);
+      }
+      // Without the limit reached, a stopped laptop whose holder runs is rebuilt and counted.
+      expect(assessEmployee(crashed, since(0, 'code:DOCKER_CONTINUATION_CONTAINER_STOPPED'), ON, now).next.uncounted).toBeUndefined();
+    });
+
+    it('is not counted against by such a rebuild, and is by every other', () => {
+      const issued = issueSupervisorAttempt(capped(now), 'rebuild-laptop', now, true);
+      expect(issued.lastAction).toEqual({ action: 'rebuild-laptop', at: now, outcome: 'issued', uncounted: true });
+      const done = settleSupervisorAttempt(issued, 'done', 'rebuilt x');
+      expect(done.rebuilds).toEqual([now - 3 * HOUR, now - HOUR]);
+      expect(done.lastAction).toMatchObject({ outcome: 'done', uncounted: true });
+      // It is still an attempt of its round.
+      expect(done.attempts['rebuild-laptop']).toEqual({ count: 1, lastAt: now });
+      const counted = settleSupervisorAttempt(issueSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'rebuild-laptop', now), 'done');
+      expect(counted.rebuilds).toEqual([now]);
+      // The mark belongs to a rebuild alone.
+      expect(issueSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'resend-continuation', now, true).lastAction).toEqual({
+        action: 'resend-continuation',
+        at: now,
+        outcome: 'issued',
+      });
+    });
+
+    it('lets three host restarts in one day bring the employee back each time', () => {
+      let history = since(0, 'code:DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+      for (const at of [1 * HOUR, 5 * HOUR, 9 * HOUR, 13 * HOUR]) {
+        // A new episode each time: the employee had been healthy in between.
+        history = { ...history, attempts: {}, since: at - 4 * MINUTE };
+        const step = assessEmployee(restarted(ready), history, ON, at);
+        expect(step.next, String(at)).toMatchObject({ action: 'rebuild-laptop', uncounted: true });
+        history = settleSupervisorAttempt(issueSupervisorAttempt(history, 'rebuild-laptop', at, step.next.uncounted), 'done');
+      }
+      expect(history.rebuilds).toEqual([]);
+    });
+  });
+
+  describe('the rules the other repairs brought', () => {
+    const stalled = (laptop: Partial<SupervisorObservation['laptop']>) => {
+      const base = restarted({ continuation: { state: 'pending', phase: 'resources-issued', allowedActions: ['observe'] }, ...laptop });
+      const history = { ...since(0, ''), transitSince: 0, transitOf: 'starting' };
+      return assessEmployee({ ...base, laptop: { ...base.laptop, record: { phase: 'resources-issued', version: 2, operationId: 'op-1' } } }, history, ON, 20 * MINUTE);
+    };
+
+    it('does not rebuild a laptop that has been starting for fifteen minutes before the pool is back', () => {
+      expect(classifyEmployee(restarted({ continuation: { state: 'pending', phase: 'resources-issued', allowedActions: ['observe'] } })).condition).toBe('starting');
+      expect(stalled({}).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
+      for (const pool of ['down', 'unknown'] as const)
+        expect(stalled({ provider: 'no-laptop', pool }).next, pool).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+      expect(stalled({ provider: 'no-laptop', pool: 'up' }).next.action).toBe('rebuild-laptop');
+    });
+
+    it('does not rebuild for a code it does not recognize before the pool is back, however long the code stood', () => {
+      const odd = (laptop: Partial<SupervisorObservation['laptop']>, at: number) => {
+        const base = restarted(laptop);
+        const seen = { ...base, laptop: { ...base.laptop, continuation: { ...base.laptop.continuation!, code: 'DOCKER_SOMETHING_NEW' } } };
+        return assessEmployee(seen, since(0, 'code:DOCKER_SOMETHING_NEW'), ON, at);
+      };
+      expect(odd({ provider: 'no-laptop', pool: 'down' }, 10 * MINUTE).next.waitingFor).toMatch(/the code to clear by itself/);
+      for (const at of [31 * MINUTE, 5 * HOUR])
+        expect(odd({ provider: 'no-laptop', pool: 'down' }, at).next).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+      expect(odd({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 31 * MINUTE).next.action).toBe('rebuild-laptop');
+    });
+
+    it('sends no set-up request again while the pool is known to be down, and spends no attempt on it', () => {
+      const offered = (laptop: Partial<SupervisorObservation['laptop']>) => {
+        const base = restarted(laptop);
+        return assessEmployee(
+          { ...base, laptop: { ...base.laptop, continuation: { ...base.laptop.continuation!, allowedActions: ['observe', 'continue'] } } },
+          history,
+          ON,
+          10 * MINUTE
+        );
+      };
+      expect(offered({ pool: 'down' }).next).toMatchObject({
+        action: null,
+        waitingFor: 'the shared pool, which the office is recovering after a host restart',
+      });
+      for (const pool of ['up', 'unknown', 'none'] as const) expect(offered({ pool }).next.action, pool).toBe('resend-continuation');
+      // Another laptop that is attached says the pool is alive, whatever an earlier look found.
+      expect(offered({ pool: 'down', poolAlive: true }).next.action).toBe('resend-continuation');
+    });
+
+    it('reads the stored home for a stopped laptop on the paths of a held terminal input and of a parked screen', () => {
+      const held = observed({
+        session: { available: true, viewerHealth: 'connected', runtimeHealth: 'unknown', inputHeld: true, turn: 'unknown' },
+        laptop: {
+          restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' },
+          continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] },
+          provider: 'no-laptop',
+          poolAlive: true,
+        },
+      });
+      const refused = since(0, 'code:DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED', {
+        attempts: { 'reconnect-viewer': { count: 1, lastAt: MINUTE } },
+        lastAction: { action: 'reconnect-viewer', at: MINUTE, outcome: 'refused' },
+      });
+      expect(assessEmployee(held, refused, ON, 10 * MINUTE).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['stored-home'],
+      });
+      const different = { ...held, laptop: { ...held.laptop, storedHome: 'different' as const } };
+      const stopped = assessEmployee(different, refused, ON, 10 * MINUTE);
+      expect(stopped.next.action).toBeNull();
+      expect(stopped.needsHuman).toMatch(/not the one their laptop was built on/);
+    });
+
+    it('neither continues nor closes a held plan move while the pool is known to be down, and does both once it is back', () => {
+      const moving = (laptop: Partial<SupervisorObservation['laptop']>, at: number, patch: Partial<SupervisorHistory> = {}) => {
+        const base = move('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+        const seen = { ...base, laptop: { ...base.laptop, poolAlive: false, ...laptop } };
+        return assessEmployee(seen, since(0, classifyEmployee(seen).fingerprint, patch), ON, at);
+      };
+      // The holder of a laptop does not come back by continuing, so this is a step of the move and not a wait for
+      // something every laptop shares.
+      expect(classifyMoveError('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('laptop-step');
+      for (const at of [5 * MINUTE, 40 * MINUTE, 3 * HOUR]) {
+        const waiting = moving({ pool: 'down' }, at);
+        expect(waiting.next, String(at)).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+        expect(waiting.needsHuman).toBeUndefined();
+        // With every continue used as well, it is still not closed before the pool is back.
+        const used = { attempts: tried('continue-move', 3, 2 * MINUTE) };
+        expect(moving({ pool: 'down' }, at + 30 * MINUTE, used).next.action, String(at)).toBeNull();
+      }
+      // The pool is back after hours: the move is continued first, and closed only after that.
+      expect(moving({ pool: 'up' }, 3 * HOUR).next).toMatchObject({ action: 'continue-move' });
+      const afterContinues = { attempts: tried('continue-move', 3, 3 * HOUR) };
+      expect(moving({ pool: 'up' }, 3 * HOUR + 10 * MINUTE, afterContinues).next).toMatchObject({ action: 'abandon-move' });
+      // A pool that could not be read holds no move.
+      expect(moving({ pool: 'unknown' }, 5 * MINUTE).next.action).toBe('continue-move');
+    });
   });
 
   it('says that the office keeps putting the shared pool\'s limits back where a rebuild would not help', () => {

@@ -12,6 +12,11 @@
  * - a copy that a client emptied its file over is remembered as refused and never placed again;
  * - it reads about once a minute, and every few seconds only around the moment a shared sign-in is renewed or
  *   while a copy is still being put right.
+ *
+ * It is also where a plan that is signed in NOWHERE is first known: every holder was read and none has a sign-in
+ * that can be used. That is the one state no copy repairs, and it is known here before the employees on the plan
+ * stop at a sign-in screen (a running client goes on until its next request). So it is told once, through the
+ * `notice` port, when two passes in a row found it, and once more when a usable sign-in is held again.
  */
 import {
   planSignInSync,
@@ -50,6 +55,37 @@ export interface PlanSignInReconcilerPorts {
   /** Every plan with at least one laptop holder, and all of its holders. */
   plans(): Promise<readonly PlanSignInGroup[]>;
   log(line: string): void;
+  /**
+   * A plan was found signed in nowhere (`usable: false`), or is signed in again after that was said. Called once
+   * per change. It is information for a person; nothing depends on it, and a throw is ignored.
+   */
+  notice?(event: PlanSignInNotice): void;
+}
+
+export interface PlanSignInNotice {
+  readonly accountId: string;
+  readonly usable: boolean;
+}
+
+/** How many passes in a row must find a plan signed in nowhere before it is said. One pass can be a bad read. */
+export const SIGNED_OUT_PASSES = 2;
+
+/**
+ * The line for the owner. `employees` are the names of those who run on the plan. Never a path, a holder or a
+ * digest: this is read by people.
+ */
+export function describePlanSignInNotice(label: string, employees: readonly string[], usable: boolean): string {
+  const plan = `The plan “${label}”`;
+  if (usable) return `${plan} is signed in again. The office is putting the sign-in back into the laptops that use it.`;
+  const who = employees.length
+    ? ` ${employees.length === 1 ? 'One employee runs' : employees.length + ' employees run'} on it: ${employees.join(', ')}.`
+    : '';
+  return (
+    `${plan} is signed in nowhere: neither the office nor any laptop holds a sign-in of it that works.${who} ` +
+    'An agent that is running goes on until its next request and then stops at the sign-in screen. Only the account ' +
+    'holder can sign a plan in (Plans). Once it is signed in, the office puts the sign-in into every laptop and ' +
+    'starts those agents again by itself.'
+  );
 }
 
 export interface PlanSignInLimits {
@@ -92,6 +128,9 @@ export class PlanSignInReconciler {
   readonly #dead = new Set<string>();
   readonly #reports = new Map<string, PlanSignInReport>();
   readonly #said = new Map<string, string>();
+  /** Passes in a row that found a plan signed in nowhere, and the plans that was said of. */
+  readonly #unusable = new Map<string, number>();
+  readonly #noticed = new Set<string>();
   #queue: Promise<unknown> = Promise.resolve();
   #nextAt = 0;
   #closed = false;
@@ -151,6 +190,22 @@ export class PlanSignInReconciler {
     if (this.#said.size > 512) this.#said.clear();
     this.#said.set(subject, key);
     this.ports.log(line);
+  }
+
+  /** Tell the change of one plan between "signed in nowhere" and "signed in again", once each. */
+  #notice(accountId: string, usable: boolean): void {
+    const passes = usable ? 0 : (this.#unusable.get(accountId) ?? 0) + 1;
+    if (this.#unusable.size > 256) this.#unusable.clear();
+    this.#unusable.set(accountId, passes);
+    const said = this.#noticed.has(accountId);
+    if (usable ? !said : said || passes < SIGNED_OUT_PASSES) return;
+    if (usable) this.#noticed.delete(accountId);
+    else this.#noticed.add(accountId);
+    try {
+      this.ports.notice?.({ accountId, usable });
+    } catch {
+      /* Telling a person is best-effort. */
+    }
   }
 
   async #pass(group: PlanSignInGroup): Promise<{ report: PlanSignInReport; fast: boolean }> {
@@ -222,6 +277,8 @@ export class PlanSignInReconciler {
         ? `[signin-sync] ${group.accountId}: a usable sign-in is held again`
         : `[signin-sync] ${group.accountId}: no holder has a usable sign-in. Sign the plan in at the office (Plans).`
     );
+    // A holder that could not be read may be the one that has a sign-in, so such a pass says nothing either way.
+    if (plan.usable || holders.length === group.holders.length) this.#notice(group.accountId, plan.usable);
     const report: PlanSignInReport = {
       accountId: group.accountId,
       checkedAt: now,

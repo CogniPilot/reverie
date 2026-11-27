@@ -107,8 +107,9 @@ import { RalphTracker } from './ralph-tracker.js';
 import { BashToolParser } from './bash-tool-parser.js';
 import {
   FirstRunScan,
-  nameProviderScreen,
-  startupScreenStatus,
+  readStartupScreen,
+  screenShape,
+  showsComposer,
   SCREEN_KEY_CONFIRM,
   FIRST_RUN_RETRY_MS,
   FIRST_RUN_SCAN_BYTES,
@@ -4673,6 +4674,8 @@ export class Session extends EventEmitter {
           },
           spawnErrLabel: 'mux attachment',
         });
+        // A pane that was already running was only attached to: the scan armed above saw no launch of it.
+        if (isRestored && !respawnedDeadPane) this._firstRunScan.attached();
 
         // Set claudeSessionId — when resuming, the Claude conversation ID is the
         // resumed one. `_pinOmpRespawnId()` (called just above, inside
@@ -5143,9 +5146,16 @@ export class Session extends EventEmitter {
   startupScreen(): StartupScreenStatus | null {
     const text = this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName) : null;
     if (typeof text !== 'string') return null;
-    const reading = nameProviderScreen(text, { composerMark: getCli(this.mode)?.capabilities.composerReadyMark });
-    if (!reading) return null;
-    return startupScreenStatus(reading, this._firstRunScan.answering(reading.screen.id, Date.now()));
+    const scan = this._firstRunScan;
+    const cli = getCli(this.mode)?.capabilities;
+    const composerMark = cli?.composerReadyMark;
+    // A composer seen here counts for the launch like one the scan saw: the pane reached it, for good.
+    if (showsComposer(text, composerMark)) scan.composerSeen();
+    const status = readStartupScreen(text, scan, Date.now(), { composerMark, composerGlyph: cli?.workDetect?.promptGlyph });
+    // A screen the office does not answer is logged once per launch by its shape, so a table row can be written for it.
+    if (status && status.kind === 'first-run' && !status.answering && status.shown !== 'words' && !this._isWorking && scan.claimShape(status.id))
+      console.warn(`[Session] ${this.id} is parked at ${status.label}, which the office does not answer. Screen shape: ${screenShape(text)}`);
+    return status;
   }
 
   /**
