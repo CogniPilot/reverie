@@ -2044,7 +2044,8 @@ function watchedSince(history: SupervisorHistory): number {
  * bound could be met at the first look after a restart, and a laptop be rebuilt that the office had not tried to
  * read. The healthy clock is dropped for the same reason: ten healthy minutes are ten minutes that were seen.
  *
- * One attempt is given back: see `continueGivenBack`.
+ * One attempt is given back: see `continueGivenBack`. A step that was issued and never settled is settled here:
+ * see `settleInterrupted`.
  */
 export function resumeSupervisorHistory(
   history: SupervisorHistory,
@@ -2057,7 +2058,26 @@ export function resumeSupervisorHistory(
     healthySince: _healthySince,
     ...kept
   } = history;
-  return continueGivenBack(kept, policy);
+  return continueGivenBack(settleInterrupted(kept), policy);
+}
+
+/** Said of a step whose outcome the office process that issued it did not live to record. */
+export const INTERRUPTED_BY_RESTART = 'interrupted by an office restart';
+
+/**
+ * A step is recorded as issued before its effect and settled when it returns. An office that stops in between
+ * leaves it issued, and no later process would ever settle it: every rule that reads how the last step ended would
+ * wait for an outcome that cannot come. The new process cannot know how far the step got, so it is settled as
+ * failed, with the attempt still spent. A rebuild is the one step whose effect is rationed by the day, so an
+ * interrupted one is counted as carried out: the limit must not be passed because the office fell over.
+ */
+function settleInterrupted(history: SupervisorHistory): SupervisorHistory {
+  const last = history.lastAction;
+  if (last?.outcome !== 'issued') return history;
+  const settled = settleSupervisorAttempt(history, 'failed', INTERRUPTED_BY_RESTART);
+  return last.action === 'rebuild-laptop' && !last.uncounted
+    ? { ...settled, rebuilds: [...settled.rebuilds, last.at].slice(-8) }
+    : settled;
 }
 
 /**
