@@ -449,6 +449,8 @@ export class EmployeeSupervisor {
   /** When the return of the pool last began a new round for everyone. */
   #poolRoundAt = Number.NEGATIVE_INFINITY;
   #poolFlight?: Promise<void>;
+  /** The step for the shared pool that is in flight right now, when one is. */
+  #poolActing?: SupervisorPoolStep;
   /** The last read of a stored home that stopped a rebuild or failed. Never one that allowed it. */
   readonly #storedHome = new Map<
     string,
@@ -508,6 +510,15 @@ export class EmployeeSupervisor {
   /** Stop deciding. Actions already running finish under their own guards, which now refuse. */
   close(): void {
     this.#closed = true;
+  }
+
+  /**
+   * The step for the shared pool that this supervisor is taking right now, when it is taking one: starting the
+   * stopped anchor, finishing a recovery, recording the pool, removing a dead anchor. A restart of the office
+   * would cut it off in the middle, so whoever decides on one asks here first. A look that only reads is none.
+   */
+  poolStepInFlight(): SupervisorPoolStep | undefined {
+    return this.#poolActing;
   }
 
   /** One pass over every employee. A pass that is still running is joined, never doubled. Never rejects. */
@@ -624,6 +635,7 @@ export class EmployeeSupervisor {
     const allowed = !!before.step && (POOL_STEP_TIER[before.step] === 'retry' || this.ports.flags(owner).autoRepair);
     const act = allowed && stepAt !== undefined && stepAt <= now ? before.step : undefined;
     if (act) this.#poolLastStep = now;
+    this.#poolActing = act;
     this.#poolDue = now + this.#resolved.poolReadMs;
     const work = (async (): Promise<SupervisorPoolResult> => {
       try {
@@ -633,6 +645,7 @@ export class EmployeeSupervisor {
       }
     })().then((result) => {
       this.#poolFlight = undefined;
+      this.#poolActing = undefined;
       this.#poolLooked(before, result, act, now);
     });
     this.#poolFlight = work;

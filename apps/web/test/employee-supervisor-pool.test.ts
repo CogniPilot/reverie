@@ -743,6 +743,66 @@ describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () 
   });
 });
 
+describe('EmployeeSupervisor: the pool step and a restart of the office', () => {
+  it('says that a step for the pool is in flight for as long as it is, and never for a look that only reads', async () => {
+    const w = box([person('a'), person('b')]);
+    const seen: Array<string | undefined> = [];
+    // What whoever decides on a restart of the office would be told, asked in the middle of each look and step.
+    const recover = w.state.recover;
+    w.state.recover = () => {
+      seen.push(w.supervisor.poolStepInFlight());
+      return recover();
+    };
+    expect(w.supervisor.poolStepInFlight()).toBeUndefined();
+    await w.run(MINUTE);
+    // The first looks only read.
+    expect(w.state.looks.every((line) => line.endsWith(':read'))).toBe(true);
+    expect(w.supervisor.poolStepInFlight()).toBeUndefined();
+    await w.run(5 * MINUTE);
+    expect(w.state.steps).toEqual(['90:recover-pool:done']);
+    expect(seen).toEqual(['recover-pool']);
+    // The step has ended: nothing of the pool stands in the way of a restart any more.
+    expect(w.supervisor.poolStepInFlight()).toBeUndefined();
+  });
+});
+
+describe('EmployeeSupervisor: a host restart and the office-wide brake on rebuilds', () => {
+  it('brings five employees back within minutes: a laptop that was stopped with the host is no occupied laptop', async () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    // The office's own limits: two steps per pass, and one rebuild an hour of a laptop an agent runs in.
+    const w = box(ids.map((id) => person(id)));
+    await w.run(20 * MINUTE);
+    expect(w.state.steps).toEqual(['90:recover-pool:done']);
+    const rebuilds = w.state.acts.filter((line) => line.includes(':rebuild-laptop:'));
+    expect(rebuilds.map((line) => line.split(':')[2]).sort()).toEqual(ids);
+    // All five rebuilds within a few minutes of the pool coming back, not one an hour.
+    const times = rebuilds.map((line) => Number(line.split(':')[0]));
+    expect(Math.max(...times) - Math.min(...times)).toBeLessThanOrEqual(5 * 60);
+    for (const id of ids) {
+      expect(w.report(id).condition, id).toBe('healthy');
+      // None of them was counted as the rebuild of a laptop that an agent runs in.
+      expect(w.state.histories.get(id)?.occupiedRebuildAt, id).toBeUndefined();
+    }
+  });
+
+  it('gives the round back after the pool returns without lifting the hour between rebuilds of occupied laptops', async () => {
+    // One employee's laptop was rebuilt under an agent a few minutes before the host went down.
+    const marked: SupervisorHistory = {
+      fingerprint: 'held-needs-rebuild:earlier',
+      since: START - 20 * MINUTE,
+      attempts: { 'rebuild-laptop': { count: 2, lastAt: START - 5 * MINUTE } },
+      rebuilds: [],
+      occupiedRebuildAt: START - 5 * MINUTE,
+    };
+    const w = box([person('a'), person('b')], LIMITS, new Map([['a', marked]]));
+    await w.run(20 * MINUTE);
+    // The new round brings the stopped laptop back at once.
+    expect(w.report('a').condition).toBe('healthy');
+    // The office-wide mark is not part of a round, and is kept.
+    expect(w.state.histories.get('a')?.occupiedRebuildAt).toBe(START - 5 * MINUTE);
+  });
+});
+
 describe('EmployeeSupervisor: an anchor that the container engine reports dead', () => {
   it('removes it by itself, lets the next laptop set-up create the pool, and brings everyone back', async () => {
     const w = box([person('a'), person('b'), person('c')]);

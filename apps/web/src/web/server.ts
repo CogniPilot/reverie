@@ -2673,11 +2673,15 @@ export class WebServer extends EventEmitter {
             )
           )
             return 'a plan move that is open';
-          return this.companyService
-            .registeredEmployees()
-            .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
-            ? 'a laptop operation that is running'
-            : undefined;
+          if (
+            this.companyService
+              .registeredEmployees()
+              .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
+          )
+            return 'a laptop operation that is running';
+          // The supervisor's own step for the pool every laptop shares belongs to no employee, so neither of the
+          // two checks above sees it. It goes on after the laptop configuration has changed, and is not cut off.
+          return this.employeeSupervisor?.poolStepInFlight() ? 'a step for the shared pool that is running' : undefined;
         },
         restartPolicy: () => {
           let mounts = '';
