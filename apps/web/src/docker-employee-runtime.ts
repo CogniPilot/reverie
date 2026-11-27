@@ -638,6 +638,7 @@ export class DockerEmployeeRuntime {
       pool: a.pool,
       limits: a.limits,
       absent: a.absent,
+      moves: () => this.#absentPlanMoves,
       sessions: a.ctx.sessions,
       current: () => this.current() && this.#attached === a,
     });

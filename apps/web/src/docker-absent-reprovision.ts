@@ -115,6 +115,11 @@ export interface DockerAbsentReprovisionPlanMoves {
     employeeId: string,
     owner: string | undefined
   ): Promise<readonly { moveId: string; record: unknown }[]>;
+  /** The candidate laptop each abandoned move of this employee had created, as that move's journal kept its record. */
+  abandonedCandidateRecords?(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: DockerEmployeeContinuationRecord }[]>;
   /** Containers named by the moves the owner abandoned for this employee. */
   ownerAbandonedContainers?(
     employeeId: string,

@@ -37,11 +37,17 @@
  *   turn in progress. The office can never type to that agent again, so nothing is gained by keeping it between
  *   turns. A turn in progress, a pane the office is not reading, a second running laptop or a running laptop that
  *   is not the recorded one all refuse, as they always did.
+ *
+ * One kind of running laptop is not counted among those: the candidate that an abandoned plan move of this employee
+ * created for the new plan, when it is not the employee's recorded laptop and a read inside it, made now, finds no
+ * agent (`#withoutEmptyCandidates`). A move starts that container before it launches an agent in it, so a move that
+ * was abandoned in between leaves it running and empty, and the rebuild is the product's own way to remove what an
+ * abandoned move left behind.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
-import type { DockerAbsentReprovision } from './docker-absent-reprovision.js';
+import type { DockerAbsentReprovision, DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
 import type { DockerLaptopLimitUpkeep } from './docker-laptop-limit-upkeep.js';
 import type { DockerPoolReconciliation } from './docker-pool-reconciliation.js';
 import { reprovisionHeads, type DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
@@ -84,6 +90,8 @@ export interface DockerSupervisorLaptopDeps {
   /** The in-place repair of one finished laptop's own limits that does not ask where its employee is. */
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
+  /** The plan moves' journal, for the candidate laptops that abandoned moves of an employee left behind. */
+  readonly moves?: () => Pick<DockerAbsentReprovisionPlanMoves, 'abandonedCandidateRecords'> | undefined;
   /** The office's own terminal object for a session, when it has one. */
   readonly sessions: { get(sessionId: string): SupervisedTerminal | undefined };
   /** The laptop runtime's configuration and key are still the ones the office started with. */
@@ -238,8 +246,34 @@ export class DockerSupervisorLaptops {
   }
 
   /**
+   * The running laptops that still have to be shown empty before a rebuild may discard them: all of them, except
+   * the candidate of an abandoned plan move of this employee in which a read made now finds no agent. The read is
+   * the same one that shows the recorded laptop empty; the move's journal only says which container to read. The
+   * employee's recorded laptop is never taken off the list here, and neither is a candidate that cannot be read or
+   * in which anything runs.
+   */
+  async #withoutEmptyCandidates(employee: SupervisedEmployee, running: readonly string[]): Promise<readonly string[]> {
+    const recorded = this.#row(employee.id)?.destination?.containerId;
+    if (running.every((id) => id === recorded)) return running;
+    const empty = new Set<string>();
+    try {
+      const left = (await this.deps.moves?.()?.abandonedCandidateRecords?.(employee.id, employee.owner)) ?? [];
+      for (const { record } of left) {
+        const id = record.destination?.containerId;
+        if (!id || id === recorded || !running.includes(id) || empty.has(id)) continue;
+        const presence = await this.#destinationPresence(record);
+        if (presence === 'absent' || presence === 'exited') empty.add(id);
+      }
+    } catch {
+      return running;
+    }
+    return running.filter((id) => !empty.has(id));
+  }
+
+  /**
    * What a rebuild would discard, read now. `no-laptop`: the Engine lists no running laptop of this employee.
-   * `exited` / `absent`: the one running laptop is the recorded destination and a read inside it found no agent.
+   * `exited` / `absent`: the one running laptop is the recorded destination and a read inside it found no agent;
+   * `absent` also when the only laptops that run are empty candidates of abandoned plan moves.
    * `running`: an agent runs there, or a laptop runs that this office cannot show to be empty.
    */
   async provider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence> {
@@ -255,6 +289,8 @@ export class DockerSupervisorLaptops {
       return 'unknown';
     }
     if (!running.length) return 'no-laptop';
+    running = await this.#withoutEmptyCandidates(employee, running);
+    if (!running.length) return 'absent';
     const row = this.#row(employee.id);
     if (!row?.destination || running.length !== 1 || running[0] !== row.destination.containerId) return 'running';
     return this.#destinationPresence(row);
@@ -405,9 +441,11 @@ export class DockerSupervisorLaptops {
    */
   async #discardRefusal(
     employee: SupervisedEmployee,
-    running: readonly string[],
+    listed: readonly string[],
     proved: readonly SupervisorPrecondition[]
   ): Promise<SupervisorActionResult | undefined> {
+    const running = await this.#withoutEmptyCandidates(employee, listed);
+    if (!running.length) return undefined;
     const row = this.#row(employee.id);
     const recorded = !!row?.destination && running.length === 1 && running[0] === row.destination.containerId;
     const presence = recorded ? await this.#destinationPresence(row!) : 'running';
