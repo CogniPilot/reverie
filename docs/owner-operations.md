@@ -397,7 +397,14 @@ was first made, and lapses when it is not repeated):
   sign-in put back, an owed handoff being typed, a rebuild), whoever asked for
   the restart: the supervisor's own request stays valid for two minutes after
   it last asked, and a handoff cut off while it is typed can never be typed
-  again. A step taken as interrupted after thirty minutes no longer counts. For
+  again. A step that has not returned after thirty minutes no longer counts,
+  whether or not its employee is still in the office. A rebuild or a repair
+  of a laptop's limits that has not returned after thirty minutes no longer
+  counts either: both are journaled, so a restart in the middle is recovered
+  (a rebuild resumes from its journal entry, or, cut off before it retired the
+  laptop record, is repeated from a fresh preview; a limits repair resumes its
+  open attempt), and the restart is what ends one that hangs. A laptop set-up
+  step is always waited for. For
   a request of the supervisor there is also no pool step that is still to be
   taken. A restart would cut such an operation off, and for a plan move
   it would reset what the move has watched. The handoff a closed move still

@@ -203,7 +203,8 @@ function persisted<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 export class DockerAbsentReprovision {
-  readonly #flights = new Set<string>();
+  /** The employees with a reprovision or rebuild in flight, and when each began. */
+  readonly #flights = new Map<string, number>();
   constructor(
     private readonly company: CompanyService,
     private readonly store: CompanyDockerContinuationStore,
@@ -227,6 +228,10 @@ export class DockerAbsentReprovision {
   /** Denial DATA for other owners of the same employee; never an admission. */
   flightActive(employeeId: string): boolean {
     return this.#flights.has(employeeId);
+  }
+  /** When the reprovision or rebuild of this employee that is in flight began, while one is. Denial DATA. */
+  flightSince(employeeId: string): number | undefined {
+    return this.#flights.get(employeeId);
   }
   /** Positive inventory only. A command failure or foreign output is unknown. */
   async #listed(kind: 'container' | 'network', filters: readonly string[], format: string): Promise<string[]> {
@@ -920,7 +925,7 @@ export class DockerAbsentReprovision {
     this.runtimeCurrent();
     authority.require();
     if (this.#flights.has(employeeId)) refuse('DOCKER_REPROVISION_BUSY');
-    this.#flights.add(employeeId);
+    this.#flights.set(employeeId, this.now());
     try {
       let entry = this.#entry(input.operationId);
       if (!entry) {
@@ -1253,7 +1258,7 @@ export class DockerAbsentReprovision {
     this.runtimeCurrent();
     authority.require();
     if (this.#flights.has(employeeId)) refuse('DOCKER_REPROVISION_BUSY');
-    this.#flights.add(employeeId);
+    this.#flights.set(employeeId, this.now());
     try {
       let entry = this.#entry(input.operationId);
       if (!entry) {

@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   OFFICE_SELF_RESTART_LIMITS,
+  OVERDUE_OPERATION_MS,
+  operationHoldsRestart,
   OfficeSelfRestart,
   OfficeSelfRestartRecord,
   ownContainerId,
@@ -409,5 +411,20 @@ describe('when the office may restart itself next', () => {
     expect(twice.restart.nextAllowedAt()).toBe(100 * HOUR + 16 * HOUR);
     // Restarts more than a day ago do not count.
     expect(office([10 * HOUR, 11 * HOUR]).restart.nextAllowedAt()).toBeUndefined();
+  });
+});
+
+describe('a laptop operation that has not returned, as a restart weighs it', () => {
+  it('waits for a set-up step always, and for a rebuild or a limits repair only until it is overdue', () => {
+    const now = 100 * HOUR;
+    expect(OVERDUE_OPERATION_MS).toBe(30 * MINUTE);
+    expect(operationHoldsRestart({ setUp: false }, now)).toBe(false);
+    expect(operationHoldsRestart({ setUp: true }, now)).toBe(true);
+    expect(operationHoldsRestart({ setUp: false, rebuildSince: now - 29 * MINUTE }, now)).toBe(true);
+    // A rebuild that has not returned in thirty minutes hangs; its journal recovers a restart in the middle of it.
+    expect(operationHoldsRestart({ setUp: false, rebuildSince: now - 30 * MINUTE }, now)).toBe(false);
+    expect(operationHoldsRestart({ setUp: false, limitsSince: now - 10 * MINUTE }, now)).toBe(true);
+    expect(operationHoldsRestart({ setUp: false, limitsSince: now - 31 * MINUTE }, now)).toBe(false);
+    expect(operationHoldsRestart({ setUp: true, rebuildSince: now - 5 * HOUR }, now)).toBe(true);
   });
 });

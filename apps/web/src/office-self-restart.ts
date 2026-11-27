@@ -49,6 +49,41 @@ export const OFFICE_SELF_RESTART_LIMITS: OfficeSelfRestartLimits = {
   spacingMs: 60 * MINUTE,
 };
 
+/**
+ * How long a journaled laptop operation (a rebuild, a repair of a laptop's limits) holds off a restart of the
+ * office. The supervisor gives up its own wait for a step after the same time (`SUPERVISOR_LIMITS.stepDeadlineMs`).
+ */
+export const OVERDUE_OPERATION_MS = 30 * MINUTE;
+
+/** The laptop operations of one employee that this office has in flight, and when the journaled ones began. */
+export interface LaptopOperationsInFlight {
+  /** A step of a laptop set-up. Always waited for. */
+  readonly setUp: boolean;
+  /** When the rebuild or reprovision in flight began. */
+  readonly rebuildSince?: number;
+  /** When the repair of the laptop's limits in flight began. */
+  readonly limitsSince?: number;
+}
+
+/**
+ * Whether a restart of the office now would cut off a laptop operation it must wait for. A set-up step is always
+ * waited for. A rebuild and a limits repair are waited for until `OVERDUE_OPERATION_MS` after they began, and not
+ * after that: both are journaled so that a restart in the middle is recovered. A rebuild retires the laptop record
+ * in one canonical write and resumes from its journal entry at the next look (`DockerAbsentReprovision`); one cut
+ * off before that write finds the laptop it discarded gone, and the next rebuild repeats from a fresh preview,
+ * because each of its steps only removes or advances. A limits repair resumes its open attempt as itself
+ * (`DockerResourceRepairJournal`). One that has not returned after that long hangs, and the restart is what ends
+ * it; without this a rebuild that never returned would keep the office from ever restarting itself.
+ */
+export function operationHoldsRestart(
+  flights: LaptopOperationsInFlight,
+  now: number,
+  overdueMs = OVERDUE_OPERATION_MS
+): boolean {
+  const young = (since: number | undefined) => since !== undefined && now - since < overdueMs;
+  return flights.setUp || young(flights.rebuildSince) || young(flights.limitsSince);
+}
+
 /** A request of the supervisor that was not repeated for this long no longer stands. It asks every half minute. */
 const REQUEST_LAPSE_MS = 2 * MINUTE;
 

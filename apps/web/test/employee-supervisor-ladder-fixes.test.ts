@@ -571,6 +571,8 @@ function officeOf(
     officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number; nextAt?: number };
     /** What a read inside each laptop finds beside the agent. Without it the office cannot make that read. */
     otherWork?: (id: string) => true | false | 'unknown';
+    /** The rebuild of this employee, the how-many-th of the office, never returns. */
+    hang?: (id: string, count: number) => boolean;
   } = {}
 ) {
   const start = 1_800_000_000_000;
@@ -636,11 +638,13 @@ function officeOf(
       : {}),
     actions: {
       'rebuild-laptop': async (employee, _guard, _move, proved) => {
+        const hung = options.hang?.(employee.id, rebuilt.length) === true;
         rebuilt.push({
           id: employee.id,
           minute: Math.round((state.now - start) / MINUTE),
-          proved: (proved ?? []).join(),
+          proved: hung ? 'hung' : (proved ?? []).join(),
         });
+        if (hung) return new Promise(() => {});
         afterRebuild.get(employee.id)?.(desks.get(employee.id)!);
         return { outcome: 'done', detail: 'rebuilt' };
       },
@@ -687,6 +691,7 @@ function officeOf(
     report: (id: string) => supervisor.reports(undefined).find((row) => row.employeeId === id)!,
     /** The office process ends and a new one starts on what was saved. */
     restart: () => void (supervisor = new EmployeeSupervisor(ports, undefined, limits)),
+    supervisor: () => supervisor,
   };
 }
 const healthy = (target: Desk) => {
@@ -1222,5 +1227,52 @@ describe('an office that can read none of its laptops and may not restart itself
     expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
     expect(o.rebuilt[0]!.proved).toMatch(/agent-unreadable/);
     expect(o.rebuilt[0]!.minute).toBeLessThan(4 * 60);
+  });
+});
+
+describe('a step that hangs, as the restart of the office weighs it', () => {
+  const held = () => ({
+    session: ATTACHED_IDLE,
+    restoration: VIEW_LOST,
+    reading: heldAt('DOCKER_RESOURCE_HELPER_FAILED'),
+    provider: 'running' as const,
+  });
+
+  it('is no longer said to be in flight once its time is up, also for an employee the owner stopped meanwhile', async () => {
+    const o = officeOf(['a'], held, { hang: () => true });
+    await o.run(20);
+    expect(o.rebuilt.map((row) => row.proved)).toEqual(['hung']);
+    expect(o.supervisor().stepInFlight()).toBe(
+      'a step of the office supervisor for A that is running (rebuild-laptop)'
+    );
+    o.desks.get('a')!.employee = { ...o.desks.get('a')!.employee, desiredRunning: false };
+    await o.run(15);
+    expect(o.supervisor().stepInFlight()).toBeUndefined();
+    await o.run(3 * 60);
+    expect(o.supervisor().stepInFlight()).toBeUndefined();
+  });
+
+  it('is not said to be in flight past its time even before a pass has looked at it', async () => {
+    const o = officeOf(['a'], held, { hang: () => true });
+    await o.run(10);
+    expect(o.supervisor().stepInFlight()).toMatch(/rebuild-laptop/);
+    o.state.now += 30 * MINUTE;
+    expect(o.supervisor().stepInFlight()).toBeUndefined();
+  });
+
+  it('is forgotten with an employee who was removed', async () => {
+    const o = officeOf(
+      ['a', 'b'],
+      (id) =>
+        id === 'a'
+          ? held()
+          : { session: ATTACHED_IDLE, restoration: { state: 'attached' }, reading: READY, provider: 'running' },
+      { hang: (id) => id === 'a' }
+    );
+    await o.run(10);
+    expect(o.supervisor().stepInFlight()).toMatch(/for A /);
+    o.desks.delete('a');
+    await o.run(1);
+    expect(o.supervisor().stepInFlight() ?? '').not.toMatch(/for A /);
   });
 });

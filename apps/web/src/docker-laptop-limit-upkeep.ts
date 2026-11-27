@@ -61,6 +61,7 @@ export interface DockerLaptopLimitUpkeepDeps {
    * where the office cannot say, and then such a record is never repaired here.
    */
   openMoves?(employeeId: string, owner: string | undefined): Promise<readonly { readonly id: string }[]>;
+  now?(): number;
 }
 
 export interface DockerLaptopLimitUpkeepResult {
@@ -74,12 +75,17 @@ function refuse(code: string): never {
 }
 
 export class DockerLaptopLimitUpkeep {
-  readonly #flights = new Set<string>();
+  /** The employees with a repair in flight, and when each began. */
+  readonly #flights = new Map<string, number>();
   constructor(private readonly deps: DockerLaptopLimitUpkeepDeps) {}
 
   /** Denial DATA for other owners of the same employee; never an admission. */
   flightActive(employeeId: string): boolean {
     return this.#flights.has(employeeId);
+  }
+  /** When the repair of this employee that is in flight began, while one is. Denial DATA. */
+  flightSince(employeeId: string): number | undefined {
+    return this.#flights.get(employeeId);
   }
 
   /** The finished laptop record a repair acts for, when the employee has one. No Engine call. */
@@ -143,7 +149,7 @@ export class DockerLaptopLimitUpkeep {
     };
     current();
     if (this.#flights.has(employeeId) || this.deps.busy(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
-    this.#flights.add(employeeId);
+    this.#flights.set(employeeId, (this.deps.now ?? Date.now)());
     try {
       await this.#qualify(row, current);
       // Nothing else of this employee took flight while the laptop was being read, and no plan move opened.

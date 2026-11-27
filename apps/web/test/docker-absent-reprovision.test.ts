@@ -3439,6 +3439,7 @@ describe('a rebuild that has not returned when another is asked for', () => {
     const first = f.service.rebuild(employeeId, request, f.authority);
     for (let tries = 0; tries < 100 && !waiting; tries++) await new Promise((resolve) => setTimeout(resolve, 5));
     expect(waiting).toBe(true);
+    expect(f.service.flightSince(employeeId)).toEqual(expect.any(Number));
     expect(f.service.flightActive(employeeId)).toBe(true);
     // A second rebuild of the same laptop, as the supervisor asks once it took the first for interrupted.
     await expect(
@@ -3453,6 +3454,7 @@ describe('a rebuild that has not returned when another is asked for', () => {
     expect(f.engine.created).toHaveLength(1);
     // After it, a preview names nothing pending, and a request made before the first finished is out of date.
     expect(f.service.flightActive(employeeId)).toBe(false);
+    expect(f.service.flightSince(employeeId)).toBeUndefined();
     await expect(
       f.service.rebuild(employeeId, { ...request, operationId: '99999999-9999-4999-8999-999999999999' }, f.authority)
     ).rejects.toMatchObject({ code: expect.stringMatching(/^DOCKER_RE/) });

@@ -117,7 +117,7 @@ import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
 import { EmployeeSupervisor } from '../employee-supervisor.js';
 import { officeSupervisorPorts } from '../employee-supervisor-office.js';
-import { OfficeSelfRestart, OfficeSelfRestartRecord, ownRestartPolicy } from '../office-self-restart.js';
+import { OfficeSelfRestart, OfficeSelfRestartRecord, operationHoldsRestart, ownRestartPolicy } from '../office-self-restart.js';
 import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
 import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
 import { PlanSignInReconciler, describePlanSignInNotice, type SignInHolderPort } from '../plan-signin-reconciler.js';
@@ -2676,7 +2676,7 @@ export class WebServer extends EventEmitter {
           if (
             this.companyService
               .registeredEmployees()
-              .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
+              .some((employee) => operationHoldsRestart(dockerRuntime.laptopOperations(employee.id), Date.now()))
           )
             return 'a laptop operation that is running';
           // The supervisor's own steps: one for the pool every laptop shares belongs to no employee, and a wake, a

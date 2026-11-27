@@ -73,6 +73,7 @@ import {
   SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_POLICY,
 } from './employee-supervisor-policy.js';
+import { OVERDUE_OPERATION_MS } from './office-self-restart.js';
 
 /** The identity of one employee as the company records it right now. */
 export interface SupervisedEmployee {
@@ -343,7 +344,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   sharedCauseProbeMs: 30 * 60_000,
   officeBlindRestartMs: 30 * 60_000,
   officeRestartTriedMs: 6 * 60 * 60_000,
-  stepDeadlineMs: 30 * 60_000,
+  stepDeadlineMs: OVERDUE_OPERATION_MS,
 };
 /** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
 const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
@@ -573,7 +574,9 @@ export class EmployeeSupervisor {
    */
   stepInFlight(): string | undefined {
     if (this.#poolActing) return 'a step for the shared pool that is running';
-    const [id, step] = [...this.#steps].at(0) ?? [];
+    const now = this.ports.now();
+    // A step older than its deadline is presumed to hang, whoever it belongs to now: see `#overdueStep`.
+    const [id, step] = [...this.#steps].find(([, row]) => now - row.at < this.#resolved.stepDeadlineMs) ?? [];
     if (!id || !step) return undefined;
     const name = this.ports.employees().find((row) => row.id === id)?.name ?? id;
     return `a step of the office supervisor for ${name} that is running (${step.action})`;
@@ -598,6 +601,8 @@ export class EmployeeSupervisor {
     const employees = this.ports.employees();
     const known = new Set(employees.map((employee) => employee.id));
     for (const id of [...this.#histories.keys()]) if (!known.has(id)) this.#forget(id);
+    // A step of an employee who is no longer on the books is nobody's to wait for.
+    for (const id of [...this.#steps.keys()]) if (!known.has(id)) this.#dropStep(id);
     for (const id of [...this.#reports.keys()])
       if (!known.has(id)) {
         this.#reports.delete(id);
@@ -1203,6 +1208,9 @@ export class EmployeeSupervisor {
   /** Returns true when an action was started for this employee. */
   async #one(employee: SupervisedEmployee, seat: boolean): Promise<boolean> {
     const now = this.ports.now();
+    // Asked first, whatever the employee's attendance: a step of an employee the owner stopped meanwhile must not
+    // hang on for good either. The next pass looks at the employee afresh.
+    if (this.#overdueStep(employee, now)) return false;
     const previous = this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY;
     if (employee.desiredRunning !== true || employee.onVacation) {
       // Stopped by choice: described from the record alone. No port is read and nothing is remembered but the reset.
@@ -1227,8 +1235,6 @@ export class EmployeeSupervisor {
       return false;
     }
     if (this.#acting.has(employee.id)) {
-      // A step that has not returned in time is taken as interrupted; the next pass looks at the employee afresh.
-      if (this.#overdueStep(employee, now)) return false;
       // An employee with a step in flight says nothing about the office; the step itself keeps the office from
       // asking for its own restart (`#officeOperating`).
       this.#reading.set(employee.id, 'no-evidence');
@@ -1723,6 +1729,15 @@ export class EmployeeSupervisor {
       /* best-effort */
     }
     return true;
+  }
+
+  /** Forget the step of an employee who was removed: its result, if it ever comes, settles nothing. */
+  #dropStep(id: string): void {
+    const step = this.#steps.get(id);
+    if (!step) return;
+    step.givenUp = true;
+    this.#steps.delete(id);
+    this.#acting.delete(id);
   }
 
   /** A step that was taken as interrupted has returned after all. Its outcome is said; the ladder has moved on. */

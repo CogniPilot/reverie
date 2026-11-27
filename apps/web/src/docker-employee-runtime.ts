@@ -1,4 +1,5 @@
 import type { DockerWakeOutcome } from './company-wake.js';
+import type { LaptopOperationsInFlight } from './office-self-restart.js';
 import { employeeStartupOrder, heldFirstNotice } from './employee-startup-order.js';
 import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
@@ -321,6 +322,18 @@ export class DockerEmployeeRuntime {
     return (
       !!a && (a.service.flightActive(employeeId) || a.limits.flightActive(employeeId) || a.absent.flightActive(employeeId))
     );
+  }
+  /** The laptop operations of this employee that are in flight, as a restart of the office weighs them. */
+  laptopOperations(employeeId: string): LaptopOperationsInFlight {
+    const a = this.#attached;
+    if (!a) return { setUp: false };
+    const rebuildSince = a.absent.flightSince(employeeId),
+      limitsSince = a.limits.flightSince(employeeId);
+    return {
+      setUp: a.service.flightActive(employeeId),
+      ...(rebuildSince === undefined ? {} : { rebuildSince }),
+      ...(limitsSince === undefined ? {} : { limitsSince }),
+    };
   }
   /** One read-only Engine command for the office's own use, where no laptop is involved. */
   engineRead(args: readonly string[]): Promise<string> {
