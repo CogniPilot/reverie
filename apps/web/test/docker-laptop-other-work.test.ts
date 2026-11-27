@@ -77,6 +77,7 @@ function work(
       }
       const found = row(path);
       if (!found) throw gone();
+      if (path.endsWith('/comm')) return found.name + '\n';
       // The name may hold spaces and brackets: the fields are counted from the last one.
       const fields = [
         found.state ?? 'S',
@@ -211,6 +212,20 @@ describe('the in-laptop read of work that is not the agent', () => {
     const ended = work([laptop(job)], { paneDead: true }).seen!;
     expect(ended.agent).toBe(false);
     expect(ended.others).toBeGreaterThanOrEqual(1);
+  });
+
+  it('refuses when tmux cannot be asked while a tmux process of the user is alive: the agent may be among them', () => {
+    // The socket file was cleared under a server that still runs, with the agent in it. Without tmux's word the
+    // agent's own processes cannot be told from other work, and they are never reported as other work.
+    expect(() => work([laptop()], { server: false })).toThrow('Existing Docker provider view unavailable');
+    // The same with only a tmux server of the employee's own alive: it is not known whose it is.
+    const own: Record<number, Row> = {
+      1: { parent: 0, name: 'reverie-worker-' },
+      60: { parent: 1, name: 'tmux: server' },
+      61: { parent: 60, name: 'make' },
+      90: { parent: 0, name: 'node' },
+    };
+    expect(() => work([own], { server: false })).toThrow('Existing Docker provider view unavailable');
   });
 
   it('says nothing of the CPU where the laptop cannot read its own cgroup', () => {

@@ -188,6 +188,12 @@ if (mode === 'work') {
   // No server, or no provider session on it: there is no agent, and what else runs is still counted.
   const served = /^([1-9][0-9]{0,9})\n$/.exec(ask(['#{pid}']) || '');
   const shown = served ? /^([1-9][0-9]{0,9}) ([01])\n$/.exec(ask(['-t', target + ':', '#{pane_pid} #{pane_dead}']) || '') : null;
+  // tmux did not answer for the laptop's own socket. With no tmux process of this user alive there is no agent,
+  // and whatever else runs is counted. With one alive it may be the provider's own server under a socket file
+  // that was cleared (see dockerProviderTmuxMayRun): which processes are the agent's is not known then, and a
+  // guess would call the agent itself other work. The read refuses, which every caller takes for unknown.
+  const tmuxMayRun = served ? false : (${dockerProviderTmuxMayRun.toString()})(fs, uid, process.pid);
+  if (tmuxMayRun) refuse();
   const serverPid = served ? Number(served[1]) : undefined;
   const agentPid = shown && shown[2] === '0' ? Number(shown[1]) : undefined;
   function table() {
