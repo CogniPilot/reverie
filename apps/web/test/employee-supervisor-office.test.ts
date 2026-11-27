@@ -60,6 +60,9 @@ function office() {
     audits: [] as SupervisorAuditEntry[],
     wake: { awakened: ['a'], skipped: [] } as { awakened: string[]; skipped: Array<{ employeeId: string; reason: string }> },
     throwing: undefined as Error | undefined,
+    /** What the adoption of a retired move answers with; undefined adopts. */
+    adoption: undefined as Error | undefined,
+    bound: true,
   };
   const deps = {
     company: {
@@ -79,7 +82,7 @@ function office() {
     },
     ready: () => state.ready,
     laptops: {
-      glance: () => ({ record: { phase: 'ready', version: 2, operationId: 'op' }, bound: true, policyApproved: true, templateOnRecord: true }),
+      glance: () => ({ record: { phase: 'ready', version: 2, operationId: 'op' }, bound: state.bound, policyApproved: true, templateOnRecord: true }),
       flightActive: () => state.flight,
       read: async () => undefined,
       source: async () => 'stopped',
@@ -107,10 +110,28 @@ function office() {
         state.calls.push(['continueDocker', ...args]);
         if (state.throwing) throw state.throwing;
       },
-      abandonHeldDockerMove: async (id: string, employeeId: string, owner: unknown, authorized: () => void) => {
+      abandonHeldDockerMove: async (
+        id: string,
+        employeeId: string,
+        owner: unknown,
+        authorized: () => void,
+        note?: string
+      ) => {
         authorized();
-        state.calls.push(['abandon', id, employeeId, owner]);
+        state.calls.push(['abandon', id, employeeId, owner, note]);
         if (state.throwing) throw state.throwing;
+        state.moves = state.moves.map((value) => (value.id === id ? { ...value, phase: 'failed' } : value));
+      },
+      resolve: async (id: string, expected: unknown, owner: unknown, executor: unknown) => {
+        state.calls.push(['resolve', id, expected, owner, executor]);
+        if (state.adoption) throw state.adoption;
+        state.moves = state.moves.map((value) => (value.id === id ? { ...value, phase: 'completed' } : value));
+      },
+      settleRetiredMove: async (id: string, employeeId: string, owner: unknown, authorized: () => void, note: string) => {
+        authorized();
+        state.calls.push(['settle', id, employeeId, owner, note]);
+        if (state.throwing) throw state.throwing;
+        state.moves = state.moves.map((value) => (value.id === id ? { ...value, phase: 'failed' } : value));
       },
     },
     moveExecutor: (employee: SupervisedEmployee, current: () => boolean) => ({ executorFor: employee.id, current }),
@@ -278,9 +299,6 @@ describe('office supervisor ports', () => {
     // A working move of the retired runtime still counts as a move in progress.
     o.state.moves = [move({ id: 'native', backend: undefined, phase: 'starting' })];
     expect(await o.ports.openMove(o.employee())).toMatchObject({ id: 'native', docker: false, phase: 'starting' });
-    // Two open moves are the owner's to untangle.
-    o.state.moves = [move(), move({ id: 'move-2' })];
-    expect((await o.ports.openMove(o.employee()))!.allowedActions).toEqual([]);
   });
 
   it('continues a held move as its original, with an executor that follows the employee and the switch', async () => {
@@ -333,7 +351,8 @@ describe('office supervisor ports', () => {
     o.state.moves = [move()];
     const held = (await o.ports.openMove(o.employee()))!;
     expect(await o.ports.actions['abandon-move']!(o.employee(), pass, held)).toEqual({ outcome: 'done', detail: 'abandoned move-1' });
-    expect(o.state.calls).toEqual([['abandon', 'move-1', 'a', undefined]]);
+    expect(o.state.calls).toEqual([['abandon', 'move-1', 'a', undefined, expect.stringContaining('supervisorAutoRepair')]]);
+    o.state.moves = [move()];
     const refusing = () => {
       throw new Error('switched off');
     };
@@ -459,5 +478,202 @@ describe('office supervisor ports', () => {
       last: { action: 'continue-move', outcome: 'done' },
     });
     expect(supervisor.reports(undefined).find((report) => report.employeeId === 'b')).toMatchObject({ condition: 'healthy' });
+  });
+});
+
+describe('office supervisor ports: a plan move that stopped part-way', () => {
+  const native = (patch: Partial<PlanMoveRecord> = {}) =>
+    move({
+      id: 'native',
+      backend: undefined,
+      allowedActions: undefined,
+      error: 'The server restarted during this move; inspect both sessions before retrying',
+      oldSession: 'session-old',
+      newSession: 'session-other',
+      ...patch,
+    });
+  const abandon = (o: ReturnType<typeof office>, held: Parameters<NonNullable<typeof o.ports.actions['abandon-move']>>[2], guard = pass) =>
+    o.ports.actions['abandon-move']!(o.employee(), guard, held);
+
+  it('closes several open moves one at a time, oldest first, and continues none of them', async () => {
+    const o = office();
+    // The service lists the newest first.
+    o.state.moves = [move({ id: 'move-2' }), move()];
+    const first = (await o.ports.openMove(o.employee()))!;
+    expect(first).toMatchObject({ id: 'move-1', allowedActions: ['abandon'] });
+    expect(await abandon(o, first)).toEqual({ outcome: 'done', detail: 'abandoned move-1' });
+    // One is left: it keeps its whole ladder.
+    expect(await o.ports.openMove(o.employee())).toMatchObject({
+      id: 'move-2',
+      allowedActions: ['continue-original', 'abandon'],
+    });
+  });
+
+  it('records who closed a move and why, in the sentence the closed move keeps', async () => {
+    const o = office();
+    o.state.moves = [move({ error: 'The target application viewer is unavailable' })];
+    await abandon(o, (await o.ports.openMove(o.employee()))!);
+    const note = o.state.calls[0]![4] as string;
+    expect(note).toMatch(/^Closed by the office on the owner's standing rule \(company setting supervisorAutoRepair\)/);
+    expect(note).toContain('The target application viewer is unavailable');
+    expect(note.length).toBeLessThan(1000);
+  });
+
+  it('answers a repeat for a move that has ended with done and calls nothing', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    await abandon(o, held);
+    expect(await abandon(o, held)).toEqual({ outcome: 'done', detail: 'already closed move-1' });
+    o.state.moves = [move({ phase: 'completed' })];
+    expect(await abandon(o, held)).toEqual({ outcome: 'done', detail: 'already closed move-1' });
+    expect(o.state.calls.filter(([name]) => name === 'abandon')).toHaveLength(1);
+    // The service's own replay answer is passed through the same way.
+    o.state.moves = [move()];
+    o.state.throwing = new PlanMoveError('This move is still working on a step; wait until it is held for recovery', 409);
+    expect((await abandon(o, held)).outcome).toBe('busy');
+  });
+
+  it('abandons with no executor and no requester, whatever the move had issued', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    await abandon(o, (await o.ports.openMove(o.employee()))!);
+    // Only the journal call was made: nothing that could continue, inspect or launch.
+    expect(o.state.calls.map(([name]) => name)).toEqual(['abandon']);
+    expect(o.state.calls[0]).toHaveLength(5);
+  });
+
+  it('shows a held move of the retired runtime only behind every laptop move, and only under the laptop runtime', async () => {
+    const o = office();
+    o.state.moves = [native(), move()];
+    expect(await o.ports.openMove(o.employee())).toMatchObject({ id: 'move-1', docker: true });
+    o.state.moves = [native()];
+    expect(await o.ports.openMove(o.employee())).toEqual({
+      id: 'native',
+      docker: false,
+      phase: 'recovery-required',
+      busy: false,
+      error: 'The server restarted during this move; inspect both sessions before retrying',
+      allowedActions: ['settle'],
+      toAccount: 'plan-b',
+    });
+    // With repairs switched off nothing would close it, so it is not put in front of the laptop's own retries.
+    o.state.settings = { supervisorAutoRepair: false };
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+    o.state.settings = {};
+    // A resource transaction keeps its own recovery actor and is never shown.
+    for (const patch of [
+      { resourceIntent: {} as never },
+      { resourcePhase: 'prepared' as const },
+      { resourceOwnerScope: 'a'.repeat(64) },
+      { purpose: 'runtime-refresh' as const },
+    ]) {
+      o.state.moves = [native(patch)];
+      expect(await o.ports.openMove(o.employee()), JSON.stringify(patch)).toBeUndefined();
+    }
+  });
+
+  it('closes a retired move and keeps the employee where they work', async () => {
+    const o = office();
+    o.state.moves = [native()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    expect(await abandon(o, held)).toEqual({ outcome: 'done', detail: 'closed native' });
+    expect(o.state.calls).toEqual([
+      ['settle', 'native', 'a', undefined, expect.stringContaining('The server restarted during this move')],
+    ]);
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+    expect(await abandon(o, held)).toEqual({ outcome: 'done', detail: 'already closed native' });
+  });
+
+  it('finishes a retired move by the owner’s adoption when the employee already works on its new session', async () => {
+    const o = office();
+    o.state.moves = [native({ newSession: 'session-a', sourceStopRequested: true, sourceCleanupVerified: true })];
+    const held = (await o.ports.openMove(o.employee()))!;
+    expect(await abandon(o, held)).toEqual({ outcome: 'done', detail: 'adopted native' });
+    expect(o.state.calls).toEqual([
+      [
+        'resolve',
+        'native',
+        { oldSession: 'session-old', newSession: 'session-a', toAccount: 'plan-b' },
+        undefined,
+        expect.objectContaining({ executorFor: 'a' }),
+      ],
+    ]);
+    // The executor it was given holds only while the supervisor's guard holds.
+    const executor = o.state.calls[0]![4] as { current(): boolean };
+    expect(executor.current()).toBe(true);
+  });
+
+  it('closes the record instead when the adoption’s own checks refuse, and adopts nothing without cleanup proof', async () => {
+    const o = office();
+    o.state.moves = [native({ newSession: 'session-a', sourceStopRequested: true, sourceCleanupVerified: true })];
+    o.state.adoption = new PlanMoveError('The candidate harness or destination plan changed');
+    expect(await abandon(o, (await o.ports.openMove(o.employee()))!)).toEqual({ outcome: 'done', detail: 'closed native' });
+    expect(o.state.calls.map(([name]) => name)).toEqual(['resolve', 'settle']);
+    // An adoption that is only busy is waited for, and nothing is closed beside it.
+    o.state.calls.length = 0;
+    o.state.moves = [native({ newSession: 'session-a', sourceStopRequested: true, sourceCleanupVerified: true })];
+    o.state.adoption = new PlanMoveError('The move is still active; wait before recovery');
+    const waiting = (await o.ports.openMove(o.employee()))!;
+    expect((await abandon(o, waiting)).outcome).toBe('busy');
+    expect(o.state.calls.map(([name]) => name)).toEqual(['resolve']);
+    expect(await o.ports.openMove(o.employee())).toMatchObject({ id: 'native' });
+    // Without durable cleanup proof there is nothing to adopt: only the record is closed.
+    o.state.calls.length = 0;
+    o.state.adoption = undefined;
+    o.state.moves = [native({ newSession: 'session-a', sourceStopRequested: true })];
+    await abandon(o, (await o.ports.openMove(o.employee()))!);
+    expect(o.state.calls.map(([name]) => name)).toEqual(['settle']);
+  });
+
+  it('closes nothing for an employee without a laptop, or once the supervisor may no longer act', async () => {
+    const o = office();
+    o.state.moves = [native()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    o.state.bound = false;
+    expect(await abandon(o, held)).toMatchObject({ outcome: 'refused', detail: expect.stringContaining('does not work in a laptop') });
+    o.state.bound = true;
+    o.state.now += 7 * 60 * 60_000;
+    const refusing = () => {
+      throw new Error('switched off');
+    };
+    expect(await abandon(o, held, refusing)).toMatchObject({ outcome: 'refused', detail: 'The office supervisor may no longer close this move' });
+    expect(o.state.calls).toEqual([]);
+  });
+
+  it('leaves a retired move it could not close out of sight for six hours, so the laptop is still looked after', async () => {
+    const o = office();
+    o.state.moves = [native()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    o.state.throwing = new PlanMoveError('The move journal did not confirm the closure, so the move is still held', 409);
+    expect((await abandon(o, held)).outcome).toBe('refused');
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+    o.state.now += 6 * 60 * 60_000 - 1;
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+    o.state.now += 1;
+    expect(await o.ports.openMove(o.employee())).toMatchObject({ id: 'native', allowedActions: ['settle'] });
+    // A failure that is not the service's own refusal counts the same, and is still reported as a failure.
+    o.state.throwing = new Error('disk');
+    await expect(abandon(o, held)).rejects.toThrow('disk');
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+  });
+
+  it('drives a retired move from first sight to closed without asking anyone', async () => {
+    const o = office();
+    o.state.moves = [native()];
+    const supervisor = new EmployeeSupervisor(o.ports, undefined, { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0, limitsCheckMs: 600_000 });
+    const report = () => supervisor.reports(undefined).find((value) => value.employeeId === 'a')!;
+    for (let minute = 0; minute <= 16; minute++) {
+      await supervisor.tick();
+      expect(report().needsHuman).toBeUndefined();
+      o.state.now += 60_000;
+    }
+    await supervisor.tick();
+    expect(o.state.calls.map(([name]) => name)).toEqual(['settle']);
+    expect(o.state.audits.at(-1)).toMatchObject({
+      action: 'supervisor_abandon_move',
+      detail: { moveId: 'native', code: 'move-retired', outcome: 'done', detail: 'closed native' },
+    });
+    expect(report()).toMatchObject({ condition: 'healthy' });
   });
 });

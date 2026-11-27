@@ -10,7 +10,12 @@
  * - continuing a held plan move: a `supervisor` requester for the ORIGINAL of that move
  *   (`captureDockerPlanMoveSupervisorRequester`), built by the server and passed in as `moveExecutor`;
  * - abandoning a held plan move: `PlanMoves.abandonHeldDockerMove` with the supervisor's guard as its `authorized`
- *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them;
+ *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them. It
+ *   writes the move's journal only and takes no executor, so it cannot issue, repeat or inspect a provider launch;
+ * - closing a held move of the retired runtime, which gates no laptop and only keeps its employee locked: the
+ *   owner's own adoption (`PlanMoves.resolve`) when the employee already works on the session that move was
+ *   creating, otherwise `PlanMoves.settleRetiredMove`. Both change the journal only and keep the employee where
+ *   they work now;
  * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running;
  * - a lost terminal whose input is also held for good: what the office's own terminal object says of that hold and
  *   of the agent's turn (`readSupervisedTerminal`), read from memory. The rebuild that follows is a laptop step;
@@ -40,7 +45,7 @@ import {
   type SupervisorObservation,
   type SupervisorPrecondition,
 } from './employee-supervisor-policy.js';
-import { PlanMoveError, type PlanMoveExecutor, type PlanMoves } from './plan-move.js';
+import { PlanMoveError, type PlanMoveExecutor, type PlanMoveRecord, type PlanMoves } from './plan-move.js';
 import { viewerHealth } from './worker-provider-health.js';
 
 interface OfficeSession extends SupervisedTerminal {
@@ -65,7 +70,10 @@ export interface OfficeSupervisorDeps {
   restorations(): readonly { employeeId: string; state: 'attached' | 'held'; code?: string }[];
   providerHealth?(employee: CompanyEmployee): { state: 'healthy' | 'dead' | 'unknown' } | undefined;
   ownerStopPending(sessionId: string): boolean;
-  readonly moves: Pick<PlanMoves, 'list' | 'get' | 'continueDocker' | 'abandonHeldDockerMove'>;
+  readonly moves: Pick<
+    PlanMoves,
+    'list' | 'get' | 'continueDocker' | 'abandonHeldDockerMove' | 'resolve' | 'settleRetiredMove'
+  >;
   /** A plan move executor that can only continue the original of a held move, while `current` holds. */
   moveExecutor(employee: SupervisedEmployee, current: () => boolean): PlanMoveExecutor;
   planSignedIn(accountId: string): Promise<boolean | undefined>;
@@ -82,6 +90,26 @@ export interface OfficeSupervisorDeps {
 
 /** How often a session that looks fine has its screen read for a provider start-up screen. */
 const SCREEN_READ_MS = 60_000;
+/**
+ * How long a held move of the retired runtime is left out of the supervisor's view after its closing step was
+ * refused. Such a move gates no laptop, so it must not stand in front of the laptop's own repair; it is offered
+ * again after this time.
+ */
+const RETIRED_MOVE_RETRY_MS = 6 * 60 * 60_000;
+const MOVE_BUSY = /still (?:active|working|waiting)/;
+/** A held move of the retired runtime that the office may close: no laptop journal and no resource transaction. */
+const retiredHeld = (row: PlanMoveRecord): boolean =>
+  row.backend !== 'docker' &&
+  row.phase === 'recovery-required' &&
+  !row.resourceIntent &&
+  !row.resourcePhase &&
+  row.resourceOwnerScope === undefined &&
+  !row.purpose;
+/** The sentence a move closed by the office carries from then on: who closed it, on which rule, and why. */
+const closingNote = (move: SupervisorMove): string =>
+  "Closed by the office on the owner's standing rule (company setting supervisorAutoRepair), because it could " +
+  'not be finished. It had stopped with: ' +
+  (move.error ?? 'no recorded reason').slice(0, 600);
 const holds = (guard: SupervisorGuard) => () => {
   try {
     guard();
@@ -197,31 +225,82 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
       ...(held ? { busy: held } : {}),
     };
   };
+  /** When the closing step of a held move of the retired runtime was last refused, by move. In memory only. */
+  const retiredRefused = new Map<string, number>();
+  const shown = (row: PlanMoveRecord, allowedActions: readonly string[]): SupervisorMove => ({
+    id: row.id,
+    docker: row.backend === 'docker',
+    phase: row.phase,
+    busy: false,
+    ...(row.error ? { error: row.error } : {}),
+    allowedActions,
+    toAccount: row.toAccount,
+  });
   const openMove = async (employee: SupervisedEmployee): Promise<SupervisorMove | undefined> => {
-    const open = (await deps.moves.list(employee.owner))
-      .filter((row) => row.employeeId === employee.id && !['completed', 'failed'].includes(row.phase))
-      // A held move of the retired runtime never gated a laptop and keeps its own recovery record.
-      .filter((row) => row.backend === 'docker' || row.phase !== 'recovery-required');
-    const row = open[0];
-    if (!row) return undefined;
-    return {
-      id: row.id,
-      docker: row.backend === 'docker',
-      phase: row.phase,
-      busy: false,
-      ...(row.error ? { error: row.error } : {}),
-      // More than one open move is the owner's to untangle: nothing is offered.
-      allowedActions: open.length === 1 ? [...(row.allowedActions ?? [])] : [],
-      toAccount: row.toAccount,
-    };
+    // Newest first, as the service lists them.
+    const rows = (await deps.moves.list(employee.owner)).filter(
+      (row) => row.employeeId === employee.id && !['completed', 'failed'].includes(row.phase)
+    );
+    // A held move of the retired runtime never gated a laptop: a laptop move, or any move that is working, is
+    // shown before it.
+    const open = rows.filter((row) => row.backend === 'docker' || row.phase !== 'recovery-required');
+    const oldest = open.at(-1);
+    // With more than one open move none is continued: which of them the employee should end on is not the office's
+    // to choose. They are closed one at a time, oldest first, until one is left; that one keeps its whole ladder.
+    if (oldest)
+      return shown(
+        oldest,
+        (oldest.allowedActions ?? []).filter((name) => open.length === 1 || name === 'abandon')
+      );
+    // Closing one is a repair. With repairs switched off it stays out of sight, as it always was: shown, it would
+    // only stand in front of the laptop's own retries.
+    if (!deps.laptops || !flags(employee.owner).autoRepair) return undefined;
+    const retired = rows
+      .filter(retiredHeld)
+      .filter((row) => now() - (retiredRefused.get(row.id) ?? -Infinity) >= RETIRED_MOVE_RETRY_MS)
+      .at(-1);
+    return retired ? shown(retired, ['settle']) : undefined;
   };
   const moveRefusal = (error: unknown): SupervisorActionResult => {
     if (!(error instanceof PlanMoveError)) throw error;
     // A PlanMoveError carries a sentence written for the API caller.
-    return {
-      outcome: /still (?:active|working|waiting)/.test(error.message) ? 'busy' : 'refused',
-      detail: error.message,
+    return { outcome: MOVE_BUSY.test(error.message) ? 'busy' : 'refused', detail: error.message };
+  };
+  /**
+   * Close a held move of the retired runtime and keep the employee where they work now. When the employee already
+   * works on the session the move was creating and its source was verifiably cleaned up, that is the owner's own
+   * adoption, which finishes the record. Otherwise, or when the adoption's own checks refuse, only the record is
+   * closed. Neither starts, stops or rebinds a session.
+   */
+  const closeRetired = async (
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard,
+    record: PlanMoveRecord | undefined,
+    move: SupervisorMove
+  ): Promise<SupervisorActionResult> => {
+    if (!record || record.employeeId !== employee.id || !retiredHeld(record))
+      return { outcome: 'refused', detail: 'the move changed' };
+    const boxed = () => {
+      if (!holds(guard)()) throw new PlanMoveError('The office supervisor may no longer close this move', 403);
+      if (!deps.laptops?.glance(employee.id).bound)
+        throw new PlanMoveError('The employee does not work in a laptop, so this move keeps its own recovery', 409);
     };
+    boxed();
+    if (record.newSession === employee.sessionId && record.sourceStopRequested && record.sourceCleanupVerified) {
+      try {
+        await deps.moves.resolve(
+          move.id,
+          { oldSession: record.oldSession, newSession: record.newSession, toAccount: record.toAccount },
+          employee.owner,
+          deps.moveExecutor(employee, holds(guard))
+        );
+        return { outcome: 'done', detail: 'adopted ' + move.id };
+      } catch (error) {
+        if (!(error instanceof PlanMoveError) || MOVE_BUSY.test(error.message)) throw error;
+      }
+    }
+    await deps.moves.settleRetiredMove(move.id, employee.id, employee.owner, boxed, closingNote(move));
+    return { outcome: 'done', detail: 'closed ' + move.id };
   };
   const laptops = deps.laptops;
   return {
@@ -330,11 +409,25 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
       'abandon-move': async (employee, guard, move) => {
         if (!move) return { outcome: 'refused', detail: 'no held move' };
         try {
-          await deps.moves.abandonHeldDockerMove(move.id, employee.id, employee.owner, () => {
-            if (!holds(guard)()) throw new PlanMoveError('The office supervisor may no longer abandon this move', 403);
-          });
+          const record = await deps.moves.get(move.id, employee.owner);
+          // Asked again for a move that has ended since: nothing is left to close, and that is no failure.
+          if (record?.employeeId === employee.id && ['completed', 'failed'].includes(record.phase))
+            return { outcome: 'done', detail: 'already closed ' + move.id };
+          if (!move.docker) return await closeRetired(employee, guard, record, move);
+          await deps.moves.abandonHeldDockerMove(
+            move.id,
+            employee.id,
+            employee.owner,
+            () => {
+              if (!holds(guard)())
+                throw new PlanMoveError('The office supervisor may no longer abandon this move', 403);
+            },
+            closingNote(move)
+          );
           return { outcome: 'done', detail: 'abandoned ' + move.id };
         } catch (error) {
+          if (!move.docker && !(error instanceof PlanMoveError && MOVE_BUSY.test(error.message)))
+            retiredRefused.set(move.id, now());
           return moveRefusal(error);
         }
       },

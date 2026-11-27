@@ -98,8 +98,8 @@ describe('employee supervisor: classification', () => {
     ['a move that is working', move(undefined, { phase: 'starting' }), 'move-in-progress'],
     ['a held move whose step is in flight', move('x', { busy: true }), 'move-in-progress'],
     ['a held move', move('The original Docker move flight changed'), 'move-held-retryable', /stopped part-way/],
-    ['a held move of the retired runtime', move('x', { docker: false }), 'needs-owner'],
-    ['a held move with no continue step', move('x', { allowedActions: [] }), 'needs-owner'],
+    ['a held move of the retired runtime', move('x', { docker: false }), 'move-held-retryable', /before the laptop runtime/],
+    ['a held move with no continue step', move('x', { allowedActions: [] }), 'move-held-retryable'],
     [
       'a session parked on a sign-in screen',
       observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
@@ -455,39 +455,6 @@ describe('employee supervisor: ladder', () => {
     it('restarts the fifteen minutes when the error changes', () => {
       const history = rollSupervisorHistory(since(0, 'move:move-1:something else'), classifyEmployee(composer), 14 * MINUTE);
       expect(history.since).toBe(14 * MINUTE);
-    });
-    it('is never abandoned for a reason the office does not recognize', () => {
-      const odd = move('The original Docker journal changed');
-      const result = assessEmployee(
-        odd,
-        since(0, classifyEmployee(odd).fingerprint, { attempts: tried('continue-move', 3, MINUTE) }),
-        ON,
-        60 * MINUTE
-      );
-      expect(result.next.action).toBeNull();
-      expect(result.needsHuman).toMatch(/does not abandon a move for a reason it does not recognize/);
-    });
-    it('is never abandoned while it waits for a sign-in', () => {
-      const error = describeStartupScreen("Stan's new session", { label: "Claude's sign-in screen", kind: 'credential', answering: false });
-      const waiting = assessEmployee(move(error), since(0, 'x'), ON, 60 * MINUTE);
-      expect(waiting).toMatchObject({ condition: 'needs-sign-in', next: { action: null } });
-      expect(waiting.needsHuman).toMatch(/Sign in the plan “Max 20x”/);
-      // Once the office reports the plan signed in, the move is continued, and still never abandoned for it.
-      const signed = { ...move(error), planSignedIn: true };
-      expect(assessEmployee(signed, since(0, 'x'), ON, 60 * MINUTE).next.action).toBe('continue-move');
-      const spent = assessEmployee(signed, since(0, 'x', { attempts: tried('continue-move', 3, 0) }), ON, 60 * MINUTE);
-      expect(spent.next.action).toBeNull();
-      expect(spent.needsHuman).toBeTruthy();
-    });
-    it('is left alone when its record does not offer abandon', () => {
-      const result = assessEmployee(
-        move('DOCKER_RESOURCE_HELPER_FAILED', { allowedActions: ['continue-original'] }),
-        since(0, 'x', { attempts: tried('continue-move', 3, 0) }),
-        ON,
-        60 * MINUTE
-      );
-      expect(result.next.action).toBeNull();
-      expect(result.needsHuman).toMatch(/cannot be abandoned here/);
     });
   });
 
@@ -1279,5 +1246,212 @@ describe('employee supervisor: a terminal the office can never type into again',
       expect(readSupervisedTerminal(undefined, true)).toEqual({ inputHeld: true, turn: 'unknown' });
       expect(readSupervisedTerminal(undefined, false)).toEqual({});
     });
+  });
+});
+
+describe('employee supervisor: a plan move that stopped part-way never waits for the owner', () => {
+  const START = 1_000 * MINUTE;
+  const signInScreen = describeStartupScreen("Stan's new session", {
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+  });
+  const decisionScreen = describeStartupScreen("Stan's new session", {
+    label: "Claude's usage-credit offer",
+    kind: 'decision',
+    answering: false,
+  });
+  /**
+   * Tick every 30 s as the office does. Every step ends as `outcome`; a move that was closed is gone at the next
+   * tick. Returns each step with the minute it ran at, and every sentence that asked for a person on the way.
+   */
+  function timeline(seen: SupervisorObservation, minutes: number, outcome: 'done' | 'refused' = 'refused') {
+    let history = EMPTY_SUPERVISOR_HISTORY,
+      now = START,
+      current = seen;
+    const actions: Array<[number, string]> = [],
+      asked: string[] = [];
+    for (; now <= START + minutes * MINUTE; now += 30_000) {
+      history = rollSupervisorHistory(history, classifyEmployee(current), now);
+      const result = assessEmployee(current, history, ON, now);
+      if (result.needsHuman) asked.push(result.needsHuman);
+      const next = result.next;
+      if (!next.action || (next.at ?? 0) > now) continue;
+      actions.push([(now - START) / MINUTE, next.action]);
+      const closed = next.action === 'abandon-move' && outcome === 'done';
+      history = recordSupervisorAttempt(history, next.action, now, closed || next.action !== 'abandon-move' ? outcome : 'refused');
+      if (closed) current = observed();
+    }
+    return { actions, asked, history, condition: classifyEmployee(current).condition };
+  }
+  const continues: Array<[number, string]> = [
+    [1, 'continue-move'],
+    [3, 'continue-move'],
+    [8, 'continue-move'],
+  ];
+
+  it('asks nobody for anything, whatever stopped the move and whatever its record offers', () => {
+    const cases: SupervisorObservation[] = [
+      move('x', { docker: false, allowedActions: ['settle'] }),
+      move(signInScreen),
+      { ...move(signInScreen), planSignedIn: true },
+      move(decisionScreen),
+      move('x', { allowedActions: [] }),
+      move('x', { allowedActions: ['continue-original'] }),
+      move('x', { allowedActions: ['abandon'] }),
+      move(undefined),
+      move('The original Docker journal changed'),
+      move('DOCKER_CONTINUATION_BUSY'),
+      move('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED'),
+      move('DOCKER_RESOURCE_HELPER_FAILED'),
+      move(new PlanMoveComposerNotReady().message),
+    ];
+    for (const seen of cases) {
+      const first = classifyEmployee(seen);
+      expect(first, JSON.stringify(seen.move)).toMatchObject({ condition: 'move-held-retryable' });
+      expect(first.needsHuman).toBeUndefined();
+      const run = timeline(seen, 45, 'done');
+      expect(run.asked, JSON.stringify(seen.move)).toEqual([]);
+      expect(run.actions.at(-1)?.[1], JSON.stringify(seen.move)).toBe('abandon-move');
+      expect(run.condition).toBe('healthy');
+    }
+  });
+
+  it('closes a move of the retired runtime after the fifteen minutes, and never continues it', () => {
+    const retired = move('The server restarted during this move; inspect both sessions before retrying', {
+      docker: false,
+      allowedActions: ['settle'],
+    });
+    expect(classifyEmployee(retired)).toMatchObject({ condition: 'move-held-retryable', code: 'move-retired' });
+    expect(timeline(retired, 30, 'done').actions).toEqual([[15, 'abandon-move']]);
+    // Even a record that claims to offer a continue is not continued: only a laptop move has one.
+    const odd = move('x', { docker: false, allowedActions: ['continue-original'] });
+    expect(timeline(odd, 30, 'done').actions).toEqual([[15, 'abandon-move']]);
+  });
+
+  it('waits thirty minutes for a plan that is not signed in, spends no continue on it, and then abandons', () => {
+    const waiting = move(signInScreen);
+    expect(classifyEmployee(waiting)).toMatchObject({ condition: 'move-held-retryable', code: 'move-sign-in' });
+    const history = since(START, classifyEmployee(waiting).fingerprint);
+    const early = assessEmployee(waiting, history, ON, START + 29 * MINUTE);
+    expect(early.next).toMatchObject({ action: null, waitingFor: "the move's new plan to be signed in at the office" });
+    expect(early.needsHuman).toBeUndefined();
+    expect(assessEmployee(waiting, history, ON, START + 30 * MINUTE)).toMatchObject({
+      condition: 'move-held-dead-end',
+      next: { action: 'abandon-move' },
+    });
+    expect(timeline(waiting, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+    // The office does not know whether the plan is signed in: the same wait and the same end.
+    expect(timeline({ ...waiting, planSignedIn: undefined }, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+  });
+
+  it('continues a move at a sign-in screen as soon as the plan is signed in, and abandons it when that does not help', () => {
+    const signed = { ...move(signInScreen), planSignedIn: true };
+    const history = since(START, classifyEmployee(signed).fingerprint);
+    expect(assessEmployee(signed, history, ON, START + 20 * MINUTE).next.action).toBe('continue-move');
+    expect(timeline(signed, 45).actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
+  });
+
+  it('does not abandon while a sign-in the office placed is running or has just been placed', () => {
+    const waiting = move(signInScreen);
+    const fingerprint = classifyEmployee(waiting).fingerprint;
+    const at = START + 40 * MINUTE;
+    const placing = (outcome: 'issued' | 'done' | 'refused', ago: number) =>
+      assessEmployee(
+        waiting,
+        since(START, fingerprint, { lastAction: { action: 'replace-sign-in', at: at - ago, outcome } }),
+        ON,
+        at
+      ).next;
+    expect(placing('issued', 10 * MINUTE)).toMatchObject({
+      action: null,
+      waitingFor: 'the sign-in the office placed to take effect',
+    });
+    expect(placing('done', MINUTE).action).toBeNull();
+    // Its watch time has passed, or nothing was placed: the move is closed.
+    expect(placing('done', 3 * MINUTE).action).toBe('abandon-move');
+    expect(placing('refused', MINUTE).action).toBe('abandon-move');
+  });
+
+  it('continues a move at a decision screen three times and then abandons it', () => {
+    const decision = move(decisionScreen);
+    expect(classifyEmployee(decision)).toMatchObject({ condition: 'move-held-retryable', code: 'move-owner-decision' });
+    expect(timeline(decision, 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
+  });
+
+  it('closes a move that offers no continue step without trying one', () => {
+    for (const allowedActions of [[], ['abandon']])
+      expect(timeline(move('x', { allowedActions }), 45, 'done').actions).toEqual([[15, 'abandon-move']]);
+  });
+
+  it('asks the service to abandon even when the record does not offer it, and spends an attempt on the refusal', () => {
+    const run = timeline(move('x', { allowedActions: ['continue-original'] }), 45);
+    expect(run.actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
+    expect(run.history.attempts['abandon-move']).toMatchObject({ count: 2 });
+  });
+
+  it('continues an error it does not recognize as often as any other and then abandons the move', () => {
+    for (const error of [undefined, 'Docker move unavailable', 'The original Docker journal changed'])
+      expect(timeline(move(error), 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
+  });
+
+  it('gives a move that is held by something outside itself thirty minutes before it abandons', () => {
+    for (const error of ['DOCKER_CONTINUATION_BUSY', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']) {
+      const outside = move(error);
+      expect(timeline(outside, 45, 'done').actions).toEqual([...continues, [30, 'abandon-move']]);
+      const waiting = assessEmployee(
+        outside,
+        since(START, classifyEmployee(outside).fingerprint, { attempts: tried('continue-move', 3, START + 8 * MINUTE) }),
+        ON,
+        START + 20 * MINUTE
+      );
+      expect(waiting.next.action).toBeNull();
+      expect(waiting.next.waitingFor).toBeTruthy();
+      expect(waiting.needsHuman).toBeUndefined();
+    }
+  });
+
+  it('says only what it could not do once both rungs are used up', () => {
+    const stuck = move('x');
+    const used = since(START, classifyEmployee(stuck).fingerprint, {
+      attempts: { ...tried('continue-move', 3, START), ...tried('abandon-move', 2, START + 20 * MINUTE) },
+    });
+    const result = assessEmployee(stuck, used, ON, START + 60 * MINUTE);
+    expect(result.next.action).toBeNull();
+    expect(result.needsHuman).toMatch(/could not continue or close this move in this round of attempts/);
+  });
+
+  it('starts the same ladder again once its attempt counts are cleared, for the same move and the same error', () => {
+    const stuck = move('x');
+    const cleared = since(START, classifyEmployee(stuck).fingerprint);
+    // The problem is as old as before; only the counts are gone.
+    expect(assessEmployee(stuck, cleared, ON, START + 6 * 60 * MINUTE).next).toMatchObject({
+      action: 'continue-move',
+      at: START + MINUTE,
+    });
+    const again = { ...cleared, attempts: tried('continue-move', 3, START + 6 * 60 * MINUTE) };
+    expect(assessEmployee(stuck, again, ON, START + 6 * 60 * MINUTE + 4 * MINUTE).next).toMatchObject({
+      action: 'abandon-move',
+      at: START + 15 * MINUTE,
+    });
+  });
+
+  it('leaves both steps to the owner’s switches', () => {
+    const stuck = move('x');
+    const history = since(START, classifyEmployee(stuck).fingerprint, { attempts: tried('continue-move', 3, START) });
+    const off = assessEmployee(stuck, history, { ...ON, autoRepair: false }, START + 60 * MINUTE);
+    expect(off.next.action).toBeNull();
+    expect(off.needsHuman).toMatch(/supervisorAutoRepair/);
+    expect(assessEmployee(stuck, since(START, 'x'), { ...ON, enabled: false }, START + 60 * MINUTE).next.action).toBeNull();
+  });
+
+  it('never acts beside a move that is working, and leaves a finished move alone', () => {
+    for (const patch of [{ busy: true }, { phase: 'checking' }, { phase: 'stopping' }]) {
+      const working = move('x', patch);
+      expect(classifyEmployee(working).condition).toBe('move-in-progress');
+      expect(assessEmployee(working, since(START, ''), ON, START + 600 * MINUTE).next.action).toBeNull();
+    }
+    for (const phase of ['completed', 'failed'])
+      expect(classifyEmployee(move('x', { phase })).condition).toBe('healthy');
   });
 });

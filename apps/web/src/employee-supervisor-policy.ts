@@ -84,6 +84,8 @@ const MINUTE = 60 * SECOND;
  *   waiting for and gives nothing up, so it is a retry: it also runs with automatic repairs switched off.
  * - Abandoning a move waits 15 minutes on the SAME error and three failed continues: a move that only needed time
  *   or one more read has finished by then, and abandoning writes the journal only (nothing is stopped or removed).
+ *   Every held move ends there, whatever stopped it: a move is never kept for the owner. A move that waits for
+ *   something outside itself is given longer first (see `SUPERVISOR_MOVE_POLICY`).
  * - A rebuild discards a laptop, so it waits longest, runs at most twice per episode and twice per day, and is
  *   never chosen while an agent may be running in that laptop (see `rebuildGate`), with one exception.
  * - The exception is a laptop whose office terminal has its input held for good (see `heldInputRebuildGate`). The
@@ -609,7 +611,8 @@ function clip(text: string, limit: number): string {
 
 /**
  * Why a held plan move stopped, read from its recorded error. `unrecognized` is every text this module does not
- * know: such a move is still continued (the move's own record offers that), but it is never abandoned automatically.
+ * know: such a move is continued as often as any other (the move's own record offers that) and then abandoned.
+ * The class decides only how long the office waits before it abandons, never whether it does.
  */
 export type SupervisorMoveErrorClass =
   | 'sign-in'
@@ -643,6 +646,18 @@ export function classifyMoveError(error: string | undefined): SupervisorMoveErro
 
 const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking', 'stopping']);
 
+/**
+ * How long a held move is kept for a cause that lies outside the move, before it is abandoned like any other.
+ *
+ * Three causes are outside: the plan the employee is being moved to is not signed in at the office, an operation
+ * that only has to finish (`wait`), and something every laptop shares (`owner`: the pool, the storage, the office's
+ * own configuration). Continuing such a move again finds the same thing, and the office repairs each of them by
+ * another path, so the move is given thirty minutes from the moment the problem was first seen. That covers a
+ * sign-in the office places or refreshes itself and the recovery of the shared pool after a host restart. After it
+ * the move is abandoned: the employee is not kept out of work for a move that cannot finish.
+ */
+export const SUPERVISOR_MOVE_POLICY: { readonly outsideCauseMs: number } = { outsideCauseMs: 30 * MINUTE };
+
 // ─── Classification ───────────────────────────────────────────────────────────
 
 const classified = (
@@ -669,34 +684,79 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
     return classified('move-in-progress', `${name} is being moved to another plan.`);
   if (move.phase !== 'recovery-required') return undefined;
   const error = clip(move.error ?? 'no reason was recorded', 300),
-    fingerprint = `move:${move.id}:${error}`,
-    held = `${name}'s plan move stopped part-way: ${error}`;
+    fingerprint = `move:${move.id}:${error}`;
+  // Every held move has the same ladder: it is continued while its record offers that, and then closed. None is
+  // kept for the owner, so no class of error and no missing step ends in a sentence that asks for one.
   if (!move.docker)
-    return classified('needs-owner', held, {
-      code: 'move-held',
-      fingerprint,
-      needsHuman: 'This move belongs to the retired runtime. Resolve it: POST /api/plans/moves/:id/resolve.',
-    });
-  const kind = classifyMoveError(move.error);
-  if (kind === 'sign-in' && observed.planSignedIn !== true)
-    return classified('needs-sign-in', held, {
-      code: 'move-sign-in',
-      fingerprint,
-      needsHuman: `Sign in ${plan(observed)} at the office (Plans). The office then continues the move on its own.`,
-    });
-  if (kind === 'owner-decision')
-    return classified('needs-owner', held, {
-      code: 'move-owner-decision',
-      fingerprint,
-      needsHuman: "Answer the screen in the new session's terminal, then continue the move.",
-    });
-  if (!move.allowedActions.includes('continue-original'))
-    return classified('needs-owner', held, {
-      code: 'move-held',
-      fingerprint,
-      needsHuman: 'This move offers no continue step. Read it: POST /api/plans/moves/:id/status.',
-    });
-  return classified('move-held-retryable', held, { code: 'move-' + kind, fingerprint });
+    return classified(
+      'move-held-retryable',
+      `A plan move of ${name} from before the laptop runtime is still on record as stopped part-way: ${error}`,
+      { code: 'move-retired', fingerprint }
+    );
+  return classified('move-held-retryable', `${name}'s plan move stopped part-way: ${error}`, {
+    code: 'move-' + classifyMoveError(move.error),
+    fingerprint,
+  });
+}
+
+/** What a held laptop move waits for outside itself, in plain words; undefined when its cause is its own. */
+function moveCauseOutside(observed: SupervisorObservation): string | undefined {
+  const kind = classifyMoveError(observed.move?.error);
+  if (kind === 'sign-in' && observed.planSignedIn !== true) return "the move's new plan to be signed in at the office";
+  if (kind === 'wait') return 'the operation that holds the move to finish';
+  if (kind === 'owner') return 'the repair of what holds the move, which every laptop shares';
+  return undefined;
+}
+
+function moveCauseOverdue(history: SupervisorHistory, now: number): boolean {
+  return history.since > 0 && now - history.since >= SUPERVISOR_MOVE_POLICY.outsideCauseMs;
+}
+
+/**
+ * A sign-in the office put into this employee's laptop is still settling: the step is running, or it ended less
+ * than its own watch time ago. A move is not closed in that window, because the continue that follows a placed
+ * sign-in is what finishes it.
+ */
+function signInBeingPlaced(history: SupervisorHistory, now: number, policy: SupervisorPolicy): boolean {
+  const last = history.lastAction;
+  if (!last || last.action !== 'replace-sign-in') return false;
+  if (last.outcome === 'issued') return true;
+  return last.outcome === 'done' && now - last.at < policy.ladder['replace-sign-in'].escalateAfterMs;
+}
+
+/**
+ * Continue: only a laptop move, and only while its record offers it. A move that waits at the sign-in screen of a
+ * plan the office does not report signed in is not continued: the continue would read the same screen and spend an
+ * attempt. It is waited for instead, for `SUPERVISOR_MOVE_POLICY.outsideCauseMs`, and continued at once when the
+ * plan becomes signed in. After that time the rung steps aside and the move is closed.
+ */
+function continueMoveGate(observed: SupervisorObservation, history: SupervisorHistory, now: number): Gate {
+  const move = observed.move;
+  if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
+  const outside = classifyMoveError(move.error) === 'sign-in' ? moveCauseOutside(observed) : undefined;
+  if (!outside) return { kind: 'ok' };
+  return moveCauseOverdue(history, now) ? { kind: 'skip' } : { kind: 'wait', waitingFor: outside };
+}
+
+/**
+ * Close the move: abandon a laptop move, or settle one of the retired runtime. Nothing about the error decides
+ * whether, only when. A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first,
+ * and no move is closed while a sign-in the office placed for it is settling. What the record offers is not asked
+ * here: the service that closes the move decides that itself and refuses in its own words, and a refusal spends
+ * one of the rung's few attempts.
+ */
+function abandonMoveGate(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
+  if (!observed.move) return { kind: 'skip' };
+  if (!observed.move.docker) return { kind: 'ok' };
+  if (signInBeingPlaced(history, now, policy))
+    return { kind: 'wait', waitingFor: 'the sign-in the office placed to take effect' };
+  const outside = moveCauseOutside(observed);
+  return outside && !moveCauseOverdue(history, now) ? { kind: 'wait', waitingFor: outside } : { kind: 'ok' };
 }
 
 function classifyCode(
@@ -1075,8 +1135,7 @@ function gate(
   /** `terminalHeldForGood` for this observation. */
   heldInput = false
 ): Gate {
-  const seen = observed.laptop.continuation,
-    move = observed.move;
+  const seen = observed.laptop.continuation;
   switch (action) {
     case 'resend-continuation': {
       // Offered by the operation itself, and never for a plan move's private record.
@@ -1093,7 +1152,7 @@ function gate(
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
     case 'continue-move':
-      return move?.docker && move.allowedActions.includes('continue-original') ? { kind: 'ok' } : { kind: 'skip' };
+      return continueMoveGate(observed, history, now);
     case 'reconnect-viewer':
       return observed.laptop.record &&
         ['ready', 'provider-issued'].includes(observed.laptop.record.phase) &&
@@ -1112,22 +1171,8 @@ function gate(
         : { kind: 'skip' };
     case 'relaunch-provider':
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
-    case 'abandon-move': {
-      const kind = classifyMoveError(move?.error);
-      if (!move?.allowedActions.includes('abandon'))
-        return {
-          kind: 'human',
-          needsHuman: 'This move cannot be abandoned here. Read it: POST /api/plans/moves/:id/status.',
-        };
-      if (kind !== 'first-run' && kind !== 'laptop-step')
-        return {
-          kind: 'human',
-          needsHuman:
-            'Continuing the move did not help, and the office does not abandon a move for a reason it does not ' +
-            'recognize. Continue it (POST /api/plans/moves/:id/resolve) or abandon it (POST /api/plans/moves/:id/abandon).',
-        };
-      return { kind: 'ok' };
-    }
+    case 'abandon-move':
+      return abandonMoveGate(observed, history, now, policy);
     case 'rebuild-laptop':
       // A new laptop would join the same pool and be held by the same thing.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };
@@ -1162,7 +1207,10 @@ const EXHAUSTED: Readonly<Partial<Record<SupervisorCondition, string>>> = {
   'held-retryable': 'Repeating the step and rebuilding did not help. ' + REBUILD_BY_HAND,
   'held-needs-rebuild': 'Rebuilding did not help. ' + REBUILD_BY_HAND,
   'laptop-not-started': 'The laptop would not start. Read GET …/docker-policy, then POST …/docker-continuation.',
-  'move-held-retryable': 'The move is still held. ' + BY_HAND['abandon-move'],
+  // Information only: it says what happened and names no step that the office waits for.
+  'move-held-retryable':
+    'The office could not continue or close this move in this round of attempts. To close it by hand: POST ' +
+    '/api/plans/moves/:id/abandon, then rebuild the laptop.',
 };
 /** Said once every step for a lost terminal whose input is held for good has been tried. */
 const HELD_INPUT_EXHAUSTED = 'The office could not rebuild the laptop on its own. ' + REBUILD_RUNNING_BY_HAND;
