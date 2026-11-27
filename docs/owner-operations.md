@@ -307,17 +307,29 @@ record offers. No sentence about a held move asks for a person.
 | Still held on the same error after that | Abandons the move | 15 minutes after that error was first seen, and once more 5 minutes later if the first attempt was refused |
 | An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
 | A decision screen in the new session | The same: three continues, then abandon | The same |
-| The sign-in screen of a plan the office does not report as signed in | Waits and spends no continue; continues at once when the plan becomes signed in | Abandons 30 minutes after the problem was first seen |
+| The sign-in screen of the new session | The same: three continues, then abandon. Nothing waits for the plan to be signed in (below) | The same |
 | An operation that only has to finish, or something every laptop shares (the pool, the storage, the office's configuration) | Three continues | Abandons 30 minutes after the problem was first seen |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
 | A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
 | A step of the move is running | Nothing | |
 
-No move is abandoned while a sign-in that the office placed for that employee
-is being placed or is less than three minutes old. The thirty minutes cover a
-sign-in the office places or refreshes itself and the recovery of the shared
-pool after a host restart.
+The thirty minutes cover the recovery of the shared pool after a host restart.
+
+A move that stopped at the sign-in screen of its new session is not waited
+for, whatever the office reports about the plan. That screen is reached only
+after the move has launched the agent in the candidate laptop, and the
+candidate keeps the plan's sign-in in a folder of its own. Signing the plan in
+at the office afterwards does not reach that folder; the office places no
+sign-in there for a held move; and a sign-in typed into the candidate changes
+the account material the move installed, which the move's own check then
+refuses (`DOCKER_PLAN_ACCOUNT_AUTH_CHANGED`). A continue therefore finishes such
+a move only when the candidate got past the screen by itself. The three
+continues look for exactly that, and then the move is abandoned. From then on
+the employee is an ordinary employee on that plan and the laptop's own sign-in
+repair applies. If the plan is signed out everywhere, it is that repair which
+waits for the plan to be signed in, by the owner or by another route. The move
+does not.
 
 While a move waits out those thirty minutes, `waitingUntil` gives the time at
 which it is closed. A move that is still held after both steps were used,

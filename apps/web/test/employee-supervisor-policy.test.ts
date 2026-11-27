@@ -1628,48 +1628,26 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     expect(timeline(odd, 30, 'done').actions).toEqual([[15, 'abandon-move']]);
   });
 
-  it('waits thirty minutes for a plan that is not signed in, spends no continue on it, and then abandons', () => {
-    const waiting = move(signInScreen);
-    expect(classifyEmployee(waiting)).toMatchObject({ condition: 'move-held-retryable', code: 'move-sign-in' });
-    const history = since(START, classifyEmployee(waiting).fingerprint);
-    const early = assessEmployee(waiting, history, ON, START + 29 * MINUTE);
-    expect(early.next).toMatchObject({ action: null, waitingFor: "the move's new plan to be signed in at the office" });
-    expect(early.needsHuman).toBeUndefined();
-    expect(assessEmployee(waiting, history, ON, START + 30 * MINUTE)).toMatchObject({
-      condition: 'move-held-dead-end',
-      next: { action: 'abandon-move' },
-    });
-    expect(timeline(waiting, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
-    // The office does not know whether the plan is signed in: the same wait and the same end.
-    expect(timeline({ ...waiting, planSignedIn: undefined }, 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+  it('continues a move at a sign-in screen three times and abandons it, whatever the office says of the plan', () => {
+    // Signing the plan in at the office cannot finish such a move, so nothing waits for it: see
+    // SUPERVISOR_MOVE_POLICY. A continue succeeds only when the candidate got past the screen by itself.
+    for (const planSignedIn of [false, undefined, true]) {
+      const held = { ...move(signInScreen), planSignedIn };
+      expect(classifyEmployee(held)).toMatchObject({ condition: 'move-held-retryable', code: 'move-sign-in' });
+      const history = since(START, classifyEmployee(held).fingerprint);
+      expect(assessEmployee(held, history, ON, START + 2 * MINUTE).next).toMatchObject({ action: 'continue-move' });
+      expect(timeline(held, 45).actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
+      expect(timeline(held, 45, 'done').asked).toEqual([]);
+    }
   });
 
-  it('continues a move at a sign-in screen as soon as the plan is signed in, and abandons it when that does not help', () => {
-    const signed = { ...move(signInScreen), planSignedIn: true };
-    const history = since(START, classifyEmployee(signed).fingerprint);
-    expect(assessEmployee(signed, history, ON, START + 20 * MINUTE).next.action).toBe('continue-move');
-    expect(timeline(signed, 45).actions).toEqual([...continues, [15, 'abandon-move'], [20, 'abandon-move']]);
-  });
-
-  it('does not abandon while a sign-in the office placed is running or has just been placed', () => {
-    const waiting = move(signInScreen);
-    const fingerprint = classifyEmployee(waiting).fingerprint;
-    const at = START + 40 * MINUTE;
-    const placing = (outcome: 'issued' | 'done' | 'refused', ago: number) =>
-      assessEmployee(
-        waiting,
-        since(START, fingerprint, { lastAction: { action: 'replace-sign-in', at: at - ago, outcome } }),
-        ON,
-        at
-      ).next;
-    expect(placing('issued', 10 * MINUTE)).toMatchObject({
-      action: null,
-      waitingFor: 'the sign-in the office placed to take effect',
+  it('has no rule about a sign-in the office placed: a recent one changes nothing', () => {
+    const held = move(signInScreen);
+    const history = since(START, classifyEmployee(held).fingerprint, {
+      attempts: tried('continue-move', 3, START + 8 * MINUTE),
+      lastAction: { action: 'replace-sign-in', at: START + 19 * MINUTE, outcome: 'done' },
     });
-    expect(placing('done', MINUTE).action).toBeNull();
-    // Its watch time has passed, or nothing was placed: the move is closed.
-    expect(placing('done', 3 * MINUTE).action).toBe('abandon-move');
-    expect(placing('refused', MINUTE).action).toBe('abandon-move');
+    expect(assessEmployee(held, history, ON, START + 20 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
   });
 
   it('continues a move at a decision screen three times and then abandons it', () => {

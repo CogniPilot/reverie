@@ -800,12 +800,21 @@ const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking
 /**
  * How long a held move is kept for a cause that lies outside the move, before it is abandoned like any other.
  *
- * Three causes are outside: the plan the employee is being moved to is not signed in at the office, an operation
- * that only has to finish (`wait`), and something every laptop shares (`owner`: the pool, the storage, the office's
- * own configuration). Continuing such a move again finds the same thing, and the office repairs each of them by
- * another path, so the move is given thirty minutes from the moment the problem was first seen. That covers a
- * sign-in the office places or refreshes itself and the recovery of the shared pool after a host restart. After it
- * the move is abandoned: the employee is not kept out of work for a move that cannot finish.
+ * Two causes are outside: an operation that only has to finish (`wait`), and something every laptop shares
+ * (`owner`: the pool, the storage, the office's own configuration). Continuing such a move again finds the same
+ * thing, and the office repairs each of them by another path, so the move is given thirty minutes from the moment
+ * the problem was first seen. That covers the recovery of the shared pool after a host restart. After it the move
+ * is abandoned: the employee is not kept out of work for a move that cannot finish.
+ *
+ * A move that stopped at the sign-in screen of its new session is NOT such a cause, whatever the office reports
+ * about the plan. That screen is only reached after the move has launched the agent in the candidate laptop, and
+ * the candidate keeps the plan's sign-in in a folder of its own. A sign-in made at the office afterwards does not
+ * reach that folder, the office places none there for a held move, and a sign-in typed into the candidate changes
+ * the account material the move installed, which the move's own check then refuses
+ * (`DOCKER_PLAN_ACCOUNT_AUTH_CHANGED`). Waiting for the plan to be signed in could therefore never finish the
+ * move. A continue succeeds only when the candidate got past the screen by itself, so such a move is continued and
+ * abandoned on the same times as any other; once it is abandoned the employee is an ordinary employee on that plan
+ * and the laptop's own sign-in repair applies.
  */
 export const SUPERVISOR_MOVE_POLICY: { readonly outsideCauseMs: number } = { outsideCauseMs: 30 * MINUTE };
 
@@ -853,7 +862,6 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
 /** What a held laptop move waits for outside itself, in plain words; undefined when its cause is its own. */
 function moveCauseOutside(observed: SupervisorObservation): string | undefined {
   const kind = classifyMoveError(observed.move?.error);
-  if (kind === 'sign-in' && observed.planSignedIn !== true) return "the move's new plan to be signed in at the office";
   if (kind === 'wait') return 'the operation that holds the move to finish';
   if (kind === 'owner') return 'the repair of what holds the move, which every laptop shares';
   return undefined;
@@ -870,49 +878,21 @@ function outsideCauseWait(waitingFor: string, history: SupervisorHistory): Gate 
     : { kind: 'wait', waitingFor };
 }
 
-/**
- * A sign-in the office put into this employee's laptop is still settling: the step is running, or it ended less
- * than its own watch time ago. A move is not closed in that window, because the continue that follows a placed
- * sign-in is what finishes it.
- */
-function signInBeingPlaced(history: SupervisorHistory, now: number, policy: SupervisorPolicy): boolean {
-  const last = history.lastAction;
-  if (!last || last.action !== 'replace-sign-in') return false;
-  if (last.outcome === 'issued') return true;
-  return last.outcome === 'done' && now - last.at < policy.ladder['replace-sign-in'].escalateAfterMs;
-}
-
-/**
- * Continue: only a laptop move, and only while its record offers it. A move that waits at the sign-in screen of a
- * plan the office does not report signed in is not continued: the continue would read the same screen and spend an
- * attempt. It is waited for instead, for `SUPERVISOR_MOVE_POLICY.outsideCauseMs`, and continued at once when the
- * plan becomes signed in. After that time the rung steps aside and the move is closed.
- */
-function continueMoveGate(observed: SupervisorObservation, history: SupervisorHistory, now: number): Gate {
+/** Continue: only a laptop move, and only while its record offers it. */
+function continueMoveGate(observed: SupervisorObservation): Gate {
   const move = observed.move;
-  if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
-  const outside = classifyMoveError(move.error) === 'sign-in' ? moveCauseOutside(observed) : undefined;
-  if (!outside) return { kind: 'ok' };
-  return moveCauseOverdue(history, now) ? { kind: 'skip' } : outsideCauseWait(outside, history);
+  return move?.docker && move.allowedActions.includes('continue-original') ? { kind: 'ok' } : { kind: 'skip' };
 }
 
 /**
  * Close the move: abandon a laptop move, or settle one of the retired runtime. Nothing about the error decides
- * whether, only when. A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first,
- * and no move is closed while a sign-in the office placed for it is settling. What the record offers is not asked
- * here: the service that closes the move decides that itself and refuses in its own words, and a refusal spends
- * one of the rung's few attempts.
+ * whether, only when. A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first.
+ * What the record offers is not asked here: the service that closes the move decides that itself and refuses in
+ * its own words, and a refusal spends one of the rung's few attempts.
  */
-function abandonMoveGate(
-  observed: SupervisorObservation,
-  history: SupervisorHistory,
-  now: number,
-  policy: SupervisorPolicy
-): Gate {
+function abandonMoveGate(observed: SupervisorObservation, history: SupervisorHistory, now: number): Gate {
   if (!observed.move) return { kind: 'skip' };
   if (!observed.move.docker) return { kind: 'ok' };
-  if (signInBeingPlaced(history, now, policy))
-    return { kind: 'wait', waitingFor: 'the sign-in the office placed to take effect' };
   const outside = moveCauseOutside(observed);
   return outside && !moveCauseOverdue(history, now) ? outsideCauseWait(outside, history) : { kind: 'ok' };
 }
@@ -1559,7 +1539,7 @@ function gate(
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
     case 'continue-move':
-      return continueMoveGate(observed, history, now);
+      return continueMoveGate(observed);
     case 'reconnect-viewer':
       // A session outside a laptop has no laptop record to judge by: the wake itself decides.
       if (!observed.boxed) return { kind: 'ok' };
@@ -1584,7 +1564,7 @@ function gate(
       if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
     case 'abandon-move':
-      return abandonMoveGate(observed, history, now, policy);
+      return abandonMoveGate(observed, history, now);
     case 'rebuild-laptop':
       // A new laptop would join the same pool and be held by the same thing.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };

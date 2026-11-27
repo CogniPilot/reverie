@@ -1248,42 +1248,30 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     return asked;
   };
 
-  it('abandons a move whose plan is not signed in after thirty minutes, and reads the plan the move goes to', async () => {
-    const stuck = heldMove(person('a'), SIGN_IN);
-    const w = world([stuck]);
-    w.state.signedIn = false;
-    const at = record(w, (action) => {
-      if (action === 'abandon-move') stuck.move = undefined;
-    });
-    expect(await quiet(w, 29)).toEqual([]);
-    expect(at).toEqual([]);
-    expect(w.report('a')).toMatchObject({
-      condition: 'move-held-retryable',
-      code: 'move-sign-in',
-      waitingFor: "the move's new plan to be signed in at the office",
-    });
-    expect(w.state.reads).toContain('plan:plan-b');
-    expect(await quiet(w, 10)).toEqual([]);
-    expect(at).toEqual([[30.5, 'abandon-move']]);
-    expect(w.state.audits.at(-1)).toMatchObject({
-      admin: 'office supervisor',
-      action: 'supervisor_abandon_move',
-      detail: { id: 'a', moveId: 'move-a', code: 'move-sign-in', outcome: 'done', attempt: 1 },
-    });
-    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
-  });
-
-  it('continues that move as soon as the plan is signed in', async () => {
-    const stuck = heldMove(person('a'), SIGN_IN);
-    const w = world([stuck]);
-    w.state.signedIn = false;
-    const at = record(w, () => {});
-    await w.run(10);
-    expect(at).toEqual([]);
-    w.state.signedIn = true;
-    await w.run(1);
-    expect(at).toEqual([[10.5, 'continue-move']]);
-  });
+  it.each([false, undefined, true])(
+    'continues a move at a sign-in screen three times and abandons it after fifteen minutes (plan signed in: %s)',
+    async (signedIn) => {
+      const stuck = heldMove(person('a'), SIGN_IN);
+      const w = world([stuck]);
+      w.state.signedIn = signedIn;
+      const at = record(w, (action) => {
+        if (action === 'abandon-move') stuck.move = undefined;
+      });
+      expect(await quiet(w, 20)).toEqual([]);
+      expect(at).toEqual([
+        [1.5, 'continue-move'],
+        [3.5, 'continue-move'],
+        [8.5, 'continue-move'],
+        [15.5, 'abandon-move'],
+      ]);
+      expect(w.state.audits.at(-1)).toMatchObject({
+        admin: 'office supervisor',
+        action: 'supervisor_abandon_move',
+        detail: { id: 'a', moveId: 'move-a', code: 'move-sign-in', outcome: 'done', attempt: 1 },
+      });
+      expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+    }
+  );
 
   it.each([
     ['a decision screen', "Stan's new session is waiting at Claude's usage-credit offer. That choice is the owner's; answer it in the session's terminal, then continue.", 15.5],
@@ -1333,19 +1321,6 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     // With the move closed the stopped laptop is what remains, and the ordinary rebuild takes it.
     expect(at.map(([, action]) => action)).toContain('rebuild-laptop');
     expect(w.state.reads).toContain('laptop:a');
-  });
-
-  it('says until when it waits for a sign-in', async () => {
-    const stuck = heldMove(person('a'), SIGN_IN);
-    const w = world([stuck]);
-    w.state.signedIn = false;
-    await w.run(5);
-    // First seen at the first pass, half a minute in; closed thirty minutes after that.
-    expect(w.report('a')).toMatchObject({
-      waitingFor: "the move's new plan to be signed in at the office",
-      waitingUntil: 10 * MINUTE + 30_000 + 30 * MINUTE,
-    });
-    expect(w.report('a').needsHuman).toBeUndefined();
   });
 
   it('starts a move the service refused to close again six hours after its last attempt, and closes it once', async () => {
