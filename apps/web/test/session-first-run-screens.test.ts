@@ -875,7 +875,8 @@ describe('how the office knows a screen is really up', () => {
   });
 
   const now = 10 * 60_000;
-  const at = (text: string, scan: FirstRunScan) => readStartupScreen(text, scan, now, { composerMark: CLAUDE_MARK });
+  const at = (text: string, scan: FirstRunScan) =>
+    readStartupScreen(text, scan, now, { composerMark: CLAUDE_MARK, composerGlyph: '❯' });
 
   it('says `widget` for a live screen, whoever started the pane', () => {
     for (const attached of [false, true])
@@ -922,8 +923,23 @@ describe('how the office knows a screen is really up', () => {
     expect(at(COMPOSER, closed)).toBeNull();
     expect(at(idleWithoutMark(['● Work summary.']), closed)).toBeNull();
     expect(at('   \n', closed)).toBeNull();
-    expect(readStartupScreen(UNNAMED_SCREEN, closed, now, { composerMark: '❯' })).toBeNull();
-    expect(readStartupScreen(UNNAMED_SCREEN, closed, now)).toBeNull();
+    expect(readStartupScreen(UNNAMED_SCREEN, closed, now, { composerMark: '❯', composerGlyph: '❯' })).toBeNull();
+    expect(readStartupScreen(UNNAMED_SCREEN, closed, now, { composerGlyph: '❯' })).toBeNull();
+    // Nor a CLI that does not say where its composer is: it cannot be shown to be without one.
+    expect(readStartupScreen(UNNAMED_SCREEN, closed, now, { composerMark: CLAUDE_MARK })).toBeNull();
+  });
+
+  it('takes an idle Codex composer that shows no mark for a conversation, by its own glyph', () => {
+    // Codex's composer row starts with its own glyph. Its footer hint is not always drawn, so the mark alone would
+    // leave an idle employee looking parked on a screen nobody knows.
+    const codex = { composerMark: '? for shortcuts', composerGlyph: '›' };
+    const closed = scanAfter([''], { until: now });
+    // The idle frame of test/codex-chat-submit-ownership.test.ts: an answer row, the empty composer, the model footer.
+    const idle = ['• earlier answer', '›', '', 'GPT-6.1-Sol high · /owned/fixture'].join('\n');
+    expect(showsComposerRow(idle, '›')).toBe(true);
+    expect(readStartupScreen(idle, closed, now, codex)).toBeNull();
+    expect(showsComposerRow(CODEX_SIGN_IN, '›')).toBe(false);
+    expect(readStartupScreen(CODEX_SIGN_IN, closed, now, codex)).toMatchObject({ id: 'codex-sign-in', shown: 'widget' });
   });
 
   it('forgets the launch for good once any read saw the composer', () => {

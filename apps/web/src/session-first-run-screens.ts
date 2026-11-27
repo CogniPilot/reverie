@@ -246,6 +246,11 @@ export interface ProviderScreenReadOptions {
    * shows it is at its composer, so whatever else it says is transcript.
    */
   readonly composerMark?: string;
+  /**
+   * The glyph the CLI draws at the start of its composer row (`capabilities.workDetect.promptGlyph`). Read only
+   * by {@link readStartupScreen}, as a second sign of a conversation; it never permits a key.
+   */
+  readonly composerGlyph?: string;
 }
 
 function lastIndexOfAny(compact: string, phrases: readonly string[]): number {
@@ -448,16 +453,19 @@ export function startupScreenStatus(
 const RULE_ROW = /^[─━═]{8}/;
 
 /**
- * Whether the frame shows a composer by its shape: the last row that starts with the selection glyph has a rule row
- * under it. A menu's highlighted option has its other options under it instead. A second, independent sign of a
- * conversation beside the composer mark, which a footer can drop (`· 1 shell · ↓ to manage` carries no
- * `shift+tab`). Only ever a reason NOT to act.
+ * Whether the frame shows a composer by its shape. A second, independent sign of a conversation beside the composer
+ * mark, which a footer can drop (`· 1 shell · ↓ to manage` carries no `shift+tab`). Only ever a reason NOT to act.
+ *
+ * A CLI whose composer glyph is its own (Codex's `›`) shows a composer wherever a row starts with it. Claude's
+ * glyph is the selection mark of its menus as well, so there the last row that starts with it must have a rule row
+ * under it: a menu's highlighted option has its other options under it instead.
  */
-export function showsComposerRow(text: string): boolean {
+export function showsComposerRow(text: string, glyph: string = SELECTION_MARK): boolean {
   const rows = stripAnsi(text)
     .replace(CHARSET_SELECT, '')
     .split('\n')
     .map((row) => row.trim());
+  if (glyph !== SELECTION_MARK) return glyph !== '' && rows.some((row) => row.startsWith(glyph));
   let last = -1;
   rows.forEach((row, index) => {
     if (row.startsWith(SELECTION_MARK)) last = index;
@@ -489,8 +497,8 @@ export interface StartupScanView {
  * A screen the table names is returned on its words, as {@link nameProviderScreen} names it, with the proof beside
  * it. A screen the table does NOT name is returned only on positive evidence that the pane never left its start-up:
  * this office launched it, its scan closed (the start-up window ran out, or a screen would not answer) without one
- * sight of the composer, the CLI has a composer mark the scan could have seen, and the frame shows text and no
- * composer. Anything less reads null, which is what a conversation reads.
+ * sight of the composer, the CLI declares both a composer mark the scan could have seen and its composer glyph, and
+ * the frame shows text and neither. Anything less reads null, which is what a conversation reads.
  */
 export function readStartupScreen(
   text: string,
@@ -499,14 +507,15 @@ export function readStartupScreen(
   options: ProviderScreenReadOptions = {}
 ): StartupScreenStatus | null {
   const reading = nameProviderScreen(text, options);
-  const shortOfComposer = scan.shortOfComposer && !showsComposerRow(text);
+  const shortOfComposer = scan.shortOfComposer && !showsComposerRow(text, options.composerGlyph);
   if (reading) return startupScreenStatus(reading, scan.answering(reading.screen.id, now), shortOfComposer);
   // Still open: the pane may only be slow. Never ended: the session is going away.
   if (!shortOfComposer || scan.active || scan.endReason === null) return null;
   const compact = compactScreenText(text);
   const mark = options.composerMark ? compactScreenText(options.composerMark) : '';
-  // Without a usable mark the scan could never have seen a composer, so its silence about one says nothing.
-  if (mark.length < 3 || compact === '' || compact.includes(mark)) return null;
+  // Without a usable mark the scan could never have seen a composer, so its silence about one says nothing. And a
+  // CLI that does not say where its composer is cannot be shown to be without one.
+  if (mark.length < 3 || !options.composerGlyph || compact === '' || compact.includes(mark)) return null;
   return UNKNOWN_STARTUP_SCREEN;
 }
 

@@ -5147,10 +5147,11 @@ export class Session extends EventEmitter {
     const text = this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName) : null;
     if (typeof text !== 'string') return null;
     const scan = this._firstRunScan;
-    const composerMark = getCli(this.mode)?.capabilities.composerReadyMark;
+    const cli = getCli(this.mode)?.capabilities;
+    const composerMark = cli?.composerReadyMark;
     // A composer seen here counts for the launch like one the scan saw: the pane reached it, for good.
     if (showsComposer(text, composerMark)) scan.composerSeen();
-    const status = readStartupScreen(text, scan, Date.now(), { composerMark });
+    const status = readStartupScreen(text, scan, Date.now(), { composerMark, composerGlyph: cli?.workDetect?.promptGlyph });
     // A screen the office does not answer is logged once per launch by its shape, so a table row can be written for it.
     if (status && status.kind === 'first-run' && !status.answering && status.shown !== 'words' && !this._isWorking && scan.claimShape(status.id))
       console.warn(`[Session] ${this.id} is parked at ${status.label}, which the office does not answer. Screen shape: ${screenShape(text)}`);
