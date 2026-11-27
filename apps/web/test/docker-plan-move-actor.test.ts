@@ -2663,6 +2663,7 @@ it('names the provider start-up screen its target is waiting at, as description 
     label: "Claude's sign-in screen",
     kind: 'credential',
     answering: false,
+    shown: 'widget',
   });
   const before = journal.read(),
     write = vi.spyOn(f.native.target, 'writeViaMux');

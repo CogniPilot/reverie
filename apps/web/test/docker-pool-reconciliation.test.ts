@@ -711,14 +711,14 @@ describe('in-place repair of a running shared pool', () => {
     f.physical.reloadServiceManager();
     return f;
   }
-  const status = async (f: Awaited<ReturnType<typeof fixture>>, headers = f.ownerHeaders) =>
+  const status = async (f: Awaited<ReturnType<typeof fixture>>, headers: Record<string, string> = f.ownerHeaders) =>
     (await f.app.inject({ method: 'GET', url: f.url + '/status', headers })).json().data as {
       state: string;
       code?: string;
       scopeDigest?: string;
       allowedActions: string[];
     };
-  const repair = (f: Awaited<ReturnType<typeof fixture>>, scopeDigest: string, headers = f.ownerHeaders) =>
+  const repair = (f: Awaited<ReturnType<typeof fixture>>, scopeDigest: string, headers: Record<string, string> = f.ownerHeaders) =>
     f.app.inject({ method: 'POST', url: f.url + '/repair', headers, payload: f.body(scopeDigest) });
   const restores = (f: Awaited<ReturnType<typeof fixture>>) =>
     f.physical.configurations.filter(({ config }) => (config.Cmd as string[])[0] === 'restore-pool');
@@ -1224,7 +1224,7 @@ describe('owner recovery of a stopped shared pool', () => {
     expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
   });
   // A recovery that was issued and did not finish is finished as itself. Nothing it issued is issued again.
-  function resume(f: Awaited<ReturnType<typeof fixture>>, headers = f.ownerHeaders) {
+  function resume(f: Awaited<ReturnType<typeof fixture>>, headers: Record<string, string> = f.ownerHeaders) {
     return f.app.inject({ method: 'POST', url: f.url + '/cold-resume', headers, payload: {} });
   }
   const idle = (f: Awaited<ReturnType<typeof fixture>>) => new DockerColdPoolJournal(f.coldFile).requireIdle();
