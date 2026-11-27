@@ -672,6 +672,31 @@ from the session's current state rather than requiring a new transition: the
 original turn may be long over. It comes back as
 `"delivered": false, "duplicate": true`.
 
+**Provider-launch hold** (`src/provider-hold-reconcile.ts`): a session whose provider
+launch the office cannot prove (a dispatch that failed part-way, or a saved launch intent
+loaded by a new office process) holds its input. Before refusing, the route reads the
+session's own terminal: a live pane, under the pid the office registered, showing that
+CLI's working line or composer mark releases the hold and THIS request is delivered. Input
+refused earlier was never kept, so nothing is replayed. Otherwise the answer is
+`409 CONFLICT` with `recoveryRequired: true`, `code` (`PROVIDER_INPUT_HELD`, or
+`PROVIDER_NOT_RUNNING` once the pane is known to have exited), a `reason` when the terminal
+was read and could not settle it (`no-terminal`, `lifecycle-in-progress`,
+`pane-unreadable`, `pane-changed`, `viewer-pane-exited`, `provider-not-visible`),
+`allowedActions` and a `reconcile` object naming the route below. The server repeats the
+read every 15 s for a session that stays held, and once after startup.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/sessions/:id/provider-hold` | The hold as the office sees it: `launchHeld`, `holdKind`, `inputHeld`, `presence` (`screen`, `owner` or `null`), `lastReconciliation`. |
+| `POST` | `/api/sessions/:id/provider-hold` | Body `{"observation": "auto" \| "running" \| "not-running"}`. `auto` re-reads the terminal. `running` is the owner's own reading of that terminal and replaces the screen match only: the pane must still be the session's live registered pane. `not-running` withdraws input again. Answers `outcome` (`confirmed`, `not-running`, `held`, `not-held`) plus the same fields as `GET`. |
+
+Both verbs need verified owner sign-in and refuse a request carrying
+`X-Reverie-Parent-Session` (`403 FORBIDDEN`). ⚠️ Only input to the existing agent is
+settled here. `launchHeld` never changes: a restart, mode switch or prompt run stays
+fenced until the employee is recovered, and no saved launch intent is retired. The
+confirmation is bound to the observed pane and lapses with it, with the mode, or with a
+new dispatch.
+
 **Wake-on-LAN hosts** (`docs/remote-sessions.md` §Wake-on-LAN): when the session's
 remote host has a wake target and is asleep, the non-wait form answers `200` with
 `{"buffered": true}` — the bytes are held and flushed after the host is back — or

@@ -1,10 +1,13 @@
+mod census;
+
 use crate::{
     args::{Common, Member},
     data::{self, Resources},
     error::{Error, Result, need},
     files::Files,
 };
-use nix::sys::statfs::{CGROUP2_SUPER_MAGIC, PROC_SUPER_MAGIC};
+use census::{Census, pid_list};
+use nix::sys::statfs::{CGROUP2_SUPER_MAGIC, FsType, PROC_SUPER_MAGIC};
 use serde::Serialize;
 use std::collections::BTreeSet;
 
@@ -22,36 +25,59 @@ pub(crate) struct Process {
     pub(crate) identity: Identity,
     directory: usize,
     cgroup: usize,
+    /// Role and container, for failure reports: `anchor`, `worker` or `member`.
+    subject: String,
+}
+/// The kernel views a scope is read through, besides its box cgroup: the
+/// cgroup filesystem type and the process filesystem. [`Scope::capture`] alone
+/// supplies the native ones.
+struct Views {
+    cgroup_magic: FsType,
+    tasks: usize,
+    tasks_magic: FsType,
 }
 pub(crate) struct Scope {
     pub(crate) common: Common,
     pub(crate) parent: usize,
-    proc_root: usize,
+    views: Views,
     pub(crate) parent_path: String,
     pub(crate) processes: Vec<Process>,
 }
+/// Failure-report name of the box cgroup and the path leading to it.
+const BOX: &str = "box";
 impl Scope {
-    pub(crate) fn capture(files: &mut Files, common: &Common) -> Result<Self> {
+    /// `worker` names the member a leaf operation targets, for failure reports.
+    pub(crate) fn capture(
+        files: &mut Files,
+        common: &Common,
+        worker: Option<&str>,
+    ) -> Result<Self> {
         need(
             nix::unistd::geteuid().is_root(),
             "BOXED_RESOURCE_ROOT_UID_REQUIRED",
         )?;
         need(common.member.len() <= 64, "BOXED_RESOURCE_MEMBER_BOUND")?;
-        let proc_root = files.root("/proc", PROC_SUPER_MAGIC, true)?;
-        let cg_root = files.root("/sys/fs/cgroup", CGROUP2_SUPER_MAGIC, true)?;
-        let parent_path = format!(
-            "/reverie.slice/reverie-box.slice/reverie-box-{}.slice",
-            common.box_id
-        );
-        let mut parent = cg_root;
-        for part in parent_path.trim_start_matches('/').split('/') {
-            parent = files.child(parent, part, CGROUP2_SUPER_MAGIC)?;
-        }
+        let tasks = files.root("/proc", PROC_SUPER_MAGIC, true)?;
+        let parent = enter(files, common).map_err(|error| error.of(|| BOX.to_owned()))?;
+        let views = Views {
+            cgroup_magic: CGROUP2_SUPER_MAGIC,
+            tasks,
+            tasks_magic: PROC_SUPER_MAGIC,
+        };
+        Self::bind(files, common, worker, parent, views)
+    }
+    fn bind(
+        files: &mut Files,
+        common: &Common,
+        worker: Option<&str>,
+        parent: usize,
+        views: Views,
+    ) -> Result<Self> {
         let mut result = Self {
             common: common.clone(),
             parent,
-            proc_root,
-            parent_path,
+            views,
+            parent_path: parent_path(common),
             processes: vec![],
         };
         let anchor = Member {
@@ -61,7 +87,7 @@ impl Scope {
         };
         result
             .processes
-            .push(result.capture_process(files, &anchor)?);
+            .push(result.capture_process(files, &anchor, "anchor")?);
         let mut ids = BTreeSet::from([anchor.id]);
         let mut pids = BTreeSet::from([anchor.pid]);
         for member in &common.member {
@@ -69,18 +95,36 @@ impl Scope {
                 ids.insert(member.id.clone()) && pids.insert(member.pid),
                 "BOXED_RESOURCE_DUPLICATE_MEMBER",
             )?;
+            let role = if worker == Some(member.id.as_str()) {
+                "worker"
+            } else {
+                "member"
+            };
             result
                 .processes
-                .push(result.capture_process(files, member)?);
+                .push(result.capture_process(files, member, role)?);
         }
+        // Named only now: a member cgroup that fails to open is its member's.
+        files.name(parent, BOX);
         result.assert_current(files)?;
         Ok(result)
     }
-    fn capture_process(&self, files: &mut Files, member: &Member) -> Result<Process> {
+    fn capture_process(&self, files: &mut Files, member: &Member, role: &str) -> Result<Process> {
+        let subject = format!("{role} {}", member.id);
+        let pinned = self.pin(files, member, &subject);
+        pinned.map_err(|error| error.of(|| subject))
+    }
+    fn pin(&self, files: &mut Files, member: &Member, subject: &str) -> Result<Process> {
         let name = format!("docker-{}.scope", member.id);
         let path = format!("{}/{name}", self.parent_path);
-        let cgroup = files.child(self.parent, &name, CGROUP2_SUPER_MAGIC)?;
-        let directory = files.child(self.proc_root, &member.pid.to_string(), PROC_SUPER_MAGIC)?;
+        let cgroup = files.child(self.parent, &name, self.views.cgroup_magic)?;
+        files.name(cgroup, subject);
+        let directory = files.child(
+            self.views.tasks,
+            &member.pid.to_string(),
+            self.views.tasks_magic,
+        )?;
+        files.name(directory, subject);
         need(
             files.read(directory, "cgroup", 4096)? == format!("0::{path}\n"),
             "BOXED_RESOURCE_PID_CGROUP",
@@ -102,6 +146,7 @@ impl Scope {
             },
             directory,
             cgroup,
+            subject: subject.to_owned(),
         })
     }
     pub(crate) fn assert_current(&self, files: &mut Files) -> Result<()> {
@@ -129,6 +174,8 @@ impl Scope {
         }
         Ok(())
     }
+    /// The init process is pinned by its retained directory and recorded
+    /// birth. Its exit or replacement always refuses.
     fn process_current(&self, files: &mut Files, process: &Process) -> Result<()> {
         need(
             data::process_stat(
@@ -144,11 +191,13 @@ impl Scope {
                 == format!("0::{}\n", process.identity.path),
             "BOXED_RESOURCE_PID_CGROUP",
         )?;
-        let named = files.child(
-            self.proc_root,
-            &process.identity.pid.to_string(),
-            PROC_SUPER_MAGIC,
-        )?;
+        let named = files
+            .child(
+                self.views.tasks,
+                &process.identity.pid.to_string(),
+                self.views.tasks_magic,
+            )
+            .map_err(|error| error.of(|| process.subject.clone()))?;
         need(
             files.identity(named)? == files.identity(process.directory)?,
             "BOXED_RESOURCE_PID_REPLACED",
@@ -169,16 +218,15 @@ impl Scope {
             procs.contains(&process.identity.pid),
             "BOXED_RESOURCE_INIT_NOT_MEMBER",
         )?;
-        for pid in pid_list(&files.read(process.cgroup, "cgroup.threads", 131072)?)? {
-            let directory = files.child(self.proc_root, &pid.to_string(), PROC_SUPER_MAGIC)?;
-            need(
-                files.read(directory, "cgroup", 4096)? == format!("0::{}\n", process.identity.path),
-                "BOXED_RESOURCE_FOREIGN_PID",
-            )?;
-            data::process_stat(&files.read(directory, "stat", 4096)?, pid)?;
-            files.release(directory)?;
+        Census {
+            tasks: self.views.tasks,
+            tasks_magic: self.views.tasks_magic,
+            cgroup: process.cgroup,
+            path: &process.identity.path,
+            init: process.identity.pid,
+            subject: &process.subject,
         }
-        Ok(())
+        .verify(files)
     }
     pub(crate) fn worker(&self, id: &str) -> Result<usize> {
         self.processes
@@ -188,16 +236,18 @@ impl Scope {
             .ok_or(Error::Refused("BOXED_RESOURCE_UNREGISTERED_WORKER"))
     }
 }
-fn pid_list(raw: &str) -> Result<BTreeSet<u32>> {
-    let mut output = BTreeSet::new();
-    for line in raw.lines() {
-        let value = data::scalar(line)?
-            .parse::<u32>()
-            .map_err(|_| Error::Refused("BOXED_RESOURCE_PID_LIST"))?;
-        need(value > 0 && output.insert(value), "BOXED_RESOURCE_PID_LIST")?;
+fn enter(files: &mut Files, common: &Common) -> Result<usize> {
+    let mut parent = files.root("/sys/fs/cgroup", CGROUP2_SUPER_MAGIC, true)?;
+    for part in parent_path(common).trim_start_matches('/').split('/') {
+        parent = files.child(parent, part, CGROUP2_SUPER_MAGIC)?;
     }
-    need(output.len() <= 8192, "BOXED_RESOURCE_PID_BOUND")?;
-    Ok(output)
+    Ok(parent)
+}
+fn parent_path(common: &Common) -> String {
+    format!(
+        "/reverie.slice/reverie-box.slice/reverie-box-{}.slice",
+        common.box_id
+    )
 }
 pub(crate) fn resources(files: &mut Files, index: usize) -> Result<Resources> {
     let mut scalar = |name| data::scalar(&files.read(index, name, 128)?);
@@ -234,3 +284,6 @@ pub(crate) fn resources(files: &mut Files, index: usize) -> Result<Resources> {
         cpuset_mems_effective,
     })
 }
+
+#[cfg(test)]
+mod tests;

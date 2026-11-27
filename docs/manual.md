@@ -72,6 +72,44 @@ depends on its web source and explicit Python, skill and test fixtures; unrelate
 documentation or workflow changes reuse its checked output. GitHub's cache is
 available to workflows, while local builds reuse the workstation's own Nix store.
 
+### Building without the test suites, and running them separately
+
+By default every package runs its test suite inside its own build, so
+`nix build .#dockerImage` builds and tests everything the image contains. One
+argument, `runChecks`, selects the same recipes without their test phases.
+`nix/build-policy.nix` owns what it changes.
+
+```bash
+# The same package names, without test phases.
+nix build .#unchecked.dockerImage
+nix build .#unchecked.workerImage
+nix build .#unchecked.workerClientCapsule
+nix build .#unchecked.docker-leaf-writer-helper-image
+nix build .#unchecked.deployment
+
+# Every suite those builds skipped, as separate builds side by side.
+nix build .#checks.x86_64-linux.deployPathSuites --keep-going --print-build-logs
+```
+
+`lib.mkContainerGpuImage`, `lib.mkBoxedWebsiteImage`, `lib.workerDockerImage`,
+`lib.workerDockerImageProvenance` and `lib.workerChildImageAnnex` accept
+`runChecks = false` for the same purpose. The argument selects each function's
+default inputs. An image you pass in, such as `baseImage`, keeps the variant it
+was built with, so give the argument to every call in the chain.
+
+The suites run in the same Nix build sandbox as before. `--keep-going` builds
+every suite that can still be built and names each one that failed. Inside a
+suite, the console runs every batch and lists each failed command at the end,
+and a Rust package runs every test binary. `nix flake check --keep-going` runs
+the same suites together with the flake's other checks.
+
+A checked build and an unchecked build of the same source are different
+derivations. The office and laptop images contain the store paths of the
+packages inside them, so the two variants never share an image ID. Use one
+variant for every image whose ID a deployment records. The unchecked build
+does not show that the suites pass: run `deployPathSuites` on the same commit
+before you treat an image as released.
+
 Reverie does not require NixOS or changes to a personal host configuration.
 The flake provides the application, tools and launchers. The native service runs
 as your user; container mode uses an existing container engine. Privileged host

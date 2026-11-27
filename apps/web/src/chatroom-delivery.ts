@@ -76,6 +76,11 @@ export interface DeliverySession {
     data: string,
     options?: { opencodeGuard?: boolean; requireIdle?: boolean; requireEmptyComposer?: boolean; onIdleRefused?: () => void; onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void }
   ): Promise<boolean>;
+  /**
+   * Press Enter for `text` that this office typed earlier and that is still the whole composer of an otherwise idle pane.
+   * Types and clears nothing; false when the pane is not in exactly that state (Session.resubmitStranded).
+   */
+  resubmitStranded?(text: string, onOutcome?: (outcome: 'submitted' | 'stranded' | 'unverified') => void): boolean;
 }
 
 /** A chat message that was in a delivery line. */
@@ -577,6 +582,10 @@ export const DELIVERY_WAIT_TEXT: Readonly<Record<DeliveryWaitReason, string>> = 
   unconfirmed_unread: 'earlier lines are unconfirmed and its composer is not provably empty',
   not_idle: 'its terminal was not idle when the line was about to be typed',
 };
+/** The waits a composer that is not empty causes. Only a seat held by one of them is looked at for an unsent wake line. */
+const COMPOSER_WAITS: ReadonlySet<DeliveryWaitReason> = new Set(['input_closed', 'unconfirmed_unread', 'not_idle']);
+/** How long after Enter was pressed for an unsent wake line it may be pressed for one again: past the composer check's schedule. */
+export const UNSENT_WAKE_RETRY_MS = 2 * 60_000;
 
 /** A seat whose waking lines have waited this long, for any reason but a busy turn, is reported (once per wait). */
 export const STALLED_ALERT_MS = 10 * 60_000;
@@ -608,6 +617,8 @@ export class ChatroomDelivery {
   private waits = new Map<string, { reason: DeliveryWaitReason; since: number }>();
   /** The wait last reported as stalled for each session, and when. */
   private stalledReported = new Map<string, { since: number; at: number }>();
+  /** When Enter was last asked for an unsent wake line of each session (takeUpUnsentWake). */
+  private unsentWakeTaken = new Map<string, number>();
 
   /** When the oldest line that would wake the session was queued; undefined when none is queued. */
   private oldestWaking(sessionId: string): number | undefined {
@@ -661,6 +672,43 @@ export class ChatroomDelivery {
     if (session.isWorking) return 'working';
     if (session.canAcceptChatInput?.() === false) return 'input_closed';
     return undefined;
+  }
+
+  /**
+   * A wake line that was typed and never submitted must not hold the seat for good. The office types the text and its Enter
+   * as two steps, and withholds the Enter whenever it cannot see, right then, that the composer holds exactly that text: a
+   * pane it could not read (a laptop it had just lost its connection to), a gate that closed while the text settled, a CLI
+   * that ignored the Enter. The text then stays in the composer. Every later wake needs an empty composer, so none was ever
+   * typed again and the member was unreachable until someone cleared that line by hand.
+   *
+   * The wake line is the only text delivery types, a constant that carries no message. When it is the WHOLE composer of a
+   * pane that is idle in every other respect, the session presses Enter for it (Session.resubmitStranded), under the same
+   * rule as any wake: only while the complete composer is still exactly that line. Nothing is typed here and nothing is
+   * cleared, so a line a person added to is never touched. The turn that Enter starts reads what is queued; the queue and
+   * the unconfirmed earlier lines are left as they are and settle through the member's own read.
+   *
+   * It is looked for only on a seat whose last attempt was held by a composer that was not empty, so a seat that takes its
+   * lines pays nothing for it, and at most once per UNSENT_WAKE_RETRY_MS. The seat's wait keeps its reason and its start: a
+   * line that no Enter moves is still reported as stalled.
+   */
+  private takeUpUnsentWake(sessionId: string, session: DeliverySession): boolean {
+    const wait = this.waits.get(sessionId);
+    if (!wait || !COMPOSER_WAITS.has(wait.reason) || !session.resubmitStranded) return false;
+    const now = (this.deps.now ?? Date.now)();
+    if (now - (this.lastDelivered.get(sessionId) ?? 0) < DELIVERY_SPACING_MS) return false;
+    const before = this.unsentWakeTaken.get(sessionId);
+    if (before !== undefined && now - before < UNSENT_WAKE_RETRY_MS) return false;
+    let taken = false;
+    try {
+      taken = session.resubmitStranded(WAKE_LINE) === true;
+    } catch {
+      taken = false;
+    }
+    if (!taken) return false;
+    this.unsentWakeTaken.set(sessionId, now);
+    this.lastDelivered.set(sessionId, now);
+    this.checkStalled(sessionId);
+    return true;
   }
 
   /** Keep queued chat durable while a migration owns a session's composer. */
@@ -823,6 +871,7 @@ export class ChatroomDelivery {
     this.lastRooms.delete(sessionId);
     this.omitted.delete(sessionId);
     this.waits.delete(sessionId);
+    this.unsentWakeTaken.delete(sessionId);
   }
 
   /**
@@ -1100,6 +1149,12 @@ export class ChatroomDelivery {
       return false;
     }
     const paneWait = this.paneWait(session);
+    // A composer that is not empty closes chat input, and the one thing that may be sitting in it is looked at first.
+    if (paneWait !== 'input_closed' && paneWait) {
+      this.noteWait(sessionId, paneWait);
+      return false;
+    }
+    if (this.takeUpUnsentWake(sessionId, session)) return false;
     if (paneWait) {
       this.noteWait(sessionId, paneWait);
       return false;

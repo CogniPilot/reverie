@@ -1,5 +1,7 @@
 /**
- * @fileoverview Agent profile images: `<data>/agent-avatars/<sessionId>.<ext>`, one per session.
+ * @fileoverview Agent profile images: `<data>/agent-avatars/<key>.<ext>`. An employee's key is its
+ * employee id, which survives every new session; a temporary agent's key is its session id. Older
+ * employee images keep the session-id key their recorded URL names, so they stay readable.
  *
  * Only PNG, JPEG, GIF and WebP, at most MAX_AVATAR_BYTES. The type is read from the file's own
  * magic bytes, never from what the uploader declared, so an SVG or HTML file (which could carry
@@ -59,6 +61,12 @@ export function checkAvatar(data: unknown): string {
 
 export function avatarUrl(sessionId: string, version: number): string {
   return `/api/avatars/${sessionId}?v=${version}`;
+}
+
+/** The stored-image key a recorded avatar URL names, or undefined for anything else. */
+export function avatarKey(url: string | undefined): string | undefined {
+  if (!url || !AVATAR_URL.test(url)) return undefined;
+  return url.slice('/api/avatars/'.length, url.indexOf('?'));
 }
 
 export class AvatarStore {

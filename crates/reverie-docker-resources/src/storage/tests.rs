@@ -63,3 +63,49 @@ fn filesystem_id_is_checked_on_the_open_directory() {
     assert!(verify_filesystem(&files, index, expected ^ 1).is_err());
     assert!(verify_filesystem(&files, index, 0).is_err());
 }
+
+#[test]
+fn filesystem_observation_reports_what_the_verifier_checks() {
+    let mut files = Files::new();
+    let index = files.storage("/", false).unwrap();
+    let seen = filesystem(&files, index).unwrap();
+    let id = seen.id.parse::<u64>().unwrap();
+    assert_eq!(seen.id, id.to_string());
+    // The reported pair is exactly what `--filesystem-id` is later verified against.
+    assert_eq!(
+        verify_filesystem(&files, index, id).is_ok(),
+        seen.ext4 && id != 0
+    );
+    assert_eq!(filesystem(&files, index).unwrap(), seen);
+}
+
+#[test]
+fn filesystem_observation_has_one_closed_shape() {
+    let directory = |raw: &str| raw.parse::<Directory>().unwrap();
+    let encoded = serde_json::to_value(FilesystemObservation {
+        version: 1,
+        purpose: "reverie-boxed-storage-filesystem-observation-v1",
+        home: directory("4:5:1000:100:448"),
+        nix: directory("4:6:1000:100:448"),
+        home_filesystem: Filesystem {
+            ext4: true,
+            id: "77".into(),
+        },
+        nix_filesystem: Filesystem {
+            ext4: true,
+            id: "77".into(),
+        },
+    })
+    .unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "version": 1,
+            "purpose": "reverie-boxed-storage-filesystem-observation-v1",
+            "home": {"dev": "4", "ino": "5", "uid": 1000, "gid": 100, "mode": 448},
+            "nix": {"dev": "4", "ino": "6", "uid": 1000, "gid": 100, "mode": 448},
+            "homeFilesystem": {"ext4": true, "id": "77"},
+            "nixFilesystem": {"ext4": true, "id": "77"},
+        })
+    );
+}

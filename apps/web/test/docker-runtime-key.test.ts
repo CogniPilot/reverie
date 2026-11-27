@@ -104,3 +104,48 @@ describe('consuming original key closure', () => {
     fs.rmSync(dir, { recursive: true });
   });
 });
+describe('what a new office process would read, for the office’s own restart', () => {
+  it('says the same identity is on disk after a change that revoked the key but left its bytes alone', () => {
+    const dir = fixture(),
+      key = new DockerRuntimeKey(dir),
+      stamp = key.stamp();
+    expect(key.sameOnDisk()).toBe(true);
+    // A file made beside the key changes the directory, which revokes the key for good.
+    fs.writeFileSync(join(dir, 'stray'), '');
+    expect(key.current()).toBe(false);
+    expect(key.stamp()).not.toBe(stamp);
+    expect(key.sameOnDisk()).toBe(true);
+    // Reading changes nothing, and does not make the key current again.
+    expect(key.stamp()).toBe(key.stamp());
+    expect(key.current()).toBe(false);
+    const again = new DockerRuntimeKey(dir);
+    expect(again.instanceId).toBe(key.instanceId);
+    again.close();
+    key.close();
+    fs.rmSync(dir, { recursive: true });
+  });
+  it('says no when another key, no key or a public key is on disk, and creates nothing', () => {
+    const dir = fixture(),
+      key = new DockerRuntimeKey(dir),
+      path = join(dir, 'worker-identity.json'),
+      body = fs.readFileSync(path, 'utf8');
+    const other = JSON.parse(body) as { key: string };
+    other.key = other.key.startsWith('0') ? '1' + other.key.slice(1) : '0' + other.key.slice(1);
+    fs.writeFileSync(path, JSON.stringify(other));
+    expect(key.sameOnDisk()).toBe(false);
+    fs.writeFileSync(path, body);
+    expect(key.sameOnDisk()).toBe(true);
+    fs.chmodSync(path, 0o644);
+    expect(key.sameOnDisk()).toBe(false);
+    fs.chmodSync(path, 0o600);
+    fs.chmodSync(dir, 0o755);
+    expect(key.sameOnDisk()).toBe(false);
+    fs.chmodSync(dir, 0o700);
+    fs.rmSync(path);
+    expect(key.sameOnDisk()).toBe(false);
+    expect(fs.existsSync(path)).toBe(false);
+    expect(key.stamp()).toMatch(/\|unreadable$/);
+    key.close();
+    fs.rmSync(dir, { recursive: true });
+  });
+});

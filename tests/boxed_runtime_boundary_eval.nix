@@ -77,6 +77,15 @@ let
       && builtins.match ".*cp /fake/reverie-boxed-recovery-helper share/reverie/helper-image-identity.json.*"
         recovery.extraCommands != null
       && baseline.extraCommands != recovery.extraCommands;
+    leafWriterImageCannotDisappear = !(passes (without "packages" "docker-leaf-writer-helper-image") ../.);
+    leafWriterImageIdentityDoesNotChangeHelperConfiguration = let
+      baseline = makeHelper {};
+      leafWriter = makeHelper { name = "reverie-boxed-leaf-writer-helper"; };
+    in leafWriter.config == baseline.config && leafWriter.contents == baseline.contents
+      && leafWriter.config.Labels == { "org.reverie.purpose" = "boxed-resource-helper-v1"; }
+      && builtins.match ".*cp /fake/reverie-boxed-leaf-writer-helper share/reverie/helper-image-identity.json.*"
+        leafWriter.extraCommands != null
+      && baseline.extraCommands != leafWriter.extraCommands;
     gpuKeepsContainerSupervisor = gpu.config.Entrypoint == [
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"

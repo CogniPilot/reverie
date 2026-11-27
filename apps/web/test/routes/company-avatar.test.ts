@@ -133,6 +133,30 @@ describe('profile images', () => {
     expect((await app.inject({ method: 'GET', url: '/api/avatars/unknown-runtime' })).statusCode).toBe(404);
   });
 
+  it("keeps an employee's image across a new session, including one stored under an old session id", async () => {
+    const employee = await service.hire({ name: 'Ellis', icon: 'E', position: 'Engineer', expertise: ['systems'], sessionId: ALPHA });
+    const uploaded = (await upload(`/api/company/agents/${ALPHA}/avatar`, PNG)).json().data.profile.avatar as string;
+    expect(uploaded).toMatch(new RegExp(`^/api/avatars/${employee.id}\\?v=\\d+$`));
+    expect(await stored()).toEqual([`${employee.id}.png`]);
+    // A plan move or laptop rebuild gives the employee a new session; the image stays.
+    await service.store.update((state) => { state.employees[0].sessionId = BETA; });
+    for (const url of [uploaded, `/api/avatars/${BETA}`, `/api/avatars/${employee.id}`]) {
+      const served = await app.inject({ method: 'GET', url });
+      expect(served.statusCode, url).toBe(200);
+      expect(served.rawPayload.equals(PNG)).toBe(true);
+    }
+    // An image recorded before this change names the old session id; it is still served.
+    const legacy = new AvatarStore(join(directory, 'agent-avatars'));
+    await legacy.put('old-session', GIF);
+    await service.store.update((state) => { state.employees[0].avatar = '/api/avatars/old-session?v=1'; });
+    const old = await app.inject({ method: 'GET', url: '/api/avatars/old-session?v=1' });
+    expect(old.statusCode).toBe(200);
+    expect(old.headers['content-type']).toBe('image/gif');
+    // Clearing removes both the employee-id file and the old one its link named.
+    expect((await app.inject({ method: 'DELETE', url: `/api/company/agents/${BETA}/avatar` })).statusCode).toBe(200);
+    expect(await stored()).toEqual([]);
+  });
+
   it('an agent sets its own image: stored, on its record and on its own membership in every room', async () => {
     const res = await upload('/api/company/self/avatar', PNG, ALPHA);
     expect(res.statusCode).toBe(200);

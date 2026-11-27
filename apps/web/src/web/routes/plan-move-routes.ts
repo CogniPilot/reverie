@@ -370,6 +370,44 @@ export function registerPlanMoveRoutes(
         return failure(reply, error);
       }
     });
+    // The signed-in owner gives up a move that is held for recovery. Same
+    // authentication as close-restored: never an agent, a worker identity, a
+    // service token or a delegated recovery header, whatever its permission.
+    // It changes the move journal only; the laptop rebuild discards containers.
+    routes.post<{ Params: { id: string } }>('/api/plans/moves/:id/abandon', async (request, reply) => {
+      if (
+        request.headers[RECOVERY_HEADER] !== undefined ||
+        dockerWorkerIdentityOf(request) ||
+        request.headers['x-reverie-worker-identity'] !== undefined ||
+        request.headers['x-reverie-parent-session'] !== undefined ||
+        request.headers['x-reverie-service-token'] !== undefined
+      )
+        return failure(reply, new PlanMoveError('Abandoning a held move requires the signed-in owner', 403));
+      try {
+        const id = Identifier.parse(request.params.id);
+        const input = parseBody(z.object({ employeeId: Identifier }).strict(), request.body);
+        const authorized = () => {
+          if (!authenticatedPlanMover(request, auth.authSessions, ownerAuth))
+            throw new PlanMoveError('The owner sign-in changed while abandoning the move', 403);
+        };
+        const data = await moves.abandonHeldDockerMove(id, input.employeeId, ownerFor(request), authorized);
+        return {
+          success: true,
+          data,
+          message:
+            'The move is closed and the employee is no longer locked by it. Nothing was stopped or removed. ' +
+            'Rebuild the laptop to discard what the move left behind and start a fresh one.',
+          allowedActions: ['rebuild'],
+        };
+      } catch (error) {
+        if (error instanceof PlanMoveError && error.status === 409)
+          return reply.code(409).send({
+            ...createErrorResponse(ApiErrorCode.CONFLICT, error.message),
+            allowedActions: ['status'],
+          });
+        return failure(reply, error);
+      }
+    });
     routes.post<{ Params: { id: string } }>('/api/plans/moves/:id/close-restored', async (request, reply) => {
       if (!execution || request.headers[RECOVERY_HEADER] !== undefined || dockerWorkerIdentityOf(request) ||
           request.headers['x-reverie-parent-session'] !== undefined)

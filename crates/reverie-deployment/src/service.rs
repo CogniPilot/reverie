@@ -13,6 +13,7 @@ mod adoption;
 mod apply;
 mod claim;
 mod invalid_create;
+mod retention;
 mod rollback;
 mod scratch;
 mod shared_writers;
@@ -280,6 +281,7 @@ impl DeploymentService {
             profile: profile.preview(),
             preserved_networks: network_topology.as_ref().map(crate::networks::Topology::preview),
             live_accounts: live_account_writers.as_ref().map(crate::live_accounts::Inventory::preview),
+            stopped_backup: live_account_writers.is_none().then(|| self.stopped_backup(&source)),
         };
             let plan = Plan {
                 version: if claim_adoption.is_some() {

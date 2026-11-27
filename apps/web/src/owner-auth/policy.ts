@@ -115,15 +115,19 @@ const AGENT_ROUTES = new Set([
   'POST /api/company/employees/:id/vacation', // route checks explicit manageOffice, never title/admin status
   'POST /api/company/employees/:id/restart', // unchanged-recipe only; runtime settings remain owner-only
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
+  'GET /api/company/employees/:id/model', // own model, or the explicit owner-granted manageModels capability
+  'PUT /api/company/employees/:id/model', // route checks the explicit owner-granted manageModels capability, never a title
   'POST /api/company/employees/:id/reconnect', // purpose-authenticated native proof and explicit recovery permission
   'POST /api/company/employees/:id/reconnect/status',
   'GET /api/company/employees/:id/docker-policy',
   'GET /api/company/employees/:id/docker-pool/status',
   'POST /api/company/employees/:id/docker-pool/reconcile',
+  'POST /api/company/employees/:id/docker-pool/repair', // re-applies the already approved limits; same recovery permission
   'GET /api/company/employees/:id/docker-stop/status',
   'POST /api/company/employees/:id/docker-stop/reconcile',
   'POST /api/company/employees/:id/docker-continuation',
   'POST /api/company/employees/:id/docker-continuation/observe',
+  'POST /api/company/employees/:id/docker-continuation/repair', // one running laptop's approved limits, in place
   'POST /api/plans/moves/force', // route requires a purpose proof; raw parent headers grant nothing
   'POST /api/plans/moves/:id/status',
   'POST /api/plans/moves/:id/resolve',

@@ -425,6 +425,130 @@ it('admits a restored Hands session with the original local model before spawnin
   expect(start).toHaveBeenCalledOnce();
   expect(sessions.get(sid)?.customModel).toEqual(customModel);
 });
+it('launches a rebuilt Hands laptop on its recipe model, and refuses beforehand when that cannot work', async () => {
+  const f = await dockerEncodedDestination();
+  const directory = mkdtempSync(join(tmpdir(), 'boxed-rebuilt-model-'));
+  const companyFile = new CompanyStore(join(directory, 'company.json'));
+  const states = new StateStore(join(directory, 'state.json'));
+  const sessions = new Map<string, Session>();
+  cleanup.push(async () => rmSync(directory, { recursive: true, force: true }));
+  await companyFile.init();
+  const employee = EmployeeSchema.parse({
+    id: eid,
+    sessionId: sid,
+    sessionGeneration: 3,
+    name: 'Synthetic',
+    icon: 'S',
+    position: 'Employee',
+    expertise: ['testing'],
+    createdAt: 1,
+    onVacation: false,
+    desiredRunning: true,
+    pronouns: 'she/her',
+    runtimeRecipe: {
+      mode: 'hands',
+      workingDir: '/workspace',
+      customModel: { endpointId: 'local-test', modelId: 'synthetic-model' },
+    },
+  });
+  await companyFile.update((state) => {
+    state.employees = [employee];
+  });
+  // The rebuilt record: no saved endpoint values and no bookkeeping to rebuild them from.
+  const original = new Session({ id: sid, workingDir: '/workspace', mode: 'hands' as SessionMode, resumeSessionId: sid });
+  cleanup.push(() => original.stop(false));
+  const saved = original.toPersistedState();
+  expect((saved as { __customModel?: unknown }).__customModel).toBeUndefined();
+  states.setSession(sid, saved);
+  const company = new CompanyService(companyFile, {
+    getSession: (id: string) => sessions.get(id),
+    chatrooms: { rooms: () => [] },
+    research: {},
+  } as unknown as CompanyServiceDeps);
+  f.row.sourceDigest = dockerEmployeeSourceDigest(employee, saved);
+  f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+  f.row.phase = 'identity-ready';
+  const key = 'synthetic-' + 'k3y'.repeat(12);
+  let endpoints = [
+    {
+      id: 'local-test',
+      label: 'Local',
+      baseUrl: 'http://127.0.0.1:8092',
+      apiKey: key,
+      models: ['synthetic-model'],
+    },
+  ];
+  const provider = new DockerEmployeeSessionProvider(
+    new CompanyDockerContinuationStore(company, (id) => states.getSession(id)),
+    {
+      store: states,
+      sessions,
+      mux: new TmuxManager(),
+      async addSession(session: Session) {
+        sessions.set(session.id, session);
+        cleanup.push(() => session.stop(false));
+      },
+      reapplyPersistedSessionState: vi.fn(),
+      setupSessionListeners: vi.fn(),
+      persistSessionStateNow: vi.fn(),
+    } as unknown as SessionPort & ConfigPort & Pick<InfraPort, 'mux'>,
+    'http://boxed-office:3000',
+    undefined,
+    async () => endpoints
+  );
+  const start = vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValue(undefined);
+  const merged = vi.spyOn(Session.prototype, 'mergeLaunchEnvironment');
+
+  // Before the one launch: every refusal is a code and a sentence, and starts nothing.
+  expect(await provider.preflight(f.row, { modelSocketMounted: true }, () => {})).toBeUndefined();
+  expect(await provider.preflight(f.row, { modelSocketMounted: false }, () => {})).toMatchObject({
+    code: 'DOCKER_CONTINUATION_LOCAL_MODEL_ENDPOINT_UNREACHABLE',
+    message: expect.stringContaining("Synthetic's local model endpoint 'local-test' is not reachable from her laptop"),
+  });
+  const present = endpoints;
+  endpoints = [];
+  const missing = await provider.preflight(f.row, { modelSocketMounted: true }, () => {});
+  expect(missing).toMatchObject({ code: 'DOCKER_CONTINUATION_LOCAL_MODEL_ENDPOINT_MISSING' });
+  expect(JSON.stringify(missing)).not.toContain(key);
+  expect(start).not.toHaveBeenCalled();
+  expect(sessions.size).toBe(0);
+  await expect(
+    provider.preflight(f.row, { modelSocketMounted: true }, () => {
+      throw Error('Canonical domain changed');
+    })
+  ).rejects.toThrow('Canonical domain changed');
+
+  // The launch itself: the endpoint values come from the recipe and the store.
+  endpoints = present;
+  f.row.phase = 'provider-issued';
+  await provider.launch(
+    f.row,
+    {
+      version: 1,
+      operationId: oid,
+      credentialId: f.row.credentialId,
+      sessionId: sid,
+      sessionGeneration: 3,
+      containerId: dest,
+      imageId: target,
+      originalDigest: dockerContinuationDigest(f.row.destination),
+      policyDigest: dockerContinuationDigest(f.row.policy),
+    },
+    () => {}
+  );
+  expect(start).toHaveBeenCalledOnce();
+  expect(merged).toHaveBeenCalledOnce();
+  expect(merged.mock.calls[0]?.[0]).toEqual({
+    REVERIE_HANDS_BASE_URL: 'http://127.0.0.1:8092/v1',
+    REVERIE_HANDS_API_KEY: key,
+    REVERIE_HANDS_MODEL: 'synthetic-model',
+  });
+  expect(merged.mock.invocationCallOrder[0]).toBeLessThan(start.mock.invocationCallOrder[0]!);
+  // Only the launch environment changed: the saved recipe and its fingerprint are as recorded.
+  const launched = sessions.get(sid)!.toPersistedState();
+  expect(dockerEmployeeSourceDigest(employee, launched)).toBe(f.row.sourceDigest);
+  expect(JSON.stringify(launched)).not.toContain(key);
+});
 
 async function savedFixture(
   explicitUnknown = false,

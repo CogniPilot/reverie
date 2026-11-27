@@ -1,5 +1,6 @@
 import {DockerEmployeeBinding,DockerEmployeeResourcePolicy,DockerEmployeeContinuationRecord} from './docker-employee-continuation-data.js';
 import {DockerPoolObservations} from './docker-pool-observation-data.js';
+import { DockerAbsentContinuationRetirements } from './docker-absent-reprovision-data.js';
 import { DockerSharedPoolLineages } from './docker-shared-pool-lineage.js';
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
@@ -9,6 +10,7 @@ import { normalizeIcon } from './chatroom-store.js';
 import { AVATAR_URL } from './agent-avatars.js';
 import { PRONOUNS_MAX, pronounsProblem } from './pronouns.js';
 import { EmployeeVoiceSchema } from './employee-voice.js';
+import { SESSION_MODEL_ID_PATTERN } from './types/session.js';
 
 const text = z.string().trim().min(1).max(100);
 /** Instance-owned belief text, never a repository persona or an authority grant. Text is preserved exactly. */
@@ -39,6 +41,8 @@ export const EmployeePermissionsSchema = z
     moveOwnPlan: z.boolean().default(false),
     managePlans: z.boolean().default(false),
     manageGoals: z.boolean().default(false),
+    /** Set another employee's (or one's own) model through the model service; owner-granted, never implied by a title. */
+    manageModels: z.boolean().default(false),
     editBoardIssues: z.boolean().optional(),
     manageBoard: z.boolean().optional(),
     manageDecisions: z.boolean().optional(),
@@ -53,6 +57,7 @@ export const EmployeePermissionsPatchSchema = EmployeePermissionsSchema.extend({
   moveOwnPlan: EmployeePermissionsSchema.shape.moveOwnPlan.removeDefault(),
   managePlans: EmployeePermissionsSchema.shape.managePlans.removeDefault(),
   manageGoals: EmployeePermissionsSchema.shape.manageGoals.removeDefault(),
+  manageModels: EmployeePermissionsSchema.shape.manageModels.removeDefault(),
 }).partial();
 export const EmployeeSchema = z
   .object({
@@ -65,7 +70,7 @@ export const EmployeeSchema = z
     /** Owner-selected avatar background; absent retains the automatic identity color. */
     avatarBackground: z.union([z.string().regex(/^#[0-9a-fA-F]{6}$/), z.literal('transparent')]).optional(),
     position: text,
-    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }),
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
     pronouns: PronounsSchema.optional(),
     voice: EmployeeVoiceSchema.optional(),
@@ -318,6 +323,28 @@ export const CompanySettingsSchema = z.object({
   ownerTitle: z.string().max(100).default(''),
   enabled: z.boolean().default(false),
   autoWakeEnabled: z.boolean().default(true),
+  /** The office supervisor observes, retries and reconnects on its own. Absent means on. */
+  supervisorEnabled: z.boolean().optional(),
+  /**
+   * The supervisor may also abandon a dead-end plan move, rebuild a laptop (at once when nothing runs in it,
+   * otherwise between its agent's turns or while its agent is parked on a provider start-up screen), give standing
+   * limits (below), and restart the office after its laptop configuration changed under it. Absent means on.
+   */
+  supervisorAutoRepair: z.boolean().optional(),
+  /**
+   * The owner's standing answer to a storage device change. After a host restart the filesystem an employee's home
+   * is on can have a new device number. The office accepts that by itself when it recorded that filesystem earlier.
+   * When it has no such record, this grant lets it accept the new number while both recorded directories are
+   * otherwise unchanged (inode, owner, mode) on one ext4 filesystem. Absent means off: the office then waits.
+   */
+  acceptStorageRenumbering: z.boolean().optional(),
+  /**
+   * The owner's standing defaults for a laptop. An employee who has no approved resource limits, or no laptop layout
+   * on record, is given what the owner already approved for the other employees: the most restrictive of their
+   * limits, and the layout all of their laptops share (docker-standing-defaults.ts). Nothing is given that some
+   * other employee does not already have, and no number is made up. Absent means on.
+   */
+  supervisorStandingDefaults: z.boolean().optional(),
   crashWakeEmployeeId: z.string().min(1).optional(),
   timeZone: z
     .string()
@@ -335,7 +362,18 @@ export const CompanySettingsSchema = z.object({
   researchMinutes: z.number().int().min(1).max(120).default(60),
   briefingMinutes: z.number().int().min(1).max(30).default(10),
   coordinatorEmployeeId: text.optional(),
+  /**
+   * The model a Claude employee is switched to when its current model reaches a per-model usage limit
+   * (employee-model-service.ts). Absent means DEFAULT_MODEL_LIMIT_FALLBACK; null turns the switch off.
+   */
+  modelLimitFallback: z.string().max(100).regex(SESSION_MODEL_ID_PATTERN).nullable().optional(),
 });
+/** The fallback model when the company has not chosen one (`modelLimitFallback` absent). */
+export const DEFAULT_MODEL_LIMIT_FALLBACK = 'claude-opus-5-5';
+/** The company's fallback model for a per-model limit, or null when the owner turned it off. */
+export function modelLimitFallback(settings: Pick<CompanySettings, 'modelLimitFallback'>): string | null {
+  return settings.modelLimitFallback === undefined ? DEFAULT_MODEL_LIMIT_FALLBACK : settings.modelLimitFallback;
+}
 export type CompanySettings = z.infer<typeof CompanySettingsSchema>;
 /** A partial owner edit. Only the crash expert accepts null, as explicit clear;
  * canonical stored settings continue to use an absent optional string. */
@@ -387,6 +425,10 @@ export const CompanyStateSchema = z.object({
   dockerEmployeeContinuations: z.array(DockerEmployeeContinuationRecord).max(64).refine(rows =>
     new Set(rows.map(row=>row.employeeId)).size===rows.length &&
     new Set(rows.map(row=>row.request.operationId)).size===rows.length).optional(),
+  /** Append-only history of continuation rows retired because the Engine positively
+   * reported every recorded container absent. History and a resumable source
+   * cursor only, never a native grant; CompanyService.view never projects it. */
+  retiredDockerEmployeeContinuations: DockerAbsentContinuationRetirements.optional(),
   /** Private deny-only native recovery correlation; CompanyService.view never projects it. */
   employeeRecoveryOperations: z.array(EmployeeRecoveryOperation).max(256).refine(
     rows => new Set(rows.map(row => row.approval.operationId)).size === rows.length,
@@ -423,8 +465,9 @@ export const CompanyStateSchema = z.object({
   /** Employees the owner retired: off the org chart and out of every room, kept (same id and session) so history still names them. */
   retired: z.array(EmployeeSchema.extend({ retiredAt: z.number() })).default([]),
 }).refine(state=>state.version===2 ||
-  (!(state.dockerSharedPoolLineages?.length) && !(state.dockerPoolObservations?.length)),
-  'Company format 2 is required for retained global pool metadata');
+  (!(state.dockerSharedPoolLineages?.length) && !(state.dockerPoolObservations?.length) &&
+    !(state.retiredDockerEmployeeContinuations?.length)),
+  'Company format 2 is required for retained pool metadata and retired continuation history');
 export type CompanyState = z.infer<typeof CompanyStateSchema>;
 
 /** Eligibility only: the organization scheduler must explicitly schedule a Gantt task. */

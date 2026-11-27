@@ -11,17 +11,46 @@ impl DeploymentService {
         let result = self.rollback_pinned(&operation, &pins);
         DeploymentError::finalized(result, pins.close())
     }
-    fn rollback_pinned(
+    /// After the one rollback attempt, no effect is ever repeated. A later
+    /// call only observes: when the original console is running under its
+    /// own name and ready, with the candidate stopped, it records that.
+    fn confirm_restored(
+        &self,
+        operation: &Operation,
+        pins: &crate::pins::Pins,
+    ) -> Result<DeploymentStatus> {
+        const LATCHED: &str = "DEPLOYMENT_ROLLBACK_ALREADY_ATTEMPTED";
+        require(!operation.record_present("restored")?, LATCHED)?;
+        let source_id = model::string(&operation.plan.source, "Id")?;
+        let source = self.engine.container(source_id)?;
+        self.original_source_selection(operation, &source)?;
+        let candidate = operation.candidate()?;
+        let current = self.engine.container(&candidate)?;
+        operation.plan.candidate_matches(&current, &self.engine)?;
+        require(
+            source["Name"] == format!("/{}", operation.plan.container)
+                && source["State"]["Running"] == true
+                && current["State"]["Running"] == false
+                && current["State"]["Pid"] == 0,
+            LATCHED,
+        )?;
+        self.await_ready(
+            source_id,
+            model::uses_front(&operation.plan.source["Config"])?,
+        )?;
+        let restored = self.engine.container(source_id)?;
+        self.publish_restored(operation, &candidate, &restored, pins)
+    }
+    pub(in crate::service) fn rollback_pinned(
         &self,
         operation: &Operation,
         pins: &crate::pins::Pins,
     ) -> Result<DeploymentStatus> {
         self.claimed(operation)?;
         let source_front = model::uses_front(&operation.plan.source["Config"])?;
-        require(
-            !operation.exists("rollback-attempt"),
-            "DEPLOYMENT_ROLLBACK_ALREADY_ATTEMPTED",
-        )?;
+        if operation.record_present("rollback-attempt")? {
+            return self.confirm_restored(operation, pins);
+        }
         let source_id = model::string(&operation.plan.source, "Id")?;
         let source = self.engine.container(source_id)?;
         self.original_source_selection(operation, &source)?;
@@ -41,6 +70,8 @@ impl DeploymentService {
             current["Name"] == original_name || current["Name"] == candidate_name,
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
+        // A refusal that is already visible must not use up the one attempt.
+        self.verify_effect_pins(operation, pins)?;
         operation.attempt("rollback-attempt")?;
         self.verify_effect_pins(operation, pins)?;
         if current["State"]["Running"] == true {

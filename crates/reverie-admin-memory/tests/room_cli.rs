@@ -346,6 +346,36 @@ fn automatic_reuses_manual_evidence_and_preserves_confirmed_exchange_identity() 
 }
 
 #[test]
+fn automatic_memory_keeps_and_recalls_a_direct_conversation_in_that_room_only() {
+    let fixture = Fixture::new();
+    let direct = json!([{"id": ROOM, "name": "", "kind": "dm", "dm": [SESSION, "user"],
+                         "visibility": "private", "members": [{"sessionId": SESSION}]}]);
+    fixture.rooms(direct);
+    let (source, reply, job) = readback();
+    fixture.history(source, reply);
+    let recorded = accepted(&fixture.automatic("record", job));
+    let store = fixture.store();
+    assert_eq!(store.count(None).unwrap(), 1);
+    assert!(store.get(recorded["id"].as_i64().unwrap()).is_ok());
+    store.close().unwrap();
+
+    let recalled = accepted(&fixture.automatic("recall", json!({"query": "compiler baseline"})));
+    assert!(
+        recalled["text"]
+            .as_str()
+            .unwrap()
+            .contains("compiler baseline")
+    );
+    assert_eq!(recalled["sources"], json!([SOURCE]));
+    // Selecting a room by name or id for a manual lookup, and the journal, still take ordinary channels only.
+    refused(&fixture.call(ROOM, "compiler baseline", "3000"));
+    automatic_refused(&fixture.automatic("journal_status", json!({})));
+    // Leaving the conversation ends both.
+    fixture.rooms(json!([]));
+    automatic_refused(&fixture.automatic("recall", json!({"query": "compiler baseline"})));
+}
+
+#[test]
 fn automatic_refuses_unverified_history_and_removal_before_writing() {
     let fixture = Fixture::new();
     let (source, reply, job) = readback();

@@ -3,7 +3,7 @@ import { resourceCapacityHistory } from './helpers/docker-resource-capacity.js';
 import { afterEach, afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
-import { DockerContinuationTask } from '../src/docker-continuation-task.js';
+import { DockerSingleAttemptTask } from '../src/docker-continuation-task.js';
 import { execFileSync, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -383,7 +383,7 @@ describe('schema-derived settlement capacity', () => {
     );
     expect(
       new Set(witnesses.filter((value) => 'task' in value).map((value) => 'task' in value && value.task.phase))
-    ).toEqual(new Set(DockerContinuationTask.options.map((option) => option.shape.phase.value)));
+    ).toEqual(new Set(DockerSingleAttemptTask.options.map((option) => option.shape.phase.value)));
     expect(Math.max(...witnesses.map(byteSize))).toBe(DockerResourceAttemptMaximumBytes);
     expect(DockerResourceAttemptMaximumBytes).toBe(150170);
     const maximum = witnesses.find((value) => byteSize(value) === DockerResourceAttemptMaximumBytes)!;
@@ -409,7 +409,7 @@ describe('schema-derived settlement capacity', () => {
         worker: { ...maximum.identity.worker, ino: '9'.repeat(21) },
       }).success
     ).toBe(false);
-    expect(DockerContinuationTask.safeParse({ ...maximum.task, name: maximum.task.name + 'z' }).success).toBe(false);
+    expect(DockerSingleAttemptTask.safeParse({ ...maximum.task, name: maximum.task.name + 'z' }).success).toBe(false);
     expect(
       DockerResourceAttempt.safeParse({ ...maximum, sessionGeneration: Number.MAX_SAFE_INTEGER + 1 }).success
     ).toBe(false);
@@ -435,7 +435,7 @@ describe('schema-derived settlement capacity', () => {
       if ('task' in witness)
         keys(
           witness.task,
-          DockerContinuationTask.options.find((option) => option.shape.phase.value === witness.task.phase)!
+          DockerSingleAttemptTask.options.find((option) => option.shape.phase.value === witness.task.phase)!
         );
       if ('identity' in witness && 'identity' in schema.shape) checkIdentity(witness.identity, schema.shape.identity);
       if ('closure' in witness && 'closure' in schema.shape) {

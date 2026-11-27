@@ -63,6 +63,16 @@ export interface SessionPort {
    * token totals, the Ralph state and the workspace's own files untouched.
    */
   discardPartiallyBuiltSession(sessionId: string): Promise<void>;
+  /**
+   * Forget the office-side viewer of a boxed laptop whose own container the
+   * Engine positively reports absent (the owner's laptop rebuild). Tears down
+   * only this office's terminal client and local pane; like
+   * {@link discardPartiallyBuiltSession} it keeps the persisted record.
+   */
+  discardAbsentLaptopView?(
+    sessionId: string,
+    containerAbsent: (containerId: string) => Promise<boolean>
+  ): Promise<void>;
   /** Genuine native stopped-source/current-target proof only. Retires an
    * already exited viewer, preserving saved history and the running target. */
   retireDockerPlanSource?(proof: unknown): Promise<void>;

@@ -28,7 +28,7 @@ import { MAX_WAKE_MACS } from '../config/remote-wake-limits.js';
 import { MAX_INPUT_LENGTH } from '../config/terminal-limits.js';
 import { enabledCliIds, enabledClis } from '../config/cli-registry/registry.js';
 import type { SessionMode } from '../types.js';
-import { isAdvisorModel } from '../types/session.js';
+import { isAdvisorModel, SESSION_MODEL_ID_PATTERN } from '../types/session.js';
 import { validateDockerMemory } from '../docker-memory-policy.js';
 
 // ========== Path Validation ==========
@@ -601,7 +601,7 @@ export const CreateSessionSchema = z.object({
   model: z
     .string()
     .max(100)
-    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._\-[\]]*$/)
+    .regex(SESSION_MODEL_ID_PATTERN)
     .or(z.literal(''))
     .optional(),
   openCodeConfig: OpenCodeConfigSchema,

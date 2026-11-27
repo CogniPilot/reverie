@@ -6,6 +6,8 @@ mod ancestors;
 mod attributes;
 mod compressed;
 mod directory;
+mod estimate;
+pub use estimate::{ConsoleEstimate, estimate_console};
 mod manifest;
 mod mounts;
 mod observed;
@@ -168,28 +170,9 @@ impl SnapshotTools {
         partial: &mut PartialCapture,
         destination: &Path,
         end: Instant,
-    ) -> Result<(
-        Manifest,
-        String,
-        reverie_contracts::kernel_mounts::MountTable,
-    )> {
+    ) -> Result<(Manifest, String, mounts::Observed)> {
         let source = &partial.source;
-        let parent = std::fs::canonicalize(
-            destination
-                .parent()
-                .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
-        )?;
-        let selected = parent.join(
-            destination
-                .file_name()
-                .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
-        );
-        require(
-            !selected.starts_with(source.root.path()) && !source.root.path().starts_with(&selected),
-            "SNAPSHOT_OVERLAP",
-        )?;
-        let mounts = mounts::capture(end)?;
-        mounts::disjoint(source.root.path(), &parent, &mounts)?;
+        let mounts = admit(source, destination, end)?;
         partial.destination = Some(Arc::new(Directory::create(destination)?));
         let destination = partial.destination.as_ref().expect("captured directory");
         require(
@@ -212,6 +195,45 @@ impl SnapshotTools {
         let digest = manifest::file_digest(archive, end)?;
         Ok((before, digest, mounts))
     }
+}
+/// The destination lies outside the console and no mount makes one a view of
+/// the other. Returns the table that proof was read from.
+fn admit(source: &SnapshotSource, destination: &Path, end: Instant) -> Result<mounts::Observed> {
+    let (parent, selected) = selected_destination(destination)?;
+    require(
+        !selected.starts_with(source.root.path()) && !source.root.path().starts_with(&selected),
+        "SNAPSHOT_OVERLAP",
+    )?;
+    let mut mounts = mounts::Observed::capture(end)?;
+    mounts.include(source.root.path())?;
+    mounts.include(&parent)?;
+    mounts.disjoint(source.root.path(), &parent)?;
+    Ok(mounts)
+}
+/// Decide while the console still runs what `stage_console` would otherwise
+/// refuse after it has been stopped: a console directory to copy, an unused
+/// destination in a private parent, and storage that is not a view of the
+/// console. Nothing is created and nothing here is retained.
+pub fn admit_console(source: &Path, destination: &Path, end: Instant) -> Result<()> {
+    deadline(end)?;
+    let source = SnapshotSource::observe(source)?;
+    let admitted = admit(&source, destination, end).and_then(|_| Directory::admits(destination));
+    combine(admitted, close_directory(source.root))
+}
+/// The canonical parent of a destination that may not exist yet, and the
+/// destination's own path beneath it.
+fn selected_destination(destination: &Path) -> Result<(PathBuf, PathBuf)> {
+    let parent = std::fs::canonicalize(
+        destination
+            .parent()
+            .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
+    )?;
+    let selected = parent.join(
+        destination
+            .file_name()
+            .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
+    );
+    Ok((parent, selected))
 }
 struct PartialCapture {
     source: SnapshotSource,
@@ -297,7 +319,7 @@ pub struct ConsoleSnapshot {
     archive: File,
     digest: String,
     manifest: Manifest,
-    mounts: reverie_contracts::kernel_mounts::MountTable,
+    mounts: mounts::Observed,
     rehearsed: bool,
 }
 
@@ -380,11 +402,18 @@ impl ConsoleSnapshot {
     }
 
     pub fn rehearse_at(&mut self, selected: Option<&RehearsalRoot>, end: Instant) -> Result<()> {
+        if let Some(root) = selected {
+            // The separate root joins the compared mounts before the source
+            // check below reads the current table.
+            self.mounts.include(root.directory().path())?;
+        }
         self.verify_source(end)?;
         let parent = selected.map_or(self.destination.as_ref(), RehearsalRoot::directory);
         if selected.is_some() {
-            mounts::disjoint(self.source.root.path(), parent.path(), &self.mounts)?;
-            mounts::disjoint(self.destination.path(), parent.path(), &self.mounts)?;
+            self.mounts
+                .disjoint(self.source.root.path(), parent.path())?;
+            self.mounts
+                .disjoint(self.destination.path(), parent.path())?;
         }
         let rehearsal = Arc::new(parent.create_child("rehearsal")?);
         let result = parent.check().and_then(|()| {
@@ -408,10 +437,7 @@ impl ConsoleSnapshot {
         Ok(())
     }
     fn check_archive(&self, end: Instant) -> Result<()> {
-        require(
-            mounts::capture(end)? == self.mounts,
-            "SNAPSHOT_MOUNTS_CHANGED",
-        )?;
+        self.mounts.require_current(end)?;
         self.source.root.check()?;
         self.destination.check()?;
         self.destination.check_file("console.tar", &self.archive)?;

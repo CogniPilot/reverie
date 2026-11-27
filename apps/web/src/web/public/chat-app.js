@@ -654,18 +654,96 @@ function caProviderPlacement(employee) {
 function caProviderContext(employee) {
   return caProviderBinding(employee) + '\0' + (caProviderPlacement(employee) ?? '');
 }
+// Each held recovery code as a sentence (roster rows, tooltips) and as a line short enough for a company card.
+const CA_RECOVERY_CHECKS = {
+  DOCKER_CONTINUATION_DESTINATION_STOPPED: [
+    'Last check found the worker container stopped',
+    'Worker container stopped',
+  ],
+  DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING: [
+    'Waiting for the original recovery operation',
+    'Recovery still pending',
+  ],
+  DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED: [
+    'Last check could not verify the agent process',
+    'Agent process unverified',
+  ],
+  DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED: [
+    'Last check could not reconnect the terminal',
+    'Terminal not reconnected',
+  ],
+};
+// What the office supervisor found, as a line short enough for a company card. Its full sentence goes to tooltips.
+const CA_SUPERVISOR_SHORT = {
+  starting: 'Starting',
+  'waiting-first-run-screen': 'Starting',
+  'stuck-first-run-screen': 'Stuck at start-up; restarting',
+  'needs-sign-in': 'At a sign-in screen; repairing',
+  'needs-owner': 'Needs you',
+  'provider-exited': 'Agent exited; repairing',
+  'viewer-lost': 'Reconnecting terminal',
+  'held-retryable': 'Laptop set-up held; retrying',
+  'held-needs-rebuild': 'Laptop held; rebuilding',
+  'laptop-not-started': 'Starting laptop',
+  'move-in-progress': 'Moving plans',
+  'move-held-retryable': 'Plan move held; retrying',
+  'move-held-dead-end': 'Plan move stuck',
+  unknown: 'Needs a look',
+};
+const CA_SUPERVISOR_SCREENS = new Set(['needs-sign-in', 'stuck-first-run-screen']);
+/** The supervisor's reading of an employee, when it found a problem: its sentence, what it will do and what it needs. */
+function caSupervisorCheck(employee) {
+  const seen = employee?.supervisor;
+  // Limits that the laptop's memory keeps from being put back are said in the sentence of a laptop that runs.
+  const limitsHeld = seen?.condition === 'healthy' && typeof seen.limitsHeld === 'string';
+  if (!seen || typeof seen.sentence !== 'string') return;
+  if (!limitsHeld && !Object.hasOwn(CA_SUPERVISOR_SHORT, seen.condition)) return;
+  const needs = typeof seen.needsHuman === 'string' ? seen.needsHuman : '';
+  const next = seen.next?.action ? `The office will try “${String(seen.next.action).replaceAll('-', ' ')}” next.` : '';
+  const waiting = typeof seen.waitingFor === 'string' ? `Waiting for ${seen.waitingFor}.` : '';
+  return {
+    text: seen.sentence.replace(/\.$/, ''),
+    more: needs || next || waiting,
+    // The office works on a start-up screen by itself. The one thing it cannot do is sign a plan in.
+    short: limitsHeld
+      ? 'Running; limits not put back'
+      : CA_SUPERVISOR_SCREENS.has(seen.condition)
+        ? seen.code === 'plan-signed-out'
+          ? 'Needs a sign-in'
+          : CA_SUPERVISOR_SHORT[seen.condition]
+        : needs
+          ? 'Needs you'
+          : CA_SUPERVISOR_SHORT[seen.condition],
+    code: String(seen.code || seen.condition),
+    ...(limitsHeld ? { whileRunning: true } : {}),
+  };
+}
+/** The held recovery check for an employee's current binding, in plain words; the raw `code` is for tooltips only. */
 function caLastRecoveryCheck(company, employee) {
-  if (!employee?.dockerBinding || employee.bindingMigration || !employee.desiredRunning ||
-      employee.onVacation || !Array.isArray(company?.boxedViewRestorations)) return;
-  const report = company.boxedViewRestorations.find(value => value?.state === 'held' &&
-    value.employeeId === employee.id && value.sessionId === employee.sessionId &&
-    value.sessionGeneration === employee.sessionGeneration && value.operationId === employee.dockerBinding.operationId);
-  switch (report?.code) {
-    case 'DOCKER_CONTINUATION_DESTINATION_STOPPED': return 'Last check found the worker container stopped';
-    case 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING': return 'Waiting for the original recovery operation';
-    case 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED': return 'Last check could not verify the agent process';
-    case 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED': return 'Last check could not reconnect the terminal';
+  // The supervisor reads more than the last attach attempt, so its sentence wins when it has one.
+  if (employee?.desiredRunning && !employee.onVacation && !employee.bindingMigration) {
+    const supervised = caSupervisorCheck(employee);
+    if (supervised) return supervised;
   }
+  if (
+    !employee?.dockerBinding ||
+    employee.bindingMigration ||
+    !employee.desiredRunning ||
+    employee.onVacation ||
+    !Array.isArray(company?.boxedViewRestorations)
+  )
+    return;
+  const report = company.boxedViewRestorations.find(
+    (value) =>
+      value?.state === 'held' &&
+      value.employeeId === employee.id &&
+      value.sessionId === employee.sessionId &&
+      value.sessionGeneration === employee.sessionGeneration &&
+      value.operationId === employee.dockerBinding.operationId
+  );
+  if (typeof report?.code !== 'string' || !Object.hasOwn(CA_RECOVERY_CHECKS, report.code)) return;
+  const [text, short] = CA_RECOVERY_CHECKS[report.code];
+  return { text, short, code: report.code };
 }
 function caBoxedProvider(employee, session, member) {
   return (
@@ -705,12 +783,15 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return {
       state: 'gone',
       label: employee.onVacation ? 'Out of office' : 'Stopped',
+      stoppedByChoice: true,
       detail: 'Stopped by owner choice. Enter the office to start this expert.',
     };
   if (employee?.bindingMigration)
     return {
       state: 'unknown',
       label: 'Moving',
+      reason: 'Plan or runtime move',
+      moving: true,
       detail: 'An account or runtime move is in progress. Current agent availability is unconfirmed.',
     };
   const health = session?.runtimeHealth ?? employee?.runtimeHealth;
@@ -730,6 +811,7 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return {
       state: 'dead',
       label: provider?.state === 'dead' ? 'Agent runtime stopped' : 'Dead pane',
+      reason: `Process ended${exit}`,
       detail: `${provider?.state === 'dead' ? 'The agent runtime' : 'The agent'} has exited${exit}. Restart the session to resume its saved conversation.${diagnosticDetail}`,
     };
   }
@@ -762,6 +844,7 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return {
       state: 'viewer-unavailable',
       label: 'Viewer unavailable',
+      reason: 'Terminal viewer lost',
       detail:
         'The optional terminal viewer is unavailable. Agent availability is unconfirmed; losing this viewer does not establish that the agent is offline.' +
         diagnosticDetail,
@@ -774,6 +857,7 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return {
       state: 'unknown',
       label: 'Agent health unknown',
+      reason: 'Health not confirmed',
       detail: serverViewerConnected
         ? 'The terminal viewer is connected. Current agent health has not been confirmed.'
         : 'Current agent health and terminal viewer connectivity have not been confirmed.',
@@ -782,6 +866,7 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     return {
       state: 'disconnected',
       label: 'Disconnected',
+      reason: 'Terminal session ended',
       detail: 'The terminal connection has ended. Whether the agent is still running has not been confirmed.',
     };
   if (
@@ -801,7 +886,46 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
       label: 'Connected',
       detail: 'The terminal session is connected. Agent health has not been confirmed.',
     };
-  return { state: 'unknown', label: 'Health unknown', detail: 'Current agent health has not been confirmed.' };
+  return {
+    state: 'unknown',
+    label: 'Health unknown',
+    reason: 'Health not confirmed',
+    detail: 'Current agent health has not been confirmed.',
+  };
+}
+
+/**
+ * The one status an employee card leads with: a plain word, the colour it takes (tone) and one short reason when it adds
+ * something the word does not already say (working, idle, offline and stopped by choice need none). `presence` is the
+ * member-list state (presenceOf), which tells a connected employee's working, idle and waiting apart the way the roster
+ * does; `lastCheck` is the short plain result of a held recovery check, when there is one.
+ */
+const CA_EMPLOYEE_STATUS = {
+  working: { tone: 'ok', label: 'Working', fine: true },
+  idle: { tone: 'idle', label: 'Idle', fine: true },
+  waiting: { tone: 'wait', label: 'Waiting for you', reason: 'Done; waiting for input' },
+  needs: { tone: 'alert', label: 'Needs you', reason: 'Waiting on your answer' },
+  error: { tone: 'alert', label: 'Error', reason: 'Session error' },
+  dead: { tone: 'alert', label: 'Agent exited' },
+  disconnected: { tone: 'alert', label: 'Disconnected' },
+  'viewer-unavailable': { tone: 'unknown', label: 'Unknown' },
+  unknown: { tone: 'unknown', label: 'Unknown' },
+  gone: { tone: 'off', label: 'Offline' },
+};
+/** `note`: what the supervisor says of an employee whose agent runs, shown in place of an empty reason. */
+function caEmployeeStatus(health, presence, lastCheck, note) {
+  if (health.moving) return { tone: 'moving', label: health.label, reason: health.reason };
+  if (health.stoppedByChoice) return { tone: 'off', label: health.label, reason: '' };
+  // The card's own health is the ceiling: roster presence only refines an employee that health already calls connected.
+  const key = health.state === 'idle' ? presence : health.state;
+  const status = CA_EMPLOYEE_STATUS[key] || CA_EMPLOYEE_STATUS.unknown;
+  // A confirmed agent whose optional terminal viewer dropped is still working; the viewer is the footnote.
+  if (status.fine)
+    return health.viewerUnavailable
+      ? { ...status, reason: 'Viewer unavailable', viewerWarning: true }
+      : { ...status, reason: note || '' };
+  const troubled = ['dead', 'disconnected', 'viewer-unavailable', 'unknown'].includes(key);
+  return { ...status, reason: (troubled && lastCheck) || health.reason || status.reason || '' };
 }
 
 function caMemberState(member, session, hooks) {
@@ -1607,6 +1731,9 @@ const CA_ICONS = {
 };
 
 /** The Board is pinned above the channel list, shown in the main pane. */
+/** Owner pages the console loads hidden once and keeps, so opening them shows the last view at once. */
+const CA_WARM_PAGES = ['board', 'workspace'];
+
 const CA_PAGES = {
   office: { label: 'Office', icon: 'gear', path: null, nav: false },
   board: { label: 'Board', icon: 'calendar', path: '/board' },
@@ -2331,7 +2458,7 @@ class ReverieChatApp {
     if (!initial && this.view === 'chat') caWrite('session', 'reverie:debug-session', null);
     this.els.root.hidden = this.view === 'debug';
     if (this.view === 'debug') this.suspendBoardFrame();
-    else if (this._boardCache && this.embed === 'board') void this.openWarmBoard({ push: false });
+    else if (this._warmPages?.has(this.embed)) void this.openWarmPage(this.embed, { push: false });
     if (this.view === 'chat' && this.built) this.touchHint();
     if (this.view === 'debug') {
       this.ensureBackButton();
@@ -2551,7 +2678,8 @@ class ReverieChatApp {
           (this.embed === 'people' && event.data?.type === 'office-back-to-chat')
         ) ||
         event.origin !== this.doc.defaultView.location.origin ||
-        event.source !== this.els.page?.querySelector('iframe')?.contentWindow
+        (event.source !== this.els.page?.querySelector('iframe')?.contentWindow &&
+          event.source !== this._warmPages?.get(this.embed)?.frame.contentWindow)
       )
         return;
       void this.returnToCompanyTools();
@@ -2570,20 +2698,19 @@ class ReverieChatApp {
       }
     });
     this.doc.defaultView?.addEventListener('resize', () => this.renderOfficePane());
+    // A retained page that finds its owner sign-in gone says so; only its own frame, on this origin, is heard.
     this.doc.defaultView?.addEventListener('message', (event) => {
-      const cache = this._boardCache;
-      if (
-        cache &&
-        event.origin === this.doc.defaultView.location.origin &&
-        event.source === cache.frame.contentWindow &&
-        event.data?.type === 'board-auth-lost'
-      )
-        this.discardBoardFrame();
+      if (event.origin !== this.doc.defaultView.location.origin) return;
+      for (const [kind, cache] of this._warmPages || [])
+        if (event.source === cache.frame.contentWindow && event.data?.type === `${kind}-auth-lost`) {
+          this.discardBoardFrame();
+          return;
+        }
     });
     this.doc.addEventListener('visibilitychange', () => {
       if (this.doc.hidden) this.suspendBoardFrame();
-      else if (this._boardCache && this.embed === 'board' && this.view === 'chat')
-        void this.openWarmBoard({ push: false });
+      else if (this._warmPages?.has(this.embed) && this.view === 'chat')
+        void this.openWarmPage(this.embed, { push: false });
     });
     this.doc.defaultView?.addEventListener('pageshow', (event) => {
       if (event.persisted && this.active) {
@@ -3533,7 +3660,7 @@ class ReverieChatApp {
   }
 
   /** Position real person nodes as a top-down tree; SVG draws only their connecting lines. */
-  companyTreeViewport(root) {
+  companyTreeViewport(root, { height = 144 } = {}) {
     const box = this.el('div', 'ca-company-tree ca-company-map');
     const tools = this.el('div', 'ca-company-map-tools');
     tools.setAttribute('aria-label', 'Reporting chart view');
@@ -3554,8 +3681,7 @@ class ReverieChatApp {
     const width = 144,
       gap = 12,
       margin = 12;
-    const height = 144,
-      level = height + 24;
+    const level = height + 24;
     const nodes = [];
     const measure = (node) => {
       node.span = Math.max(
@@ -3571,6 +3697,7 @@ class ReverieChatApp {
       node.element.classList.add('ca-company-map-node');
       node.element.style.left = `${node.x}px`;
       node.element.style.top = `${node.y}px`;
+      node.element.style.height = `${height}px`;
       node.element.dataset.depth = String(depth);
       node.element.dataset.parentId = parent?.id || '';
       canvas.append(node.element);
@@ -4042,7 +4169,8 @@ class ReverieChatApp {
       };
       // Keep malformed/orphaned records visible without rewriting their stored reporting choice.
       for (const employee of employees) if (!visited.has(employee.id)) root.children.push(build(employee));
-      const tree = this.companyTreeViewport(root);
+      // Taller than the default node: room for a two-line title, or one line of title and the status reason.
+      const tree = this.companyTreeViewport(root, { height: 160 });
       chart.append(tree);
       if (!employees.length) chart.append(this.el('p', 'ca-hint', 'No permanent team members yet.'));
       const people = this.el('section', 'ca-company-people');
@@ -5635,11 +5763,12 @@ class ReverieChatApp {
   async readBoardOwnerKey() {
     if (this.app._chatSelf) return null;
     try {
-      const [company, auth] = await Promise.all([
+      // One round trip: the three reads are independent, and every one must still agree.
+      const [company, auth, me] = await Promise.all([
         this.app._chatApi('/api/company'),
         this.app._chatApi('/api/chatrooms/phone-status'),
+        this.app._chatApi('/api/office/me'),
       ]);
-      const me = await this.app._chatApi('/api/office/me');
       const owner =
         company.ok && auth.ok && me.ok && this.canManageOffice(company.data, auth.data)
           ? this.boardIdentity(me.data?.person)
@@ -5650,66 +5779,122 @@ class ReverieChatApp {
     }
   }
 
+  /** The retained Board document, or null. */
+  get _boardCache() {
+    return this._warmPages?.get('board') || null;
+  }
+
+  /** The owner the retained pages were loaded for, or null when none is retained. */
+  warmPagesOwner() {
+    return this._warmPages?.values().next().value?.owner ?? null;
+  }
+
   checkBoardIdentity(person) {
     const owner = this.boardIdentity(person);
-    if (owner !== this._boardKnownIdentity || (this._boardCache && owner !== this._boardCache.owner)) {
+    const retained = this.warmPagesOwner();
+    if (owner !== this._boardKnownIdentity || (retained !== null && owner !== retained)) {
       this._boardKnownIdentity = owner;
       this.discardBoardFrame();
       if (owner && this.canManageOffice()) this.scheduleBoardWarm();
     }
   }
 
+  /** Drop every retained owner page (Board and Workspace) and any warm-up still in flight. */
   discardBoardFrame() {
     this._boardEpoch = (this._boardEpoch || 0) + 1;
     this._boardWarmAttempted = false;
-    const cache = this._boardCache;
-    this._boardCache = null;
-    if (cache) {
+    const pages = this._warmPages;
+    this._warmPages = null;
+    for (const [kind, cache] of pages || []) {
       cache.frame.src = 'about:blank';
       cache.panel.remove();
-      if (this.embed === 'board') this.closePage();
+      if (this.embed === kind) this.closePage();
     }
   }
 
-  notifyBoard(active) {
-    const cache = this._boardCache;
+  /** Tell a retained page whether it is on screen: the Board polls only while it is, the Workspace refreshes on show. */
+  notifyWarmPage(kind, active) {
+    const cache = this._warmPages?.get(kind);
     if (!cache) return;
     active = active && this.view === 'chat' && !this.doc.hidden && !cache.panel.hidden;
-    cache.frame.dataset.boardActive = String(active);
-    cache.frame.contentWindow?.postMessage({ type: 'board-visibility', active }, this.doc.defaultView.location.origin);
+    cache.frame.dataset[`${kind}Active`] = String(active);
+    cache.frame.contentWindow?.postMessage(
+      { type: `${kind}-visibility`, active },
+      this.doc.defaultView.location.origin
+    );
+  }
+
+  notifyBoard(active) {
+    this.notifyWarmPage('board', active);
   }
 
   suspendBoardFrame() {
     this._boardOpen = (this._boardOpen || 0) + 1;
-    if (this._boardCache) {
-      this._boardCache.panel.hidden = true;
-      this.notifyBoard(false);
+    for (const [kind, cache] of this._warmPages || []) {
+      if (cache.panel.hidden) continue;
+      cache.panel.hidden = true;
+      this.notifyWarmPage(kind, false);
     }
   }
 
+  /** The address a console page loads from; the shell's own tool pages follow a mounted base path. */
+  pagePath(kind) {
+    return ['workspace', 'bots', 'previews', 'failures'].includes(kind)
+      ? (this.doc.defaultView.__REVERIE_BASE__ || '') + CA_PAGES[kind].path
+      : CA_PAGES[kind].path;
+  }
+
+  /** A hidden, owner-bound copy of one console page, loaded once and shown at once when opened. */
+  warmPageEl(kind, owner) {
+    const board = kind === 'board';
+    const panel = this.el('section', board ? 'ca-board-page' : 'ca-warm-page');
+    panel.hidden = true;
+    panel.dataset.kind = kind;
+    const frame = this.el('iframe', board ? 'ca-board-frame' : 'ca-warm-frame');
+    frame.title = CA_PAGES[kind].label;
+    frame.dataset[`${kind}Managed`] = 'true';
+    frame.dataset[`${kind}Active`] = 'false';
+    frame.loading = 'eager';
+    if (!board) {
+      const back = this.el('header', 'ca-tool-page-head');
+      back.append(
+        this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), {
+          icon: 'back',
+          text: 'Back to Company / tools',
+        })
+      );
+      panel.append(back);
+    }
+    frame.onload = () => {
+      if (this._warmPages?.get(kind)?.frame !== frame || this.embed !== kind || this.view !== 'chat' || panel.hidden)
+        return;
+      if (!board) this.configureCompanyToolsBack(frame);
+      this.notifyWarmPage(kind, true);
+    };
+    panel.append(frame);
+    return { owner, panel, frame };
+  }
+
+  /** Load the Board and the Workspace hidden, once, for the verified owner, so opening either shows it at once. */
   scheduleBoardWarm() {
-    if (this._boardCache || this._boardWarmAttempted || !this.canManageOffice() || this.doc.hidden) return;
+    const missing = () => CA_WARM_PAGES.filter((kind) => !this._warmPages?.has(kind));
+    if (!missing().length || this._boardWarmAttempted || !this.canManageOffice() || this.doc.hidden) return;
     this._boardWarmAttempted = true;
     const epoch = this._boardEpoch || 0;
     const warm = async () => {
-      if (this.doc.hidden || this.embed === 'board') return;
+      if (this.doc.hidden) return;
       const owner = await this.readBoardOwnerKey();
-      if (!owner || epoch !== (this._boardEpoch || 0) || this._boardCache || this.embed === 'board') return;
-      const panel = this.el('section', 'ca-board-page');
-      panel.hidden = true;
-      const frame = this.el('iframe', 'ca-board-frame');
-      frame.title = 'Board';
-      frame.dataset.boardManaged = 'true';
-      frame.dataset.boardActive = 'false';
-      frame.loading = 'eager';
-      this._boardCache = { owner, panel, frame };
-      frame.onload = () => {
-        if (this._boardCache?.frame === frame && this.embed === 'board' && this.view === 'chat' && !panel.hidden)
-          this.notifyBoard(true);
-      };
-      panel.append(frame);
-      this.els.body.append(panel);
-      frame.src = CA_PAGES.board.path;
+      if (!owner || epoch !== (this._boardEpoch || 0)) return;
+      const retained = this.warmPagesOwner();
+      if (retained !== null && retained !== owner) return;
+      for (const kind of missing()) {
+        // A page already open in the shared frame keeps it; the next close warms it.
+        if (this.embed === kind) continue;
+        const cache = this.warmPageEl(kind, owner);
+        (this._warmPages ||= new Map()).set(kind, cache);
+        this.els.body.append(cache.panel);
+        cache.frame.src = this.pagePath(kind);
+      }
     };
     if (this.doc.defaultView.requestIdleCallback)
       this.doc.defaultView.requestIdleCallback(
@@ -5724,15 +5909,21 @@ class ReverieChatApp {
       }, 200);
   }
 
-  async openWarmBoard({ push = true } = {}) {
-    const cache = this._boardCache,
+  async openWarmBoard(options) {
+    return this.openWarmPage('board', options);
+  }
+
+  /** Show a retained page after the same owner check that loaded it; a changed owner falls back to a fresh page. */
+  async openWarmPage(kind, { push = true } = {}) {
+    const cache = this._warmPages?.get(kind),
       attempt = (this._boardOpen = (this._boardOpen || 0) + 1);
     if (!cache) return;
     const owner = await this.readBoardOwnerKey();
-    if (attempt !== this._boardOpen || cache !== this._boardCache || this.view !== 'chat' || this.doc.hidden) return;
+    if (attempt !== this._boardOpen || cache !== this._warmPages?.get(kind) || this.view !== 'chat' || this.doc.hidden)
+      return;
     if (!owner || owner !== cache.owner) {
       this.discardBoardFrame();
-      this.openPage('board', { push });
+      this.openPage(kind, { push });
       return;
     }
     this.disposeCompanyPage();
@@ -5740,16 +5931,22 @@ class ReverieChatApp {
     if (this.orgOpen) this.closeOrg();
     this.toggleDrawer(null);
     if (this.els.page) this.els.page.hidden = true;
-    this.embed = 'board';
+    for (const [other, retained] of this._warmPages)
+      if (other !== kind && !retained.panel.hidden) {
+        retained.panel.hidden = true;
+        this.notifyWarmPage(other, false);
+      }
+    this.embed = kind;
     this._embedRoom = this.roomId;
     cache.panel.hidden = false;
     this.els.root.classList.add('is-page');
     this.els.chat.inert = true;
     this.els.members.inert = true;
-    this.notifyBoard(true);
+    if (kind !== 'board') this.configureCompanyToolsBack(cache.frame);
+    this.notifyWarmPage(kind, true);
     const win = this.doc.defaultView;
-    if (push && caPageFromHash(win.location.hash) !== 'board')
-      win.history.pushState({ reveriePage: 'board' }, '', '#board');
+    if (push && caPageFromHash(win.location.hash) !== kind)
+      win.history.pushState({ reveriePage: kind }, '', `#${kind}`);
     this.renderSidebar();
     this.renderHeader();
   }
@@ -6056,8 +6253,8 @@ class ReverieChatApp {
   openPage(kind, { push = true } = {}) {
     const page = CA_PAGES[kind];
     if (!page) return;
-    if (kind === 'board' && this._boardCache) {
-      void this.openWarmBoard({ push });
+    if (this._warmPages?.has(kind)) {
+      void this.openWarmPage(kind, { push });
       return;
     }
     this.suspendBoardFrame();
@@ -6152,7 +6349,7 @@ class ReverieChatApp {
   /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
   closePage({ history = 'replace' } = {}) {
     if (!this.embed) return;
-    const wasBoard = this.embed === 'board';
+    const wasWarm = CA_WARM_PAGES.includes(this.embed);
     this.suspendBoardFrame();
     this.disposeCompanyPage();
     this.embed = null;
@@ -6177,7 +6374,7 @@ class ReverieChatApp {
     }
     this.renderSidebar();
     this.renderHeader();
-    if (wasBoard && !this._boardCache) {
+    if (wasWarm && CA_WARM_PAGES.some((kind) => !this._warmPages?.has(kind))) {
       this._boardWarmAttempted = false;
       this.scheduleBoardWarm();
     }
@@ -9021,6 +9218,11 @@ class ReverieChatApp {
     const employee = this.company?.employees?.find((e) => e.id === record.employee.id) || record.employee;
     const health = this.employeeHealth(employee);
     node.className = `${record.className} is-${health.state}${health.state === 'idle' ? ' is-connected' : ''}`;
+    node.title = health.detail;
+    node.setAttribute('role', node.dataset.healthRole || 'status');
+    const recovery = health.viewerUnavailable ? this.viewerReconnectStatus(employee) : null;
+    const card = node.closest('.ca-company-person');
+    if (card) return this.paintEmployeeCard(card, node, employee, health, recovery);
     node.textContent = health.label;
     if (health.viewerUnavailable && health.state !== 'viewer-unavailable') {
       const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');
@@ -9028,46 +9230,95 @@ class ReverieChatApp {
         'The optional terminal viewer is unavailable. Automatic terminal input may wait for Reconnect; uncertain deliveries are not replayed.';
       node.append(' ', warning);
     }
-    node.title = health.detail;
-    node.setAttribute('role', node.dataset.healthRole || 'status');
-    const recovery = this.viewerReconnectStatus(employee);
-    if (recovery && health.viewerUnavailable) {
+    if (recovery)
       node.append(this.el('span', 'ca-viewer-reconnect-status', ` · ${this.viewerReconnectDescription(recovery)}`));
-    }
     node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${health.detail}`);
-    const card = node.closest('.ca-company-person');
-    if (card)
-      for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone'])
-        card.classList.toggle(`is-health-${state}`, health.state === state);
-    card?.classList.toggle('is-offline', health.state === 'gone');
-    if (card) card.title = `${card.dataset.healthTitle} · ${health.detail}`;
-    if (card) {
-      const controls = this._healthCards?.get(card);
-      const wanted = controls?.manage && ['dead', 'disconnected'].includes(health.state) && !health.viewerOnly;
-      const restart = card.querySelector('.ca-dead-pane-restart');
-      if (wanted && !restart)
-        card.append(
-          this.button(
-            'ca-btn is-danger ca-dead-pane-restart',
-            `Restart session for ${employee.name}`,
-            () => this.openEmployeeRestart(employee, controls.onSaved),
-            { text: 'Restart' }
-          )
-        );
-      else if (!wanted) restart?.remove();
-      const reconnect = card.querySelector('.ca-reconnect-viewer');
-      const canReconnect = health.viewerOnly || this.canReconnectEmployee(employee);
-      if (canReconnect && !reconnect)
-        card.append(
-          this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), {
-            icon: 'reconnect',
-          })
-        );
-      else if (!canReconnect) reconnect?.remove();
-      const status = card.querySelector('.ca-viewer-status');
-      if (this.canInspectEmployeeViewer(employee) && !status) card.append(this.viewerStatusButton(employee));
-      else if (!this.canInspectEmployeeViewer(employee)) status?.remove();
-    }
+  }
+
+  /** The roster state (presenceOf) of an employee's own session, whether or not a loaded channel lists them. */
+  employeePresence(employee) {
+    const listed = [this.room, ...(this.viewRooms || [])]
+      .flatMap((room) => room?.members || [])
+      .find((m) => m.sessionId === employee.sessionId);
+    return this.presenceOf(listed || { sessionId: employee.sessionId, alive: employee.available !== false });
+  }
+
+  /**
+   * A company card says three things in fixed places: one status pill (`node`), one plain reason under the name, and the
+   * next action in the card's corner. The longer explanation and any raw recovery code stay in the tooltips.
+   */
+  paintEmployeeCard(card, node, employee, health, recovery) {
+    const lastCheck = caLastRecoveryCheck(this.company, employee);
+    const status = caEmployeeStatus(
+      health,
+      this.employeePresence(employee),
+      lastCheck?.short,
+      lastCheck?.whileRunning ? lastCheck.short : undefined
+    );
+    const detail = [
+      health.detail,
+      recovery ? this.viewerReconnectDescription(recovery) : '',
+      lastCheck && status.reason === lastCheck.short
+        ? `${lastCheck.text} (${lastCheck.code}).${lastCheck.more ? ' ' + lastCheck.more : ''}`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    node.textContent = status.label;
+    node.setAttribute('aria-label', `${employee.name || 'Expert'}: ${status.label}. ${health.detail}`);
+    for (const state of ['dead', 'disconnected', 'viewer-unavailable', 'unknown', 'gone'])
+      card.classList.toggle(`is-health-${state}`, health.state === state);
+    card.classList.toggle('is-offline', health.state === 'gone');
+    for (const tone of ['ok', 'idle', 'wait', 'alert', 'moving', 'unknown', 'off'])
+      card.classList.toggle(`is-tone-${tone}`, status.tone === tone);
+    card.classList.toggle('has-status-reason', !!status.reason);
+    card.title = `${card.dataset.healthTitle} · ${detail}`;
+    let reason = card.querySelector('.ca-company-reason');
+    if (!reason) node.after((reason = this.el('span', 'ca-company-reason')));
+    reason.classList.toggle('ca-viewer-warning', status.viewerWarning === true);
+    reason.textContent = status.reason;
+    reason.title = detail;
+    reason.hidden = !status.reason;
+
+    const controls = this._healthCards?.get(card);
+    const manage = controls?.manage === true;
+    const restart = {
+      name: 'ca-dead-pane-restart',
+      wanted: manage && ['dead', 'disconnected'].includes(health.state) && !health.viewerOnly,
+      make: () =>
+        this.button(
+          'ca-btn is-danger ca-dead-pane-restart',
+          `Restart session for ${employee.name}`,
+          () => this.openEmployeeRestart(employee, controls.onSaved),
+          { text: 'Restart' }
+        ),
+    };
+    const reconnect = {
+      name: 'ca-reconnect-viewer',
+      wanted: health.viewerOnly || this.canReconnectEmployee(employee),
+      make: () =>
+        this.button('ca-icon-btn ca-reconnect-viewer', 'Reconnect', () => this.reconnectEmployeeViewer(employee), {
+          icon: 'reconnect',
+          text: 'Reconnect',
+        }),
+    };
+    // The viewer check explains a state that is not simply working or idle.
+    const inspect = {
+      name: 'ca-viewer-status',
+      wanted: !status.fine && this.canInspectEmployeeViewer(employee),
+      make: () => this.viewerStatusButton(employee),
+    };
+    // The card offers the one next step: a dead agent can only be restarted, otherwise the repair that interrupts nothing
+    // comes first. The roster row, the member menu and the profile keep every other control.
+    const next = (health.state === 'dead' ? [restart, reconnect] : [reconnect, restart])
+      .concat(inspect)
+      .find((action) => action.wanted);
+    let slot = card.querySelector('.ca-company-status-actions');
+    if (!slot) card.append((slot = this.el('div', 'ca-company-status-actions')));
+    // A kept button is left in place so it keeps focus across repaints.
+    if (!next) slot.replaceChildren();
+    else if (!slot.firstElementChild?.classList.contains(next.name)) slot.replaceChildren(next.make());
+    slot.hidden = !next;
   }
 
   canReconnectEmployee(employee) {
@@ -9754,7 +10005,7 @@ class ReverieChatApp {
   async loadPhoneStatus() {
     const res = await this.app._chatApi('/api/chatrooms/phone-status');
     if (!this._phonePending?.size) this.phoneStatus = res.ok ? res.data : undefined;
-    if (this._boardCache && (!res.ok || !this.canManageOffice(this.company, res.data))) this.discardBoardFrame();
+    if (this._warmPages && (!res.ok || !this.canManageOffice(this.company, res.data))) this.discardBoardFrame();
     this.renderUser();
     if (this.view === 'chat') this.renderMembers();
   }
@@ -10306,8 +10557,9 @@ class ReverieChatApp {
                       : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
     const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
-    const recovery = ['dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(state) &&
-      caLastRecoveryCheck(this.company, employee);
+    const recovery =
+      ['dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(state) &&
+      caLastRecoveryCheck(this.company, employee)?.text;
     if (recovery || sub) text.append(this.el('span', 'ca-member-sub', recovery || sub));
     if (recovery) b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${recovery}`);
     if (state === 'unknown') b.title = `${b.title || m.name} · ${health.detail}`;
@@ -12957,6 +13209,14 @@ class ReverieChatApp {
     goalLabel.title =
       'Read, create and update this company’s operational goals before review. Does not grant verification, closing, cancellation, adoption, grants or unblocker attestations. Requires the authenticated Goal broker.';
     goalLabel.prepend(manageGoals);
+    const modelLabel = this.el('label', 'ca-hint', ' Set employee models');
+    const manageModels = this.el('input');
+    manageModels.type = 'checkbox';
+    manageModels.checked = employee.permissions?.manageModels === true;
+    manageModels.setAttribute('aria-label', `Set employee models for ${employee.name}`);
+    modelLabel.title =
+      'Choose the Claude model a colleague or this employee runs on. The office types /model only into an idle pane with an empty composer. Does not grant plans, accounts, restarts or other runtime settings.';
+    modelLabel.prepend(manageModels);
     const planPermissions = {};
     const planLabels = [];
     for (const [key, text] of [
@@ -13029,12 +13289,13 @@ class ReverieChatApp {
       recoverEmployees: recovery,
       manageOffice,
       manageGoals,
+      manageModels,
       ...planPermissions,
       ...Object.fromEntries(Object.entries(boardPermissions).map(([key, value]) => [key, value.input])),
     };
     const projection = (value) =>
       boardProjection(value) &&
-      ['recoverEmployees', 'manageOffice', 'manageGoals', 'moveOwnPlan', 'managePlans'].every(
+      ['recoverEmployees', 'manageOffice', 'manageGoals', 'manageModels', 'moveOwnPlan', 'managePlans'].every(
         (key) => typeof value?.permissions?.[key] === 'boolean'
       );
     const readUnconfirmed = 'Current permissions could not be confirmed. Refresh permissions before changing them.';
@@ -13138,6 +13399,9 @@ class ReverieChatApp {
     manageGoals.addEventListener('change', () => {
       void savePreference(manageGoals, 'manageGoals');
     });
+    manageModels.addEventListener('change', () => {
+      void savePreference(manageModels, 'manageModels');
+    });
     for (const [key, input] of Object.entries(planPermissions))
       input.addEventListener('change', () => {
         void savePreference(input, key);
@@ -13148,11 +13412,12 @@ class ReverieChatApp {
       });
     const general = this.el('fieldset', 'ca-profile-permissions');
     general.append(
-      this.el('legend', '', 'Recovery, office, plans and goals'),
+      this.el('legend', '', 'Recovery, office, plans, goals and models'),
       label,
       officeLabel,
       ...planLabels,
-      goalLabel
+      goalLabel,
+      modelLabel
     );
     preferenceStatus.classList.add('ca-profile-permission-status');
     preferenceFeedback.append(preferenceStatus, preferenceError, refresh);

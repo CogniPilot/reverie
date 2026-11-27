@@ -6,6 +6,7 @@ import { DockerViewerPane } from './docker-viewer-pane.js';
 import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { readFileSync } from 'node:fs';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
+import type { DockerEmployeeBinding } from './docker-employee-continuation-data.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
 import { captureLaunchProtocolAdmission, completeInitialLaunchAdmission, initialLaunchAdmitted } from './initial-launch-admission.js';
@@ -105,14 +106,15 @@ import { TaskTracker, type BackgroundTask } from './task-tracker.js';
 import { RalphTracker } from './ralph-tracker.js';
 import { BashToolParser } from './bash-tool-parser.js';
 import {
-  isTrustDialogScreen,
-  trustDialogNextKey,
-  TRUST_KEY_CONFIRM,
-  TRUST_DIALOG_WINDOW_MS,
-  TRUST_DIALOG_RETRY_MS,
-  TRUST_DIALOG_MAX_ATTEMPTS,
-  TRUST_DIALOG_SCAN_BYTES,
-} from './session-trust-dialog.js';
+  FirstRunScan,
+  readStartupScreen,
+  screenShape,
+  showsComposer,
+  SCREEN_KEY_CONFIRM,
+  FIRST_RUN_RETRY_MS,
+  FIRST_RUN_SCAN_BYTES,
+  type StartupScreenStatus,
+} from './session-first-run-screens.js';
 import {
   trackActivityStreak,
   isSustainedActivity,
@@ -155,7 +157,7 @@ import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
-import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
+import { composerGlyphVerified, composerIsEmpty, promptStillInComposer, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
@@ -182,7 +184,14 @@ import { resolveConfigModel } from './model-config-resolvers.js';
 import { legacyConfigForMode } from './session-cli-registry-bridge.js';
 import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type FullAccessCheck } from './full-access-default.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
-import { readProcStat, stopPtyChild } from './signal-target.js';
+import { readProcStat, stopPtyChild, type PaneLiveness } from './signal-target.js';
+import {
+  decideProviderHold,
+  providerScreenEvidence,
+  type ProviderHoldClaim,
+  type ProviderHoldReconciliation,
+  type ProviderPresenceSource,
+} from './provider-hold-reconcile.js';
 import { getLifecycleLog } from './session-lifecycle-log.js';
 import { ownerStopPending } from './owner-stop-journal.js';
 import {
@@ -543,7 +552,7 @@ export class NativeProviderRetirementRequiredError extends Error {
 /** A dispatched provider command may have run; no caller may replay it as a rollback. */
 export class ProviderDispatchUnconfirmedError extends Error {
   constructor(cause?: unknown) {
-    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it; inspect the terminal and confirm whether the provider ran. Same-session retry cannot clear this hold; supported reconciliation is not yet implemented.', {cause});
+    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it. The office releases the hold by itself once the terminal shows the running agent; otherwise the verified owner settles it with POST /api/sessions/:id/provider-hold ({"observation":"running"} or {"observation":"not-running"}). A new launch stays fenced until the employee is recovered.', {cause});
     this.name = 'ProviderDispatchUnconfirmedError';
   }
 }
@@ -712,13 +721,11 @@ export class Session extends EventEmitter {
   private _modelLineRows = 1;
   /** Resolved with the pattern above: the fields it shows that are never the model. */
   private _modelRejectWords: readonly string[] = [];
-  private _trustDialogAccepted: boolean = false; // Stops the trust-dialog scan (answered, or given up)
-  private _trustDialogAttempts = 0; // Keystrokes sent at the trust dialog
-  private _lastTrustDialogScanAt = 0; // Throttle for the trust-dialog screen read
-  private _trustDialogTimer: NodeJS.Timeout | null = null; // Re-read after a keystroke (see below)
+  /** When the office may still type at a first-run screen; armed only by a launch (session-first-run-screens.ts). */
+  private readonly _firstRunScan = new FirstRunScan();
+  private _firstRunTimer: NodeJS.Timeout | null = null; // The scan's own next read (see _answerFirstRunScreen)
   /** Re-sends Enter while a programmatic prompt still sits in the composer (session-submit-verifier.ts). */
   private _submitVerifier: SubmitVerifier | null = null;
-  private _interactiveStartedAt = 0; // When the interactive pane launched (bounds that scan)
   private _taskTracker: TaskTracker;
 
   // Token tracking for auto-clear
@@ -1114,6 +1121,89 @@ export class Session extends EventEmitter {
   /** Input to a freshly verified existing provider is separate from a new-provider dispatch. */
   get providerDispatchHoldKind(): 'loaded-intent' | 'intrinsic' | undefined { return this.#providerDenial?.kind; }
   get providerInputHeld(): boolean { return !this._existingProviderObservationAdmitted(); }
+  /** Website-side confirmation that the provider the denial doubts is in this pane now. It admits INPUT to that
+   * existing provider only: the denial, and every reader of `providerDispatchHeld`, stays in force, no launch is
+   * admitted, and it lapses with the pane, the mode, a new dispatch or a new denial. */
+  #providerPresence?: {
+    readonly source: ProviderPresenceSource;
+    readonly evidence: 'working-line' | 'composer' | 'owner-attested';
+    readonly denial: object;
+    readonly current: () => boolean;
+  };
+  #providerHoldLast?: { readonly denial: object; readonly result: ProviderHoldReconciliation };
+  #providerHoldReconciling?: Promise<ProviderHoldReconciliation>;
+  private _currentProviderPresence() {
+    const presence = this.#providerPresence;
+    if (!presence) return undefined;
+    if (presence.denial === this.#providerDenial && presence.current()) return presence;
+    this.#providerPresence = undefined;
+    return undefined;
+  }
+  get providerPresence(): ProviderPresenceSource | undefined { return this._currentProviderPresence()?.source; }
+  /** The last reconciliation of the CURRENT denial: what an input refusal reports. */
+  get providerHoldLastReconciliation(): ProviderHoldReconciliation | undefined {
+    return this.#providerHoldLast && this.#providerHoldLast.denial === this.#providerDenial ? this.#providerHoldLast.result : undefined;
+  }
+  /**
+   * Settle whether input may flow while a launch denial stands, from this session's own pane (provider-hold-reconcile.ts).
+   * `auto` reads the pane; `running` / `not-running` are the verified owner's reading of the terminal (the caller
+   * authenticates). Nothing is typed, replayed, launched or retired here.
+   */
+  reconcileProviderHold(claim: ProviderHoldClaim = 'auto'): Promise<ProviderHoldReconciliation> {
+    if (claim !== 'auto') return this._reconcileProviderHold(claim);
+    if (this.#providerHoldReconciling) return this.#providerHoldReconciling;
+    const work = this._reconcileProviderHold(claim).finally(() => {
+      if (this.#providerHoldReconciling === work) this.#providerHoldReconciling = undefined;
+    });
+    this.#providerHoldReconciling = work;
+    return work;
+  }
+  private async _reconcileProviderHold(claim: ProviderHoldClaim): Promise<ProviderHoldReconciliation> {
+    const denial = this.#providerDenial;
+    if (!denial) return { outcome: 'not-held' };
+    const settle = (result: ProviderHoldReconciliation): ProviderHoldReconciliation => {
+      if (this.#providerDenial === denial) this.#providerHoldLast = { denial, result };
+      return result;
+    };
+    if (claim === 'not-running') {
+      this.#providerPresence = undefined;
+      return settle({ outcome: 'not-running', evidence: 'owner-attested' });
+    }
+    if (denial.kind === 'loaded-intent' && this.dockerContinuationViewCurrent)
+      return settle({ outcome: 'confirmed', source: 'engine-view', evidence: 'engine-view' });
+    const present = this._currentProviderPresence();
+    if (present && claim === 'auto') return settle({ outcome: 'confirmed', source: present.source, evidence: present.evidence });
+    if (this._isStopped || this._closing) return settle({ outcome: 'held', reason: 'no-terminal' });
+    if (this.paneLifecycleInFlight) return settle({ outcome: 'held', reason: 'lifecycle-in-progress' });
+    const pane = this._captureMuxPaneObservation(() => this.#providerDenial === denial && !this._closing);
+    if (!pane || !pane.current()) return settle({ outcome: 'held', reason: 'no-terminal' });
+    let before: PaneLiveness, after: PaneLiveness, screen: string | null | undefined;
+    try {
+      before = await pane.read();
+      // The owner's reading replaces the screen match, so only an automatic check captures the screen.
+      screen = before.state === 'live' && claim === 'auto' ? this._mux?.capturePaneText?.(pane.name) : null;
+      after = before.state === 'live' ? await pane.read() : before;
+    } catch {
+      return settle({ outcome: 'held', reason: 'pane-unreadable' });
+    }
+    if (!pane.current() || this.paneLifecycleInFlight) return settle({ outcome: 'held', reason: 'pane-changed' });
+    const cli = getCli(this.mode)?.capabilities;
+    const decision = decideProviderHold(claim, {
+      before,
+      after,
+      registeredPid: pane.pid,
+      screen: providerScreenEvidence(screen, {
+        composerReadyMark: cli?.composerReadyMark,
+        workingLine: cli?.workDetect?.workingLine ? this._workingLinePattern() : null,
+      }),
+      // Only a local pane runs the provider as its own command; a laptop, remote or worker pane is a viewer.
+      paneIsProvider: this.paneExitApplies && !this._workerBacked,
+    });
+    if (decision.outcome === 'confirmed')
+      this.#providerPresence = { source: decision.source, evidence: decision.evidence, denial, current: () => pane.current() && !this._paneExit };
+    else if (decision.outcome === 'not-running') this.#providerPresence = undefined;
+    return settle(decision);
+  }
   private _holdUnconfirmedProvider(
     cause?: unknown,
     publication?: ProviderLaunchPublication
@@ -2057,11 +2147,26 @@ export class Session extends EventEmitter {
     if (!view || !this._docker || view.descriptor.mode !== this.mode || (view.descriptor.hooks.kind === 'none' && dockerProviderHookPolicy(this.mode)?.kind !== 'none')) return false;
     try { DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker); return true; } catch { return false; }
   }
+  /** This office process launched the provider of exactly this binding into this Session's own pane. Its
+   * terminal is then the launch's own viewer, which no separate view proof stands for. */
+  dockerContinuationLaunchedFor(binding: DockerEmployeeBinding): boolean {
+    const launch = this._dockerContinuationLaunch;
+    return (
+      !!launch &&
+      !this.#dockerContinuationView &&
+      !!this._muxSession &&
+      !this._isStopped &&
+      !this._closing &&
+      !this._viewerClientLost &&
+      DockerEmployeeProviderLaunch.prototype.issuedFor.call(launch, this, binding)
+    );
+  }
   private _requireDockerContinuationView(): void {
     if (!this.dockerContinuationViewCurrent) throw Error('Original Docker provider view changed');
   }
   private _existingProviderObservationAdmitted(): boolean {
-    return !this.#providerDispatchUncertainty || ((this.#providerDenial?.kind === 'loaded-intent') && this.dockerContinuationViewCurrent);
+    return !this.#providerDispatchUncertainty || ((this.#providerDenial?.kind === 'loaded-intent') && this.dockerContinuationViewCurrent)
+      || this._currentProviderPresence() !== undefined;
   }
   get docker(): SessionDocker | undefined {
     return this._docker;
@@ -3147,6 +3252,8 @@ export class Session extends EventEmitter {
       providerDispatchHeld: this.providerDispatchHeld,
       providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
       providerInputHeld: this.providerInputHeld,
+      // Live diagnostics: a pane observation admits input while the launch denial stands.
+      providerPresence: this.providerPresence ?? null,
       // Retained private view currency only; never fresh native health or an effect grant.
       ...(this._docker?.continuation ? { dockerProviderViewCurrent: this.dockerContinuationViewCurrent } : {}),
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
@@ -3167,6 +3274,13 @@ export class Session extends EventEmitter {
     };
   }
 
+  private _retainPermissionRecipe = false;
+  /** A saved plan-generation recipe that already records its permission mode
+   * keeps recording it when a later ordinary continuation relaunches it, so
+   * the launch fingerprint taken from that saved state still matches. */
+  retainPermissionRecipe(): void {
+    this._retainPermissionRecipe = true;
+  }
   /** Provider recipe DATA only, without runtime/view getters. Never an API serializer or a grant. */
   providerRecipeState() {
     const persistentRecord = resolvedStockProtocol(this.mode)?.shipped.capabilities.rebootRestore === 'persistent-record';
@@ -3206,7 +3320,7 @@ export class Session extends EventEmitter {
     // A plan generation must keep its explicit permission/tool recipe across
     // replacement and restore. Legacy v1/v2 launch fingerprints stay unchanged.
     if (
-      this._docker?.continuation?.planReplacement &&
+      (this._docker?.continuation?.planReplacement || this._retainPermissionRecipe) &&
       accountReplacementProfile(this.mode)?.name === 'anthropic-account-v1'
     ) {
       snapshot.claudeMode = this._claudeMode;
@@ -3215,6 +3329,7 @@ export class Session extends EventEmitter {
     delete snapshot.dockerProviderViewCurrent;
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
+    delete snapshot.providerPresence;
     if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;
     return snapshot;
   }
@@ -3242,23 +3357,39 @@ export class Session extends EventEmitter {
     if (!this._envOverrides) return undefined;
     const safe: Record<string, string> = {};
     for (const [key, value] of Object.entries(this._envOverrides)) {
-      if (
-        key.startsWith('CLAUDE_CODE_') ||
-        [
-          'CLAUDE_CONFIG_DIR',
-          'CODEX_HOME',
-          'REVERIE_RESEARCH_CYCLE_ID',
-          'REVERIE_EMPLOYEE_ID',
-          'REVERIE_RESEARCH_DEADLINE_AT',
-          'REVERIE_RESEARCH_CYCLE_ID',
-          'REVERIE_EMPLOYEE_ID',
-          'REVERIE_RESEARCH_DEADLINE_AT',
-        ].includes(key) ||
-        (this.subscriptionProfile && key === 'XDG_DATA_HOME')
-      )
-        safe[key] = value;
+      if (this._persistsEnvOverride(key)) safe[key] = value;
     }
     return Object.keys(safe).length > 0 ? safe : undefined;
+  }
+
+  /** Whether {@link getEnvOverridesForPersist} writes this key to state.json. */
+  private _persistsEnvOverride(key: string): boolean {
+    return (
+      key.startsWith('CLAUDE_CODE_') ||
+      [
+        'CLAUDE_CONFIG_DIR',
+        'CODEX_HOME',
+        'REVERIE_RESEARCH_CYCLE_ID',
+        'REVERIE_EMPLOYEE_ID',
+        'REVERIE_RESEARCH_DEADLINE_AT',
+      ].includes(key) ||
+      (!!this.subscriptionProfile && key === 'XDG_DATA_HOME')
+    );
+  }
+
+  /**
+   * Environment for the next launch only, derived at launch time from the
+   * endpoint store (values that are never saved, such as a local model key).
+   * A key that state.json records is recipe data and is left alone here, so
+   * this can never change the saved recipe or a launch fingerprint taken from
+   * it. Returns the keys it actually merged.
+   */
+  mergeLaunchEnvironment(environment: Readonly<Record<string, string>>): string[] {
+    const merged = Object.entries(environment).filter(([key, value]) => value !== '' && !this._persistsEnvOverride(key));
+    if (merged.length === 0) return [];
+    this._envOverrides = { ...(this._envOverrides ?? {}), ...Object.fromEntries(merged) };
+    for (const [key] of merged) this._pendingEnvUnsets.delete(key);
+    return merged.map(([key]) => key);
   }
 
   toDetailedState() {
@@ -3785,7 +3916,7 @@ export class Session extends EventEmitter {
     const current = () => stillCurrent() && identity.current() && !this._isStopped &&
       this.#workspaceHookEpoch === epoch && this.mode === mode &&
       identity.subject.pid === pid;
-    return {current, pid, read: () => identity.mux.readPaneLiveness!(identity.name)};
+    return {current, pid, name: identity.name, read: () => identity.mux.readPaneLiveness!(identity.name)};
   }
 
   /** A dispatched worker command cannot settle successfully with a dead or unconfirmed outer pane.
@@ -3959,6 +4090,9 @@ export class Session extends EventEmitter {
     // is history. Without this the caller's persist-and-broadcast writes the old
     // exit straight back onto a session that is running again.
     this.clearPaneExitForNewPane();
+    // A relaunched CLI starts from its first screen again: a plan change or a profile switch can have pointed it at a
+    // config directory it has never seen. A viewer-only respawn started no CLI, so it arms nothing.
+    if (newPid && !this._workerAttachOnly) this._armFirstRunScan();
     this.fullAccessCheck = this._scheduleFullAccessCheck(newPid);
     console.log('[Session] restartCli: restarted CLI for', this._muxSession.muxName, 'pid', newPid);
     return true;
@@ -4407,15 +4541,9 @@ export class Session extends EventEmitter {
     await this._prepareCodexHookTrust();
     assertAdmission();
 
-    // Bounds the workspace-trust scan (see _maybeAcceptTrustDialog). Stamped here
+    // Bounds the first-run screen scan (see _answerFirstRunScreen). Armed here
     // rather than at PTY spawn so a slow mux attach still counts as startup.
-    this._interactiveStartedAt = Date.now();
-    this._trustDialogAttempts = 0;
-    this._lastTrustDialogScanAt = 0;
-    if (this._trustDialogTimer) {
-      clearTimeout(this._trustDialogTimer);
-      this._trustDialogTimer = null;
-    }
+    this._armFirstRunScan();
 
     this._resetBuffers();
 
@@ -4546,6 +4674,8 @@ export class Session extends EventEmitter {
           },
           spawnErrLabel: 'mux attachment',
         });
+        // A pane that was already running was only attached to: the scan armed above saw no launch of it.
+        if (isRestored && !respawnedDeadPane) this._firstRunScan.attached();
 
         // Set claudeSessionId — when resuming, the Claude conversation ID is the
         // resumed one. `_pinOmpRespawnId()` (called just above, inside
@@ -4753,8 +4883,8 @@ export class Session extends EventEmitter {
 
       this._handleTerminalOutput(data);
 
-      // === Auto-accept workspace trust dialog ===
-      this._maybeAcceptTrustDialog();
+      // === Answer the provider's first-run screens (theme, notes, trust, bypass) ===
+      this._answerFirstRunScreen();
 
       // === Idle/working detection runs on every chunk (latency-sensitive) ===
       this._detectInteractiveActivity(data);
@@ -4865,81 +4995,167 @@ export class Session extends EventEmitter {
   }
 
   /**
-   * Answer Claude's workspace-trust dialog, which blocks a fresh case until
-   * someone presses Enter. Reverie sessions run permission-skipping or
-   * classifier-guarded modes, so the answer is always "yes, I trust this folder".
+   * Answer the screens a provider CLI shows before its composer on a config
+   * directory it has never seen: Claude's theme chooser, security notes,
+   * workspace-trust question and Bypass Permissions warning. The office launched
+   * this pane, in this mode, on the owner's instruction, so each has one answer,
+   * and a session parked on any of them is simply stuck (a plan move ended in
+   * `recovery-required` behind four of them). What is recognised, and the key
+   * that answers it, is data in session-first-run-screens.ts; sign-in and other
+   * real decisions are recognised there too and are never typed into.
    *
    * Reads the RENDERED SCREEN rather than the chunk that just arrived. tmux
    * repaints a row with cursor-forward escapes in place of spaces, so the wire
-   * carries `I\x1b[Ctrust\x1b[Cthis\x1b[Cfolder` and the old
-   * `data.includes('trust this folder')` could never match: the auto-accept had
-   * been dead for every session that hit the dialog. The screen is also what
-   * makes a retry safe, since the terminal buffer is append-only and keeps the
-   * dialog in its tail long after it has been answered.
+   * carries `I\x1b[Ctrust\x1b[Cthis\x1b[Cfolder` and a
+   * `data.includes('trust this folder')` could never match. The screen is also
+   * what makes a retry safe, since the terminal buffer is append-only and keeps a
+   * screen in its tail long after it has been answered. Only a session with no
+   * pane at all (direct PTY) reads a short tail of that buffer; a pane whose
+   * capture failed is read again later, never guessed at from stale output.
    *
    * ⚠️ **The keystroke is read off the screen, never assumed.** Claude Code
-   * 2.1.252 dropped the option numbers, put "No, exit" first, and highlights IT
-   * by default, so the bare `\r` this used to send now answers *exit*: a fresh
-   * case died (`Pane is dead (status 1)`) about six seconds after spawning.
-   * `trustDialogNextKey()` returns one step at a time — an arrow while the
-   * cursor is on the wrong option, Enter only once the screen shows it on the
-   * trust option — and this method re-reads the pane between the two, so a
-   * dropped arrow costs a repaint instead of the session.
+   * 2.1.252 put "No, exit" first and highlights IT by default, so a bare `\r`
+   * answers *exit* and the pane dies seconds after spawning. The matcher returns
+   * one step per frame — an arrow while the cursor is on the wrong option, Enter
+   * only once the screen shows it on the right one — and this method re-reads
+   * the pane between the two, so a dropped arrow costs a repaint, not the session.
    *
-   * Three guards keep an Enter press off a live session: a startup-only window,
-   * a two-marker match (isTrustDialogScreen), and an attempt cap.
+   * ⚠️ **The scan drives itself.** It used to run only from `onData`, and the
+   * arrow that moves the cursor is the LAST output the pane produces, so a dialog
+   * left sitting on the right option never got its Enter (measured on a live
+   * 2.1.252 spawn: cursor moved at 6 s, then nothing). The same is true of a
+   * screen that paints in one burst inside the read throttle. So while the scan
+   * is armed a one-shot timer re-enters this method; every exit route goes
+   * through _clearAllTimers().
+   *
+   * What keeps a key off a live conversation is FirstRunScan: armed only by a
+   * launch, a startup window that only an answered first-run screen extends, an
+   * attempt budget per screen, and a permanent end at the first sight of the
+   * composer.
    */
-  private _maybeAcceptTrustDialog(): void {
+  private _answerFirstRunScreen(): void {
+    const scan = this._firstRunScan;
+    if (!scan.active || this._isStopped) return;
+    if (!this._firstRunTimer) this._scheduleFirstRunRead();
     if (this._viewerInputHeld) return;
-    if (this._trustDialogAccepted) return;
-    const now = Date.now();
-    if (now - this._interactiveStartedAt > TRUST_DIALOG_WINDOW_MS) {
-      this._trustDialogAccepted = true; // window closed; anything matching now is not the dialog
+    if (!scan.due(Date.now())) return;
+    // The next read is measured from this one, so it lands outside the throttle.
+    this._scheduleFirstRunRead();
+
+    if (!this._mux || !this._muxSession) {
+      this._applyFirstRunFrame(this._terminalBuffer.value.slice(-FIRST_RUN_SCAN_BYTES));
       return;
     }
-    if (now - this._lastTrustDialogScanAt < TRUST_DIALOG_RETRY_MS) return;
-    this._lastTrustDialogScanAt = now;
-
-    // Prefer the pane; fall back to the buffer tail on a direct-PTY session,
-    // where there is no screen to read.
-    const screen =
-      (this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName) : null) ??
-      this._terminalBuffer.value.slice(-TRUST_DIALOG_SCAN_BYTES);
-    if (!isTrustDialogScreen(screen)) return;
-
-    // Null means the frame does not say which option is highlighted. Waiting for
-    // the next repaint is the safe move; pressing Enter blind is the bug.
-    const key = trustDialogNextKey(screen);
-    if (key === null) return;
-
-    this._trustDialogAttempts++;
-    if (this._trustDialogAttempts > TRUST_DIALOG_MAX_ATTEMPTS) {
-      this._trustDialogAccepted = true; // leave it to the user rather than keep typing
-      console.warn(`[Session] Workspace trust dialog did not clear after retries: ${this.id}`);
+    // This runs from a timer: a pane that cannot be read is simply read again on the next one.
+    let frame: string | null | Promise<string | null | undefined>;
+    try {
+      frame = this._readPaneStatus();
+    } catch {
       return;
     }
-    const step = key === TRUST_KEY_CONFIRM ? 'confirming' : 'moving to the trust option';
-    console.log(
-      `[Session] Auto-accepting workspace trust dialog for: ${this.id} (attempt ${this._trustDialogAttempts}, ${step})`
+    if (frame instanceof Promise) {
+      void frame.then(
+        (text) => {
+          if (typeof text === 'string') this._applyFirstRunFrame(text);
+        },
+        () => {}
+      );
+    } else if (typeof frame === 'string') this._applyFirstRunFrame(frame);
+  }
+
+  /** Act on one frame the scan claimed: at most one key, charged to the screen it answers. */
+  private _applyFirstRunFrame(text: string): void {
+    if (this._isStopped || this._viewerInputHeld) return;
+    const scan = this._firstRunScan;
+    const step = scan.read(Date.now(), text, { composerMark: getCli(this.mode)?.capabilities.composerReadyMark });
+    if (step.action === 'ended') {
+      if (step.reason === 'attempts')
+        console.warn(`[Session] ${step.screen?.label ?? 'A first-run screen'} did not clear after retries: ${this.id}`);
+      return;
+    }
+    if (step.action !== 'press') return;
+    const { screen, key, attempt } = step;
+    const move = key === SCREEN_KEY_CONFIRM ? 'confirming' : 'moving the selection';
+    console.log(`[Session] Answering ${screen.label} for: ${this.id} (attempt ${attempt}, ${move})`);
+    this.writeViaMux(key).then(
+      (sent) => {
+        // Refused before it reached the pane (input held, pane replaced): not an attempt at the screen.
+        if (!sent) scan.refund(screen.id);
+      },
+      (error: unknown) => {
+        // An unconfirmed write now holds this session's input; the key is never sent again from here.
+        console.warn(`[Session] Could not answer ${screen.label} for: ${this.id}:`, getErrorMessage(error));
+      }
     );
-    this.writeViaMux(key);
+  }
 
-    // ⚠️ Schedule the next read; do NOT wait for more PTY output. This scan only
-    // ever ran from `onData`, which was enough while one Enter answered the
-    // dialog. It is not enough now: the arrow that moves the cursor is the LAST
-    // output the pane produces, so a dialog left sitting on the trust option
-    // never gets its Enter and the worker stays parked on it forever (measured
-    // on a live 2.1.252 spawn: cursor moved at 6 s, then nothing). The timer is
-    // one-shot and self-rearming through this same path, and every exit route
-    // goes through _clearAllTimers().
-    // The +100ms puts the re-entry OUTSIDE the scan throttle above; firing at
-    // exactly the throttle boundary would let the scan return early and break
-    // the chain with the dialog still on screen.
-    if (this._trustDialogTimer) clearTimeout(this._trustDialogTimer);
-    this._trustDialogTimer = setTimeout(() => {
-      this._trustDialogTimer = null;
-      this._maybeAcceptTrustDialog();
-    }, TRUST_DIALOG_RETRY_MS + 100);
+  /** A pane was launched or respawned: its CLI may show its first-run screens (again). */
+  private _armFirstRunScan(): void {
+    this._firstRunScan.arm(Date.now());
+    this._scheduleFirstRunRead();
+  }
+
+  /**
+   * One-shot re-entry of the scan. The +100ms puts it OUTSIDE the scan's read
+   * throttle; firing at exactly the boundary would let the read be refused and
+   * leave a screen sitting until some unrelated output arrived.
+   */
+  private _scheduleFirstRunRead(): void {
+    if (this._firstRunTimer) clearTimeout(this._firstRunTimer);
+    this._firstRunTimer = null;
+    if (!this._firstRunScan.active || this._isStopped) return;
+    this._firstRunTimer = setTimeout(() => {
+      this._firstRunTimer = null;
+      this._answerFirstRunScreen();
+    }, FIRST_RUN_RETRY_MS + 100);
+    this._firstRunTimer.unref?.();
+  }
+
+  /**
+   * The pane's visible screen, styles kept (so a dimmed composer placeholder still reads as empty),
+   * or null when there is no pane or it cannot be read.
+   * Read-only: one capture, no input. For a caller that must see the screen before it types.
+   */
+  readScreen(): string | null {
+    const text = this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }) : null;
+    return typeof text === 'string' ? text : null;
+  }
+
+  /** The visible screen as plain text without blocking the server (for periodic reads), or null. */
+  async readScreenAsync(): Promise<string | null> {
+    const mux = this._mux;
+    const pane = this._muxSession;
+    if (!mux || !pane) return null;
+    const text = mux.capturePaneTextAsync
+      ? await mux.capturePaneTextAsync(pane.muxName).catch(() => null)
+      : mux.capturePaneText?.(pane.muxName);
+    return typeof text === 'string' ? text : null;
+  }
+
+  /** Re-read the pane for an open dialog now, e.g. right after the office dismissed one. */
+  refreshPaneDialog(): void {
+    this._refreshPaneDialog(false);
+  }
+
+  /**
+   * The known provider start-up screen this pane shows right now, and whether
+   * the office is still answering it. Read-only: one pane capture, no input.
+   * Null when the pane shows none of them, cannot be read, or is at its composer.
+   * For a caller that found the session short of its composer and has to say why.
+   */
+  startupScreen(): StartupScreenStatus | null {
+    const text = this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName) : null;
+    if (typeof text !== 'string') return null;
+    const scan = this._firstRunScan;
+    const cli = getCli(this.mode)?.capabilities;
+    const composerMark = cli?.composerReadyMark;
+    // A composer seen here counts for the launch like one the scan saw: the pane reached it, for good.
+    if (showsComposer(text, composerMark)) scan.composerSeen();
+    const status = readStartupScreen(text, scan, Date.now(), { composerMark, composerGlyph: cli?.workDetect?.promptGlyph });
+    // A screen the office does not answer is logged once per launch by its shape, so a table row can be written for it.
+    if (status && status.kind === 'first-run' && !status.answering && status.shown !== 'words' && !this._isWorking && scan.claimShape(status.id))
+      console.warn(`[Session] ${this.id} is parked at ${status.label}, which the office does not answer. Screen shape: ${screenShape(text)}`);
+    return status;
   }
 
   /**
@@ -5951,10 +6167,11 @@ export class Session extends EventEmitter {
     // Stop re-sending Enter for a prompt this session will never take now
     this._submitVerifier?.cancel();
     this._submitVerifier = null;
-    // Clear the workspace-trust follow-up read
-    if (this._trustDialogTimer) {
-      clearTimeout(this._trustDialogTimer);
-      this._trustDialogTimer = null;
+    // Stop the first-run screen scan and its follow-up read
+    this._firstRunScan.disarm();
+    if (this._firstRunTimer) {
+      clearTimeout(this._firstRunTimer);
+      this._firstRunTimer = null;
     }
 
     // A compaction cannot be in progress once the session is torn down
@@ -6738,6 +6955,33 @@ export class Session extends EventEmitter {
   }
 
   /**
+   * Take up a line this office typed earlier that is still sitting unsent in the composer. A write that owns the composer
+   * (an agent wake) leaves its text typed and unsent whenever the Enter could not be justified at that moment: the pane could
+   * not be read right after the text (a laptop the office had just lost its connection to), the write's gate closed while the
+   * text settled, or the CLI ignored every Enter of the retry schedule. Nothing pressed Enter for it later, and the composer
+   * was never empty again, so every later wake was refused for good.
+   *
+   * Nothing is typed or cleared here. When the pane is idle in every other respect and its WHOLE composer is exactly `text`,
+   * the composer check (session-submit-verifier.ts) is armed for that text again: it presses Enter only while the complete
+   * composer still is that text and this pane is still idle, and reports how it ended. One character more or less in the
+   * composer, a turn in progress, held input, another write or check in flight, or a harness whose composer cannot be read:
+   * false, and nothing was done.
+   */
+  resubmitStranded(text: string, onOutcome?: SessionWriteOptions['onOutcome']): boolean {
+    const admitted = this.captureInputAdmission();
+    const mux = this._mux, subject = this._muxSession;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    if (!admitted() || !text.trim() || !mux?.capturePaneText || !subject || !composerGlyphVerified(glyph)) return false;
+    if (this._inputHeldForRecovery() || this._capacityTextPending || this._submitVerifier?.armed) return false;
+    const idle = (): boolean => !this._inputHeldForRecovery() && this._idleForWake(null, false);
+    if (!idle()) return false;
+    const screen = mux.capturePaneText(subject.muxName, undefined, { escapes: true });
+    if (screen == null || promptStillInComposer(screen, text, glyph) !== true) return false;
+    this._verifySubmitted(`${text}\r`, onOutcome, false, idle, admitted);
+    return true;
+  }
+
+  /**
    * Arm the composer check for a prompt that went out some other way than
    * `writeViaMux`, e.g. cron's paste mode, which writes the body raw and its Enter
    * separately. `text` is what the composer line starts with while the prompt is still
@@ -6778,9 +7022,15 @@ export class Session extends EventEmitter {
         };
         try {
           const shellKeyGuard = protocol.shellKeyGuard;
-          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(shellKeyGuard ? {opencode: true} : {})});
+          // The gate (idle, exclusive, move-free) and this check being the current one decide whether the Enter may be
+          // pressed. They are not what the key is held to once it is out: the turn a taken Enter starts ends "idle",
+          // and a newer write arms its own check. Read after the key, either called a delivered Enter an input of
+          // unknown outcome, and that hold is never lifted. Once the key is out, only the subject it went to counts.
+          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, settled: original, ...(shellKeyGuard ? {opencode: true} : {})});
           const sent = gate && shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
-          if (!effect()) verifier.cancel();
+          // A closed gate alone leaves the schedule running: the next look finds the composer empty (sent), or finds the
+          // text and stops at the gate above without pressing anything.
+          if (!current()) verifier.cancel();
           return sent;
         } catch (cause) {
           if (cause instanceof TerminalInputUnconfirmedError) {this.holdUnconfirmedInput(cause); verifier.cancel();}

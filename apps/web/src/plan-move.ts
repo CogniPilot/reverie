@@ -5,12 +5,15 @@ import {
   requireDockerPlanDisjointHistoryData,
 } from './docker-plan-disjoint-generation.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
-import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
+import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
+import { dockerPlanMoveHandoffDigest, type DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
 import { ResourceHistoricalSettlement } from './resource-native-client.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { reserveDockerPlanMove, runDockerPlanMove } from './plan-move-docker-runner.js';
+import { describeStartupScreen, type StartupScreenStatus } from './session-first-run-screens.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -83,12 +86,20 @@ export interface PlanMoveInput {
 export interface PlanMoveRecord {
   /** Public view DATA only. Never persisted as effect authority. */
   backend?: 'docker';
-  allowedActions?: readonly 'continue-original'[];
+  /** Next steps for this move. `abandon` is the signed-in owner's only. */
+  allowedActions?: readonly ('continue-original' | 'abandon')[];
   /** Public diagnostic only; never stored as native effect credit. */
   sourceViewRetirement?: PlanMoveSourceViewRetirement;
+  /** Public view DATA only, for a laptop move that has switched the employee to the new session: whether its
+   * handoff was typed there. `owed`: not typed. `unconfirmed`: typed, outcome unknown. `delivered`: confirmed. */
+  handoffState?: 'owed' | 'unconfirmed' | 'delivered';
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
+  /** Terminal closure: the Engine reported every recorded container absent, or
+   * the signed-in owner abandoned a held move (its own containers are recorded
+   * for the owner's laptop rebuild). */
+  dockerAbandonment?: PlanMoveAbsentAbandonment | PlanMoveOwnerAbandonment;
   id: string;
   owner?: string;
   employeeId: string;
@@ -111,6 +122,38 @@ export interface PlanMoveRecord {
   resourceIntent?: PlanMoveResourceIntent;
   resourceOwnerScope?: string;
   resourcePhase?: PlanMoveResourcePhase;
+}
+export interface PlanMoveAbsentAbandonment {
+  version: 1;
+  reason: 'recorded-containers-absent';
+  operationId: string;
+  at: number;
+}
+export interface PlanMoveOwnerAbandonment {
+  version: 1;
+  reason: 'owner-abandoned';
+  at: number;
+  containers: {
+    source: string;
+    target?: string;
+    sourceHolder?: string;
+    helpers: { role: 'storage-holder' | 'leaf-helper' | 'identity-helper'; containerId: string }[];
+  };
+}
+/** The handoff of a closed laptop move that switched its employee to the new session and never confirmed typing it
+ * there. DATA only: it types nothing and proves nothing about the session. */
+export interface PlanMoveOwedHandoff {
+  readonly moveId: string;
+  readonly employeeId: string;
+  /** The session the move switched the employee to. */
+  readonly sessionId: string;
+  /** The text the move would have typed, and the digest of the exact bytes. */
+  readonly text: string;
+  readonly digest: string;
+  /** The move had begun to type it and never confirmed it. It must not be typed again. */
+  readonly typed: boolean;
+  /** When the move was closed. */
+  readonly closedAt: number;
 }
 export interface PlanMoveSourceViewRetirement {
   state: 'pending' | 'completed' | 'unconfirmed';
@@ -206,14 +249,101 @@ export class PlanMoveAccountSnapshotChanged extends PlanMoveError {
 /** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
 export class PlanMoveUnconfirmed extends PlanMoveError {}
 
+/** A step of a laptop move was given up by the step watch (`PLAN_MOVE_STEP_LIMITS`). What it had done is not known. */
+export class PlanMoveStepTimedOut extends PlanMoveUnconfirmed {}
+
+/**
+ * How long one step of a laptop move is waited for before the move is held instead.
+ *
+ * A step is a chain of short waits, each with its own limit: a container engine command ends after thirty seconds,
+ * the journal lock after five, the wait for an employee to yield after five minutes, a read of the new session's
+ * composer after three. Between them the step passes a checkpoint (it asks whether it is still the move's flight),
+ * so a healthy step passes one at least every thirty seconds, and every second while it waits for a composer. What
+ * has no limit of its own is a wait on the office itself: an audit entry, a company record, a terminal, the launch.
+ *
+ * - `stallMs`: no checkpoint for this long means one such wait never returned. Ten minutes is twenty times the
+ *   longest wait that has a limit.
+ * - `phaseMs`: a backstop for a step that keeps passing checkpoints and never ends. Waiting for the employee
+ *   ends by its own five-minute limit, and checking the target and stopping the source are a handful of waits;
+ *   they get fifteen minutes. Building and starting the new laptop, and checking it (up to three composer reads,
+ *   the handoff and the completion), are dozens of waits, by a count of the steps some twenty minutes if every
+ *   one ran to its limit; they get forty-five. The counts are estimates from reading the steps, not measurements.
+ *   A phase that is not listed gets the longest.
+ * - `graceMs`: how long a step that was told to stop is given to stop by itself before the move is taken from it.
+ * - `checkMs`: how often a step is looked at.
+ */
+export interface PlanMoveStepLimits {
+  readonly stallMs: number;
+  readonly phaseMs: Readonly<Partial<Record<PlanMovePhase, number>>>;
+  readonly graceMs: number;
+  readonly checkMs: number;
+}
+export const PLAN_MOVE_STEP_LIMITS: PlanMoveStepLimits = {
+  stallMs: 10 * 60_000,
+  phaseMs: {
+    waiting: 15 * 60_000,
+    creating: 15 * 60_000,
+    stopping: 15 * 60_000,
+    starting: 45 * 60_000,
+    checking: 45 * 60_000,
+  },
+  graceMs: 60_000,
+  checkMs: 15_000,
+};
+
+/** The sentence a move is held with once the step watch gave its step up. It says what is and is not known. */
+function stepTimedOutMessage(phase: PlanMovePhase, stalledMs: number | undefined, lastedMs: number): string {
+  const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000)),
+    step =
+      phase === 'recovery-required'
+        ? 'while it was being continued'
+        : phase === 'completed'
+          ? 'while the old terminal of the finished move was being retired'
+          : `in its “${phase}” step`;
+  return (
+    `The office stopped waiting for this move ${step}: ` +
+    (stalledMs !== undefined
+      ? `nothing came back from it for ${minutes(stalledMs)} minutes. `
+      : `that had lasted ${minutes(lastedMs)} minutes. `) +
+    'How far that step got is not known. The move is held as an office restart would leave it; nothing was repeated.'
+  );
+}
+
+/** What a candidate that is short of its composer was showing instead, when that is a screen the office can name. */
+export interface PlanMoveWaitingAt extends Pick<StartupScreenStatus, 'label' | 'kind' | 'answering'> {
+  /** The owner-facing name of the session, e.g. "Stan's new session". */
+  readonly who: string;
+}
+
 /** Only a supported, currently observed composer that is not yet ready is retryable.
  * Unknown capability, account, binding and source-cleanup failures remain ordinary refusals.
+ *
+ * `waitingAt` is description only. It names the provider start-up screen the candidate was read on (a first-run screen
+ * the office is answering, or a sign-in it never answers), so a wait that runs out says where the session is stuck
+ * instead of only that it is not at its composer. It grants nothing and never makes a refusal retryable.
  */
 export class PlanMoveComposerNotReady extends PlanMoveError {
-  constructor() {
-    super('The existing candidate is not at its verified composer');
+  constructor(readonly waitingAt?: Readonly<PlanMoveWaitingAt>) {
+    super(waitingAt ? describeStartupScreen(waitingAt.who, waitingAt) : 'The existing candidate is not at its verified composer');
     this.name = 'PlanMoveComposerNotReady';
   }
+}
+
+/** How long a candidate's composer is waited for before the move asks for the owner. */
+export const PLAN_MOVE_COMPOSER_WAIT_MS = 120_000;
+/** How much longer it is waited for while the office is verifiably still answering a first-run screen. */
+export const PLAN_MOVE_FIRST_RUN_GRACE_MS = 60_000;
+
+/**
+ * Whether a composer that was not ready may be read again, `elapsedMs` into the wait.
+ *
+ * A candidate on a first-run screen the office is still answering is still starting, not failed: it gets a bounded
+ * grace past the ordinary deadline. Anything else, a sign-in prompt and a screen the office gave up on included, ends
+ * at the ordinary deadline, and the error that ends it names the screen.
+ */
+export function planMoveComposerWaitContinues(error: PlanMoveComposerNotReady, elapsedMs: number): boolean {
+  if (elapsedMs < PLAN_MOVE_COMPOSER_WAIT_MS) return true;
+  return error.waitingAt?.answering === true && elapsedMs < PLAN_MOVE_COMPOSER_WAIT_MS + PLAN_MOVE_FIRST_RUN_GRACE_MS;
 }
 
 export class PlanMoves {
@@ -247,7 +377,10 @@ export class PlanMoves {
   }
   private loaded: Promise<void> | undefined;
 
-  constructor(private readonly port: PlanMovePort) {}
+  constructor(
+    private readonly port: PlanMovePort,
+    private readonly stepLimits: PlanMoveStepLimits = PLAN_MOVE_STEP_LIMITS
+  ) {}
 
   private init(): Promise<void> {
     this.loaded ??= (async () => {
@@ -294,16 +427,23 @@ export class PlanMoves {
       ...record
     } = source;
     delete record.sourceViewRetirement;
+    delete record.handoffState;
     if (source.dockerReplacement) {
       record.backend = 'docker';
+      const { companyPublication, handoff } = source.dockerReplacement;
+      if (companyPublication)
+        record.handoffState = handoff?.phase === 'submitted' ? 'delivered' : handoff ? 'unconfirmed' : 'owed';
       const retirement = this.sourceRetirement(source);
       if (retirement) record.sourceViewRetirement = retirement;
+      const idle = !this.aborts.has(record.id) && !this.intents.has(record.id);
       record.allowedActions =
         (record.phase === 'recovery-required' ||
           (record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed')) &&
-        !this.aborts.has(record.id) &&
-        !this.intents.has(record.id)
-          ? ['continue-original']
+        idle
+          ? // A held move can always be given up by its owner, whatever stopped it.
+            record.phase === 'recovery-required' && !record.resourceIntent && this.port.dockerJournal?.abandonOwner
+            ? ['continue-original', 'abandon']
+            : ['continue-original']
           : [];
     }
     // A completion journal write is provisional while final native/audit fences
@@ -523,6 +663,65 @@ export class PlanMoves {
     const proof = await executor.dockerReplacement!.admitDisjointGeneration!(employeeId, owner, rows);
     requireDockerPlanDisjointGeneration(proof, this.coldRows(employeeId, owner, ownId), employeeId, owner);
     return proof;
+  }
+  /** Open moves an absent-laptop reprovision would have to close. DATA only. */
+  async openMoves(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { id: string; docker: boolean; busy: boolean }[]> {
+    await this.init();
+    return (
+      [...this.records.values()]
+        .filter((row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase))
+        // A held move of the retired native runtime has no Docker effect to close
+        // and never gated a boxed continuation. It keeps its own recovery record.
+        .filter(
+          (row) =>
+            row.dockerReplacement ||
+            row.phase !== 'recovery-required' ||
+            this.aborts.has(row.id) ||
+            this.intents.has(row.id)
+        )
+        .map((row) => ({
+          id: row.id,
+          docker: !!row.dockerReplacement && row.owner === owner && !row.resourceIntent,
+          busy: this.aborts.has(row.id) || this.intents.has(row.id),
+        }))
+    );
+  }
+  /** Close every open native move of one employee as abandoned. The caller holds
+   * fresh positive Engine proof of absence and retains it through `current`.
+   * The private journal is kept verbatim; no native effect is issued here. */
+  async abandonAbsentDockerMoves(
+    employeeId: string,
+    owner: string | undefined,
+    abandonment: PlanMoveAbsentAbandonment,
+    current: () => void
+  ): Promise<readonly string[]> {
+    current();
+    const store = this.port.dockerJournal;
+    const open = await this.openMoves(employeeId, owner);
+    if (!open.length) return [];
+    if (!store?.abandonAbsent || open.some((row) => !row.docker || row.busy))
+      throw new PlanMoveError('An open move for this employee requires its own recovery', 409);
+    const closed: string[] = [];
+    for (const { id } of open) {
+      const record = this.records.get(id)!;
+      current();
+      const disk = await store.record(id);
+      current();
+      if (this.records.get(id) !== record || this.aborts.has(id) || this.intents.has(id) || !disk.dockerReplacement)
+        throw new PlanMoveError('The original Docker move flight changed', 409);
+      const saved = await store.abandonAbsent(id, disk.dockerReplacement, abandonment, current);
+      record.phase = saved.phase;
+      record.error = saved.error;
+      record.dockerReplacement = saved.dockerReplacement;
+      record.dockerSettlementBudget = saved.dockerSettlementBudget;
+      record.dockerAbandonment = saved.dockerAbandonment;
+      closed.push(id);
+    }
+    this.releaseLock(employeeId);
+    return closed;
   }
   private releaseLock(employeeId: string): void {
     if (
@@ -777,6 +976,233 @@ export class PlanMoves {
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');
     this.aborts.get(id)!.abort(new PlanMoveError('Move cancelled by the owner'));
+  }
+
+  /** The signed-in owner gives up one move that is held for recovery. It is
+   * closed as terminally failed, the employee's move lock is released and the
+   * containers the move's own journal named are recorded for the owner's laptop
+   * rebuild. Journal DATA only: nothing is started, stopped or removed, and no
+   * other employee's record is read or written. A move that is still working
+   * (or only waiting for idle, which `cancel` covers) is refused.
+   *
+   * The office supervisor calls the same method on the owner's standing rule
+   * (company setting `supervisorAutoRepair`), with its own guard as
+   * `authorized` and a `note` that says so and why; the note becomes the
+   * closed record's sentence. It needs no executor and no requester: nothing
+   * here can issue, repeat or inspect a provider launch, so a move whose paid
+   * dispatch is on record is closed with that record kept as it is. */
+  async abandonHeldDockerMove(
+    id: string,
+    employeeId: string,
+    owner: string | undefined,
+    authorized: () => void = () => {},
+    note?: string
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    authorized();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner || record.employeeId !== employeeId)
+      throw new PlanMoveError('Unknown move', 404);
+    // Replaying a finished abandonment answers with the same closed record.
+    if (record.phase === 'failed' && record.dockerAbandonment?.reason === 'owner-abandoned') return this.view(record);
+    const store = this.port.dockerJournal;
+    if (!record.dockerReplacement || record.resourceIntent || !store?.abandonOwner)
+      throw new PlanMoveError(
+        'Only a held laptop plan move can be abandoned here; this move keeps its own recovery action',
+        409
+      );
+    if (this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError(
+        record.phase === 'waiting'
+          ? 'This move is still waiting for the employee to be idle; cancel it instead'
+          : 'This move is still working on a step; wait until it is held for recovery, then abandon it',
+        409
+      );
+    if (record.phase !== 'recovery-required')
+      throw new PlanMoveError(
+        ['completed', 'failed'].includes(record.phase)
+          ? 'This move has already finished; there is nothing to abandon'
+          : 'Only a move that is held for recovery can be abandoned',
+        409
+      );
+    this.intents.add(id);
+    try {
+      const current = () => {
+        authorized();
+        if (this.records.get(id) !== record || !this.intents.has(id) || this.aborts.has(id))
+          throw new PlanMoveError('The held move changed while it was being abandoned; refresh and retry', 409);
+      };
+      let saved: Readonly<PlanMoveRecord>;
+      try {
+        const disk = await store.record(id);
+        current();
+        if (
+          disk.id !== id ||
+          disk.owner !== owner ||
+          disk.employeeId !== employeeId ||
+          disk.requestDigest !== record.requestDigest ||
+          !disk.dockerReplacement
+        )
+          throw new PlanMoveError('The original move journal changed; refresh and retry', 409);
+        // An earlier attempt whose acknowledgement was lost is settled by the durable record.
+        saved =
+          disk.phase === 'failed' && disk.dockerAbandonment?.reason === 'owner-abandoned'
+            ? disk
+            : await store.abandonOwner(id, disk.dockerReplacement, Date.now(), current, note);
+      } catch (error) {
+        if (error instanceof PlanMoveError) throw error;
+        throw new PlanMoveError(
+          'The move journal did not confirm the abandonment, so the move is still held. Retry abandoning it.',
+          409
+        );
+      }
+      if (saved.phase !== 'failed' || saved.dockerAbandonment?.reason !== 'owner-abandoned')
+        throw new PlanMoveError('The move journal did not record the abandonment; the move is still held', 409);
+      record.phase = saved.phase;
+      record.error = saved.error;
+      record.dockerReplacement = saved.dockerReplacement;
+      record.dockerSettlementBudget = saved.dockerSettlementBudget;
+      record.dockerAbandonment = saved.dockerAbandonment;
+      this.releaseLock(record.employeeId);
+      this.intents.delete(id);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
+  }
+  /** Containers recorded by the owner-abandoned moves of one employee. DATA
+   * only: the rebuild still proves each one by its Engine labels. */
+  async ownerAbandonedContainers(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; containers: PlanMoveOwnerAbandonment['containers'] }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      row.phase === 'failed' &&
+      row.dockerAbandonment?.reason === 'owner-abandoned'
+        ? [{ moveId: row.id, containers: structuredClone(row.dockerAbandonment.containers) }]
+        : []
+    );
+  }
+
+  /** The handoffs that closed laptop moves of one owner never confirmed typing, oldest first. A move counts once
+   * it has begun to switch its employee to the new session: from then on the employee may be on a session that was
+   * never told anything. Whether the employee is on that session, and whether the office has typed the handoff
+   * since, is the caller's to find out (`PlanMoveOwedHandoffs`). DATA only. */
+  async owedHandoffs(owner: string | undefined): Promise<readonly PlanMoveOwedHandoff[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) => {
+      const state = row.dockerReplacement;
+      if (row.owner !== owner || row.phase !== 'failed' || !state?.companyPublication) return [];
+      if (state.handoff?.phase === 'submitted' || this.aborts.has(row.id) || this.intents.has(row.id)) return [];
+      return [
+        {
+          moveId: row.id,
+          employeeId: row.employeeId,
+          sessionId: state.seed.target.sessionId,
+          text: state.seed.handoff,
+          digest: dockerPlanMoveHandoffDigest(state.seed.handoff),
+          typed: state.handoff !== undefined,
+          closedAt: row.dockerAbandonment?.at ?? row.at,
+        },
+      ];
+    });
+  }
+
+  /** The candidate laptop that each abandoned Docker move of one employee had created, exactly as that move's
+   * journal kept its record. DATA only: this journal proves nothing about a container. A caller that wants to know
+   * whether such a laptop is empty reads the laptop itself. A move that never created a candidate names none. */
+  async abandonedCandidateRecords(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: DockerEmployeeContinuationRecord }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      row.phase === 'failed' &&
+      row.dockerAbandonment?.reason === 'owner-abandoned' &&
+      row.dockerReplacement?.work?.destination
+        ? [{ moveId: row.id, record: structuredClone(row.dockerReplacement.work) }]
+        : []
+    );
+  }
+
+  /** The office closes one held move of the retired runtime: a record with no laptop journal and no resource
+   * transaction. Under the laptop runtime such a record gates no laptop and owns no session; it only keeps its
+   * employee locked against every later plan move and viewer repair. The standing rule is to keep the employee
+   * where they work now: the record is closed as failed with its reason and the lock is released. Journal DATA
+   * only: no session is started, stopped, rebound or adopted, and no other record is changed.
+   *
+   * `authorized` is the caller's guard, checked again before the write. It must also hold that the employee works
+   * in a laptop of the laptop runtime: under the retired runtime a held move may still own a session that has to
+   * be inspected, and this method is not for that. A move that has already finished is answered with its record,
+   * so a repeat changes nothing. A resource transaction keeps its own recovery actor and is refused. */
+  async settleRetiredMove(
+    id: string,
+    employeeId: string,
+    owner: string | undefined,
+    authorized: () => void,
+    note: string
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    authorized();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner || record.employeeId !== employeeId)
+      throw new PlanMoveError('Unknown move', 404);
+    if (record.dockerReplacement)
+      throw new PlanMoveError('A laptop plan move is abandoned through its own journal', 409);
+    if (record.resourceIntent || record.resourcePhase || record.resourceOwnerScope !== undefined || record.purpose)
+      throw new PlanMoveError('Resource transactions require their own verified recovery actor', 409);
+    if (this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError('This move is still working on a step; wait until it is held for recovery', 409);
+    if (['completed', 'failed'].includes(record.phase)) return this.view(record);
+    if (record.phase !== 'recovery-required')
+      throw new PlanMoveError('Only a move that is held for recovery can be closed', 409);
+    this.intents.add(id);
+    const held = { phase: record.phase, error: record.error };
+    try {
+      authorized();
+      record.phase = 'failed';
+      record.error = note.slice(0, 1000);
+      try {
+        await this.save();
+      } catch {
+        // Whatever reached the disk, this process keeps the hold; a restart reads the durable record.
+        record.phase = held.phase;
+        if (held.error === undefined) delete record.error;
+        else record.error = held.error;
+        throw new PlanMoveError('The move journal did not confirm the closure, so the move is still held', 409);
+      }
+      this.releaseLock(employeeId);
+      this.intents.delete(id);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
+  }
+
+  /** The laptop record that each finished Docker move of one employee replaced, exactly as that move's seed kept
+   * it. DATA only: this journal proves nothing about a container. The laptop rebuild binds a record to the
+   * employee's own laptop history by its digest before it reads anything from it. A move that is still open, or
+   * whose completion is still being fenced, is not finished. */
+  async replacedSourceRecords(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: DockerEmployeeContinuationRecord }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      ['completed', 'failed'].includes(row.phase) &&
+      row.dockerReplacement &&
+      !this.aborts.has(row.id) &&
+      !this.intents.has(row.id)
+        ? [{ moveId: row.id, record: structuredClone(row.dockerReplacement.seed.source.record) }]
+        : []
+    );
   }
 
   async closeRestoredDockerMove(id: string, owner: string | undefined, executor: PlanMoveExecutor) {
@@ -1147,6 +1573,122 @@ export class PlanMoves {
       this.intents.delete(id);
     }
   }
+  /**
+   * Watch one flight of a laptop move (`PLAN_MOVE_STEP_LIMITS`). A step that passes no checkpoint for too long, or a
+   * phase that lasts too long, is first told to stop through the flight's own abort signal: a step that is waiting
+   * in a loop ends there and the runner holds the move in its usual way. A step that does not end within the grace
+   * is stuck in a wait that never returns, and the move is taken from it (`releaseStuckStep`).
+   */
+  private watchStep(
+    record: PlanMoveRecord,
+    abort: AbortController,
+    executor: PlanMoveExecutor
+  ): { progress(): void; released(): boolean; stop(): void } {
+    const limits = this.stepLimits;
+    let progressAt = performance.now(),
+      phase = record.phase,
+      phaseAt = progressAt,
+      toldAt: number | undefined,
+      released = false,
+      reason = '';
+    const look = () => {
+      const now = performance.now();
+      if (this.aborts.get(record.id) !== abort) return clearInterval(timer);
+      if (record.phase !== phase) [phase, phaseAt] = [record.phase, now];
+      if (toldAt === undefined) {
+        const stalled = now - progressAt >= limits.stallMs,
+          bound = limits.phaseMs[phase] ?? Math.max(...Object.values(limits.phaseMs));
+        if (!stalled && now - phaseAt < bound) return;
+        reason = stepTimedOutMessage(phase, stalled ? now - progressAt : undefined, now - phaseAt);
+        toldAt = now;
+        console.warn(`[plans] move ${record.id}: ${reason}`);
+        return abort.abort(new PlanMoveStepTimedOut(reason));
+      }
+      if (now - toldAt < limits.graceMs) return;
+      released = true;
+      clearInterval(timer);
+      void this.releaseStuckStep(record, abort, executor, reason);
+    };
+    const timer = setInterval(look, limits.checkMs);
+    timer.unref?.();
+    return {
+      progress: () => {
+        progressAt = performance.now();
+      },
+      released: () => released,
+      stop: () => clearInterval(timer),
+    };
+  }
+
+  /**
+   * Take a move from a step that is stuck in a wait which never returns, and leave it as an office restart would:
+   * held, with whatever its journal last recorded, and nothing repeated. The stuck step can do nothing more
+   * afterwards: every checkpoint it would pass refuses (`runDocker`), each effect and each journal write is behind
+   * one, and a continue takes the journal over under a new epoch before it issues anything. A provider launch whose
+   * intent is in the journal stays there, so a continue of such a move only reads and verifies and never launches
+   * again. The sentence the move is held with says that the step's outcome is not known.
+   *
+   * A move that had already completed keeps that: only the retirement of its old terminal is left unconfirmed.
+   */
+  private async releaseStuckStep(
+    record: PlanMoveRecord,
+    abort: AbortController,
+    executor: PlanMoveExecutor,
+    reason: string
+  ): Promise<void> {
+    const id = record.id;
+    if (this.aborts.get(id) !== abort) return;
+    // The move reads as working until the hold is written, so nothing continues or abandons it meanwhile.
+    this.intents.add(id);
+    this.aborts.delete(id);
+    try {
+      if (record.phase === 'completed') {
+        this.sourceRetirements.set(id, { state: 'unconfirmed', error: reason });
+        return;
+      }
+      record.phase = 'recovery-required';
+      record.error = reason;
+      // The journal may be what the step is stuck on. The write is given the same grace and no more; the hold in
+      // memory does not depend on it.
+      await Promise.race([
+        this.recordStuckStep(record, reason),
+        delay(this.stepLimits.graceMs, undefined, { ref: false }),
+      ]);
+      // The audit is one of the waits that can itself be stuck, so it is not waited for.
+      void Promise.resolve()
+        .then(() => executor.audit({ ...record }))
+        .catch(() => console.warn(`[plans] move ${id} could not post the audit of its stopped step`));
+    } finally {
+      this.intents.delete(id);
+      if (['completed', 'failed'].includes(record.phase)) this.releaseLock(record.employeeId);
+    }
+  }
+
+  /** Write the hold of a stuck step to the journal, or take over what the journal already settled. Best effort:
+   * when it cannot be written, this process holds the move in memory and a restart reads the journal as it is. */
+  private async recordStuckStep(record: PlanMoveRecord, reason: string): Promise<void> {
+    const store = this.port.dockerJournal,
+      id = record.id;
+    try {
+      const disk = await store!.record(id);
+      if (this.records.get(id) !== record || this.aborts.has(id) || !disk.dockerReplacement) return;
+      // The step had written its last word before it got stuck: that outcome stands.
+      const settled = ['completed', 'failed'].includes(disk.phase);
+      const saved = settled
+        ? disk
+        : await store!.phase(id, disk.dockerReplacement, { phase: 'recovery-required', error: reason }, () => {
+            if (this.records.get(id) !== record || this.aborts.has(id))
+              throw new PlanMoveError('The held move changed');
+          });
+      // A write that came back late must not reach into a continue that has started meanwhile.
+      if (this.records.get(id) !== record || this.aborts.has(id)) return;
+      Object.assign(record, structuredClone(saved));
+      if (saved.error === undefined) delete record.error;
+    } catch {
+      /* the hold stays in memory */
+    }
+  }
+
   private async runDocker(
     record: PlanMoveRecord,
     executor: PlanMoveExecutor,
@@ -1155,6 +1697,7 @@ export class PlanMoves {
     const abort = new AbortController();
     const completedBefore = record.phase === 'completed';
     this.aborts.set(record.id, abort);
+    const watch = this.watchStep(record, abort, executor);
     try {
       if (!this.port.dockerJournal) throw new PlanMoveError('The private Docker journal is unavailable', 503);
       const retirement = await runDockerPlanMove(
@@ -1163,18 +1706,23 @@ export class PlanMoves {
         this.port.dockerJournal,
         {
           signal: abort.signal,
+          released: () => watch.released(),
           current: () => {
             if (
+              watch.released() ||
               this.records.get(record.id) !== record ||
               (record.phase !== 'completed' && this.aborts.get(record.id) !== abort)
             )
               throw new PlanMoveError('The original Docker move flight changed');
+            watch.progress();
           },
         },
         mode
       );
-      if (retirement) this.sourceRetirements.set(record.id, retirement);
+      if (retirement && !watch.released()) this.sourceRetirements.set(record.id, retirement);
     } catch (error) {
+      // A step the move was taken from has no say about the record any more.
+      if (watch.released()) return;
       if (completedBefore && mode === 'reconcile')
         this.sourceRetirements.set(record.id, {
           state: 'unconfirmed',
@@ -1185,6 +1733,7 @@ export class PlanMoves {
         record.error = error instanceof Error ? error.message : 'Docker move unavailable';
       }
     } finally {
+      watch.stop();
       if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
       if (record.phase === 'completed' || record.phase === 'failed') this.releaseLock(record.employeeId);
     }

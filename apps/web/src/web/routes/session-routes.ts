@@ -57,6 +57,7 @@ import {
   isMuxMouseStripMode,
 } from '../../session.js';
 import type { PaneCaptureOptions } from '../../mux-interface.js';
+import { providerInputHeldBody } from '../../provider-hold-reconcile.js';
 import { SseEvent } from '../sse-events.js';
 import {LaunchReservation} from '../launch-reservation.js';
 import { webviewCapabilities } from '../../webview-capabilities.js';
@@ -2334,7 +2335,18 @@ export function registerSessionRoutes(
         reloadRequired: true,
         recoveryRequired: true,
       });
-    if (session.providerInputHeld !== false) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
+    // A getter over live state: read it again after the await below.
+    const providerInputHeld = () => session.providerInputHeld !== false;
+    if (providerInputHeld()) {
+      // The hold releases itself once the session's own terminal shows the running agent (provider-hold-reconcile.ts).
+      // Only THIS request is judged by the fresh reading: input refused earlier was never kept, so nothing is replayed.
+      const reconciled = await session.reconcileProviderHold();
+      if (ctx.sessions.get(id) !== session)
+        return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, 'The session changed while its terminal was being checked; nothing was typed'));
+      if (providerInputHeld()) return providerInputHeldBody(id, reconciled);
+      console.log(`[provider-hold] session ${id.slice(0, 8)} terminal check on input: ${reconciled.outcome}; input admitted, launch fence unchanged`);
+      ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
+    }
     if (session.terminalInputHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message), recoveryRequired: true};
     const agentCaller =
       typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';

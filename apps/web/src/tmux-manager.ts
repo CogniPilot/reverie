@@ -3,6 +3,7 @@ import { dockerPlanDestinationEnvironment, dockerPlanGeneration } from './docker
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX, dockerProviderSocketLabel, dockerProviderRuntimeArguments } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
+import { BOXED_MODEL_SOCKET, takesBoxedModelEndpoint } from './docker-employee-local-model.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { DockerViewerPane, type DockerViewerCommand } from './docker-viewer-pane.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
@@ -1603,6 +1604,31 @@ function replacementExecutionEnvironment(opts: DockerLaunchOptions) {
     env.REVERIE_HOOK_GENERATION = opts.execEnv.REVERIE_HOOK_GENERATION;
   return { env, names: opts.execEnvNames.filter(key => names.has(key) || key === 'REVERIE_HOOK_GENERATION'), identityFile: paths.identityFile };
 }
+/** A provider that exits non-zero within this long of its launch keeps its pane. */
+export const DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS = 120;
+/** How long that dead pane, with the provider's last screen, is kept in the laptop. */
+export const DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS = 900;
+/**
+ * tmux commands, run before the provider's session exists, that keep evidence
+ * of a launch that dies at once. Without them the laptop's tmux server exits
+ * with the provider and nothing it printed survives.
+ *
+ * Only a non-zero exit inside the launch window is kept, as a dead pane holding
+ * the last screen and the exit status, and only for a bounded time; the session
+ * is then closed exactly as it always was. A clean exit, and any exit after the
+ * window, closes at once as before. The options are global because they must
+ * be in force before the pane can die; this server hosts this one provider.
+ */
+export function dockerProviderExitEvidenceCommands(target: string): string[][] {
+  if (!/^reverie-dkr-[0-9a-f-]{36}$/.test(target)) throw Error('Fixed boxed provider session required');
+  const close = 'kill-session -t ' + target;
+  const early = '#{e|<:#{e|-:#{pane_dead_time},#{session_created}},' + DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS + '}';
+  const keep = "run-shell -d " + DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS + " -C '" + close + "'";
+  return [
+    ['set-option', '-g', 'remain-on-exit', 'failed'],
+    ['set-hook', '-g', 'pane-died', 'if-shell -F "' + early + '" "' + keep + '" "' + close + '"'],
+  ];
+}
 /** First provider is private one-attempt authority; normal restores only attach. */
 function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string {
  const {docker,sessionId}=opts,placement=docker.continuation!;
@@ -1619,7 +1645,10 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  const env={...selectedEnvironment.env,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:selectedEnvironment.identityFile,REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',key+'='+value]);
- flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',key]));
+ // Office REVERIE_* state never enters a laptop, except the names this CLI's
+ // own registry entry declares as its provider inputs.
+ const declared=getCli(opts.mode)?.env.dockerExecEnvNames??[];
+ flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION'||declared.includes(key))).flatMap(key=>['--env',key]));
  let inner:string;
  let innerArgs:string[];
  if(opts.continuationLaunch){
@@ -1627,8 +1656,15 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
    const workspace = DockerEmployeeProviderLaunch.prototype.workspaceForCommand.call(opts.continuationLaunch, sessionId, docker);
    const nativeEnv = DOCKER_PROVIDER_VIEW_ENV.filter((_, i) => i % 2 === 1).map(value => { const n=value.indexOf('='); return value.slice(0,n)+'='+shellescape(value.slice(n+1)); }).join(' ');
    const cwdCheck = workspace ? nativeEnv + ' ' + ['/opt/reverie-worker-client/bin/node', '--input-type=commonjs', '-e', DOCKER_CODEX_WORKSPACE_PROGRAM, '--', 'verify', workspace.realPath, workspace.dev, workspace.ino].map(shellescape).join(' ') + ' && ' : '';
+   // The legacy worker runtime served the mounted model socket on loopback;
+   // a boxed laptop starts the same fixed image relay for a CLI whose registry
+   // entry takes its model endpoint from the launch environment.
+   const modelRelay = takesBoxedModelEndpoint(getCli(opts.mode))
+     ? '{ [ -S ' + BOXED_MODEL_SOCKET + ' ] && REVERIE_MODEL_SOCKET=' + BOXED_MODEL_SOCKET + ' /bin/reverie-model-relay >/dev/null 2>&1 & } ; '
+     : '';
    const source = tmuxSourceCommands([
-    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + opts.canonicalCommand],
+    ...dockerProviderExitEvidenceCommands(target),
+    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + modelRelay + opts.canonicalCommand],
     ['setenv', '-t', target, 'REVERIE_SESSION_ID', sessionId],
     ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],
     ['set', '-t', target, 'status', 'off'],
@@ -4262,8 +4298,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const attempt = new TerminalInputAttempt();
     const session = this.sessions.get(sessionId);
     const originalName = session?.muxName, originalPid = session?.pid;
-    const admitted = () => attempt.continuing() && this.sessions.get(sessionId) === session
-      && session?.muxName === originalName && session?.pid === originalPid && (!options.admitted || options.admitted());
+    const sameSubject = () => attempt.continuing() && this.sessions.get(sessionId) === session
+      && session?.muxName === originalName && session?.pid === originalPid;
+    const admitted = () => sameSubject() && (!options.admitted || options.admitted());
+    // Read once the keys are out. A write may name what still has to hold then (MuxInputOptions.settled).
+    const settled = () => options.settled ? sameSubject() && options.settled() : admitted();
     if (!admitted()) return false;
     const dispatch = async (command: string, execOptions: {timeout: number}, terminalEffect = true) => {
       if (!admitted()) throw attempt.fail(new Error('Input provider authority changed')) ?? new Error('Input provider authority changed');
@@ -4334,7 +4373,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return attempt.finish(outcome !== 'not-written', admitted());
+        return attempt.finish(outcome !== 'not-written', outcome === 'not-written' ? admitted() : settled());
       }
 
       if (textPart && hasCarriageReturn) {
@@ -4377,7 +4416,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         });
       }
 
-      return attempt.finish(true, admitted());
+      return attempt.finish(true, settled());
     } catch (err) {
       const unconfirmed = attempt.fail(err);
       if (unconfirmed) throw unconfirmed;

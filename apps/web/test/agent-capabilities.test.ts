@@ -86,6 +86,19 @@ describe('current agent capability command', () => {
     expect(f.output.join('\n')).toContain('not provider-native /goal');
     expect(f.calls.every(call => call.method === 'GET' && call.body === undefined)).toBe(true);
   });
+  it('reports the model grant, its revocation and an older server that does not report it', async () => {
+    const f = fixture();
+    f.deps.json = false;
+    const current = snapshot();
+    for (const [value, word] of [[true, 'allowed'], [false, 'denied'], [undefined, 'unknown (server does not report this grant)']] as const) {
+      if (value === undefined) delete current.company.manageModels;
+      else current.company.manageModels = value;
+      f.set(current);
+      f.output.length = 0;
+      expect(await agentCapabilities(f.deps, refs)).toBe(0);
+      expect(f.output.join('\n')).toContain(`Set employee models: ${word}; read or set with reverie agent model`);
+    }
+  });
   it('uses the authenticated server snapshot, performs only GET, and sees a revoked grant on the next call', async () => {
     const f = fixture();
     expect(await agentCapabilities(f.deps, refs)).toBe(0);

@@ -170,6 +170,11 @@ HTMLCanvasElement.prototype.getContext = function(type, ...args) {
 // Omitted no-op events (registered by server but unused in UI):
 //   respawn:stepSent, respawn:aiCheckStarted, respawn:aiCheckCompleted,
 //   respawn:aiCheckFailed, respawn:aiCheckCooldown
+// How long an SSE stream must stay open before the reconnect backoff starts over
+// (connectSSE). Longer than a stream that is cut right after its init frame,
+// shorter than any real outage the fast first retry is meant for.
+const SSE_STABLE_OPEN_MS = 10000;
+
 const _SSE_HANDLER_MAP = [
   // Core
   [SSE_EVENTS.INIT, '_onInit'],
@@ -2166,6 +2171,8 @@ class ReverieApp {
 
     // Clear any pending reconnect timeout to prevent duplicate connections
     this._clearTimer('sseReconnectTimeout');
+    // The stream this timer was vouching for is being replaced.
+    this._clearTimer('_sseStableTimer');
 
     // Same discipline for the staleness watchdog: connectSSE() runs on every
     // reconnect and is the only teardown path this page-lifetime interval has,
@@ -2235,7 +2242,18 @@ class ReverieApp {
 
     this.eventSource.onopen = () => {
       if (this.eventSource !== source) return;
-      this.reconnectAttempts = 0;
+      // The backoff restarts only once this stream has STAYED open. Resetting it
+      // here, at open, let a stream that opens and is cut again at once retry
+      // every 200ms for as long as that lasted, and every retry re-runs
+      // handleInit (approvals, tab layout, teams, a terminal capture). Measured
+      // on a live office: one tab reconnecting once a second for hours, about 40
+      // requests a second, most cancelled by the next reconnect, which kept the
+      // server's main thread busy for every other client.
+      this._clearTimer('_sseStableTimer');
+      this._sseStableTimer = setTimeout(() => {
+        this._sseStableTimer = null;
+        if (this.eventSource === source) this.reconnectAttempts = 0;
+      }, SSE_STABLE_OPEN_MS);
       // Start the liveness clock here, not at the first frame: the watchdog
       // only ever fires while the status is 'connected', and this is the
       // moment that becomes true.
@@ -2244,6 +2262,7 @@ class ReverieApp {
     };
     this.eventSource.onerror = () => {
       if (this.eventSource !== source) return;
+      this._clearTimer('_sseStableTimer');
       this.reconnectAttempts++;
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         this.setConnectionStatus('disconnected');
@@ -2534,6 +2553,7 @@ class ReverieApp {
         providerDispatchHeld: previous.providerDispatchHeld,
         providerInputHeld: previous.providerInputHeld,
         providerDispatchHoldKind: previous.providerDispatchHoldKind,
+        providerPresence: previous.providerPresence,
       };
     }
     this._observeInputRecovery(previous);
@@ -4093,14 +4113,16 @@ class ReverieApp {
    */
   _providerInputRecovery(session) {
     const dispatch = session?.providerDispatchHeld, input = session?.providerInputHeld, kind = session?.providerDispatchHoldKind;
+    // The server admits input to an intrinsic hold only on a named pane observation (`providerPresence`).
+    const present = session?.providerPresence === 'screen' || session?.providerPresence === 'owner';
     const valid = typeof dispatch === 'boolean' && typeof input === 'boolean' &&
-      (dispatch ? kind === 'loaded-intent' || (kind === 'intrinsic' && input) : kind === null && !input);
+      (dispatch ? kind === 'loaded-intent' || (kind === 'intrinsic' && (input || present)) : kind === null && !input);
     const loaded = valid && kind === 'loaded-intent';
     const newFields = input !== undefined || kind !== undefined;
     return {
       valid, loaded,
       held: valid ? input : dispatch === true || newFields || (dispatch !== undefined && typeof dispatch !== 'boolean'),
-      sticky: dispatch === true && !loaded,
+      sticky: dispatch === true && !loaded && !(valid && input === false),
     };
   }
 
@@ -4214,6 +4236,7 @@ class ReverieApp {
           providerDispatchHeld: session.providerDispatchHeld,
           providerInputHeld: session.providerInputHeld,
           providerDispatchHoldKind: session.providerDispatchHoldKind,
+          providerPresence: session.providerPresence,
         });
       }
       this._renderInputRecoveryBanner();

@@ -12,8 +12,78 @@ import { writeCompanyStateFile } from './company-store.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { canSettleRestoredPlanSource } from './plan-move-docker.js';
 
+/** Explicit terminal closure of a native move whose recorded containers the
+ * Engine positively reported absent. History only; never a retry grant. */
+export const DockerPlanMoveAbsentAbandonment = z
+  .object({
+    version: z.literal(1),
+    reason: z.literal('recorded-containers-absent'),
+    operationId: z
+      .string()
+      .uuid()
+      .regex(/^[0-9a-f-]+$/),
+    at: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+const containerId = z.string().regex(/^[a-f0-9]{64}$/);
+/** Explicit terminal closure by the signed-in owner of a move held for
+ * recovery. The containers its own journal named are kept as DATA for the
+ * owner's laptop rebuild, which must still prove each one belongs to the
+ * employee before it discards it. Never a retry, stop or removal grant. */
+export const DockerPlanMoveOwnerAbandonment = z
+  .object({
+    version: z.literal(1),
+    reason: z.literal('owner-abandoned'),
+    at: z.number().int().nonnegative().safe(),
+    containers: z
+      .object({
+        /** The laptop the move started from. */
+        source: containerId,
+        /** The candidate laptop the move created for the new plan, if any. */
+        target: containerId.optional(),
+        /** The read-only holder of the stopped source, if one was created. */
+        sourceHolder: containerId.optional(),
+        /** Per-operation helpers of the candidate; never the shared pool's. */
+        helpers: z
+          .array(
+            z
+              .object({ role: z.enum(['storage-holder', 'leaf-helper', 'identity-helper']), containerId })
+              .strict()
+          )
+          .max(8),
+      })
+      .strict(),
+  })
+  .strict();
+export type DockerPlanMoveOwnerAbandonment = z.infer<typeof DockerPlanMoveOwnerAbandonment>;
+export const DockerPlanMoveAbandonment = z.discriminatedUnion('reason', [
+  DockerPlanMoveAbsentAbandonment,
+  DockerPlanMoveOwnerAbandonment,
+]);
+export type DockerPlanMoveAbandonment = z.infer<typeof DockerPlanMoveAbandonment>;
+/** Containers one move's private journal names as its own. Shared pool tasks
+ * (the anchor and its helper) belong to every laptop and are left out. */
+export function dockerPlanMoveContainers(
+  state: Readonly<DockerPlanMoveJournalState>
+): DockerPlanMoveOwnerAbandonment['containers'] {
+  const reader = state.sourceReader,
+    helpers = (state.work?.tasks ?? []).flatMap((task) => {
+      // An issued CREATE that recorded no container names nothing to discard.
+      const id = 'containerId' in task ? task.containerId : undefined;
+      return id && (task.role === 'storage-holder' || task.role === 'leaf-helper' || task.role === 'identity-helper')
+        ? [{ role: task.role, containerId: id }]
+        : [];
+    });
+  return {
+    source: state.seed.source.binding.containerId,
+    ...(state.work?.destination ? { target: state.work.destination.containerId } : {}),
+    ...(reader && 'containerId' in reader && reader.containerId ? { sourceHolder: reader.containerId } : {}),
+    helpers,
+  };
+}
 const RecordSchema = z
   .object({
+    dockerAbandonment: DockerPlanMoveAbandonment.optional(),
     dockerReplacement: DockerPlanMoveJournalState.optional(),
     dockerSettlementBudget: z
       .object({
@@ -117,7 +187,10 @@ const RecordSchema = z
     if (record.restoredSource && (!docker || record.phase !== 'failed' ||
         !canSettleRestoredPlanSource(docker, record.restoredSource)))
       context.addIssue({ code: 'custom', message: 'Restored source settlement requires an untouched target' });
-    if (docker && record.phase === 'failed' && !record.restoredSource && (docker.sourceStop || docker.work || docker.paidDispatch))
+    if (record.dockerAbandonment && (!docker || record.phase !== 'failed' || record.restoredSource))
+      context.addIssue({ code: 'custom', message: 'Abandonment closes only its original failed Docker journal' });
+    if (docker && record.phase === 'failed' && !record.restoredSource && !record.dockerAbandonment &&
+        (docker.sourceStop || docker.work || docker.paidDispatch))
       context.addIssue({ code: 'custom', message: 'Issued Docker plan work retains recovery' });
     if (
       docker &&
@@ -787,6 +860,56 @@ export class PlanMoveStore {
     });
   }
 
+  /** Terminal `failed` with an explicit abandonment record. The caller holds
+   * fresh positive Engine proof that every recorded container is absent. The
+   * native journal is retained verbatim and becomes immutable history. */
+  abandonAbsentDockerMove(
+    id: string, before: Readonly<DockerPlanMoveJournalState>,
+    abandonment: DockerPlanMoveAbandonment, current: () => void
+  ): Promise<Readonly<PlanMoveRecord>> {
+    const captured = DockerPlanMoveJournalState.parse(before),
+      checked = DockerPlanMoveAbsentAbandonment.parse(abandonment);
+    return this.dockerTransaction(id, captured, current, (record) => {
+      if (record.restoredSource) throw Error('A restored source move has its own settlement');
+      record.phase = 'failed';
+      record.error = 'Abandoned: the Engine reported every recorded container absent';
+      record.dockerAbandonment = { ...checked };
+    });
+  }
+
+  /** Terminal `failed` because the signed-in owner abandoned a held move. The
+   * containers recorded are exactly the ones this same journal cursor names;
+   * a caller cannot add one. The native journal is retained verbatim and
+   * becomes immutable history, so no late actor can dispatch from it. Nothing
+   * is started, stopped or removed here.
+   *
+   * `note` is given when the office closed the move on the owner's standing
+   * rule instead of the owner in person: it says so and why, in the record's
+   * error text. It is description only and changes nothing else. */
+  abandonOwnerDockerMove(
+    id: string,
+    before: Readonly<DockerPlanMoveJournalState>,
+    at: number,
+    current: () => void,
+    note?: string
+  ): Promise<Readonly<PlanMoveRecord>> {
+    const captured = DockerPlanMoveJournalState.parse(before),
+      checked = DockerPlanMoveOwnerAbandonment.parse({
+        version: 1,
+        reason: 'owner-abandoned',
+        at,
+        containers: dockerPlanMoveContainers(captured),
+      }),
+      said = z.string().min(1).max(1000).optional().parse(note);
+    return this.dockerTransaction(id, captured, current, (record) => {
+      if (record.restoredSource) throw Error('A restored source move has its own settlement');
+      if (record.resourceIntent) throw Error('A resource transaction keeps its own recovery');
+      record.phase = 'failed';
+      record.error = said ?? 'Abandoned by the owner. Rebuild the laptop to discard what this move left behind.';
+      record.dockerAbandonment = structuredClone(checked);
+    });
+  }
+
   dockerPublish(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
@@ -851,7 +974,11 @@ export class PlanMoveStore {
     let maximum = this.settlementBounds.get(key);
     if (maximum === undefined) {
       const budget = { version: 1 as const, purpose: 'docker-plan-settlement-budget-v1' as const, maxRecordBytes: 1 };
-      const { restoredSource: _terminalRestoredSource, ...openRecord } = record;
+      const {
+        restoredSource: _terminalRestoredSource,
+        dockerAbandonment: _terminalAbandonment,
+        ...openRecord
+      } = record;
       const witness = dockerPlanMaximumRecord({ ...openRecord, dockerSettlementBudget: budget });
       for (let pass = 0; pass < 8; pass++) {
         const value = Buffer.byteLength(JSON.stringify(RecordSchema.parse(witness)));

@@ -248,21 +248,27 @@
           : `${entries.length} ${entries.length === 1 ? 'item' : 'items'}`
     );
   }
-  async function load(target, push = false, selection = null) {
+  /** Read a folder. `quiet` refreshes the one on screen: its rows stay until the new listing replaces them. */
+  async function load(target, push = false, selection = null, quiet = false) {
     if (push) locationEpoch++;
     const turn = ++epoch;
-    clearPreview();
     loading = true;
-    uploadAllowed = false;
-    updateUpload();
-    $('up').disabled = true;
-    $('search').disabled = true;
-    status('Loading workspace…');
-    $('files').replaceChildren();
-    $('empty-state').hidden = false;
-    $('empty-state').replaceChildren(node('p', 'Loading files…'));
+    if (!quiet) {
+      clearPreview();
+      uploadAllowed = false;
+      updateUpload();
+      $('up').disabled = true;
+      $('search').disabled = true;
+      status('Loading workspace…');
+      $('files').replaceChildren();
+      $('empty-state').hidden = false;
+      $('empty-state').replaceChildren(node('p', 'Loading files…'));
+    }
     try {
       const res = await fetch(url('api/workspace/files', { path: target }), { cache: 'no-store' });
+      // The console keeps this page loaded; a lost owner sign-in tells it to drop the page.
+      if ((res.status === 401 || res.status === 403) && parent !== window)
+        parent.postMessage({ type: 'workspace-auth-lost' }, location.origin);
       if (!res.ok) throw new Error(await responseError(res));
       const { data } = await res.json();
       if (turn !== epoch) return;
@@ -303,6 +309,9 @@
       if (turn === epoch) {
         entries = [];
         uploadAllowed = false;
+        clearPreview();
+        $('files').replaceChildren();
+        $('empty-state').hidden = false;
         status(error.message, true);
         $('empty-state').replaceChildren(
           node('p', 'Could not load this folder'),
@@ -553,6 +562,18 @@
     await load(query.get('path') || '', false, selected ? { path: selected, binding: query.get('binding') } : null);
   }
   addEventListener('popstate', loadLocation);
+  // The console keeps this page loaded while hidden and says when it is shown again: read the open folder behind its rows.
+  addEventListener('message', (event) => {
+    if (
+      event.source !== parent ||
+      event.origin !== location.origin ||
+      event.data?.type !== 'workspace-visibility' ||
+      event.data.active !== true ||
+      loading
+    )
+      return;
+    void load(path, false, null, true);
+  });
   addEventListener('pagehide', () => {
     if (imageUrl) URL.revokeObjectURL(imageUrl);
   });

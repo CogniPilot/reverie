@@ -48,14 +48,21 @@ export function boardOwnerIds(
   }));
 }
 
+/** Add `issue` to the list under `key`, in place (a copy per card made a large board quadratic). */
+function append(groups: Map<string, Issue[]>, key: string, issue: Issue): void {
+  const list = groups.get(key);
+  if (list) list.push(issue);
+  else groups.set(key, [issue]);
+}
+
 /** Pace per owner and per milestone (milestones also get done/total over their non-wontdo issues). */
 export function boardPace(state: Pick<BoardState, 'issues' | 'milestones'>, now: number, ownerIds: Readonly<Record<string, string>> = {}) {
   const byOwner = new Map<string, Issue[]>();
   const byMilestone = new Map<string, Issue[]>();
   for (const issue of state.issues) {
     const owner = Object.hasOwn(ownerIds, issue.id) ? ownerIds[issue.id] : issue.owner ?? issue.ownerLabel;
-    if (owner) byOwner.set(owner, [...(byOwner.get(owner) ?? []), issue]);
-    if (issue.milestoneId) byMilestone.set(issue.milestoneId, [...(byMilestone.get(issue.milestoneId) ?? []), issue]);
+    if (owner) append(byOwner, owner, issue);
+    if (issue.milestoneId) append(byMilestone, issue.milestoneId, issue);
   }
   const owners: Record<string, Pace> = {};
   for (const [owner, list] of byOwner) owners[owner] = paceOf(list, now);

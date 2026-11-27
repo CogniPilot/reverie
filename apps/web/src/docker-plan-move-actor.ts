@@ -23,6 +23,7 @@ import { submitRecoveryPrompt, recoveryComposerReady } from './company-recovery-
 import { composerIsEmpty } from './session-submit-verifier.js';
 import { getCli } from './config/cli-registry/registry.js';
 import type { DockerResourceRevisionStore } from './docker-resource-revisions.js';
+import type { DockerResourceRepairJournal } from './docker-resource-repair-journal.js';
 import type { RuntimeRecipe } from './expert-runtime-recipe.js';
 import { Session } from './session.js';
 import type { DockerPlanSourceContext } from './docker-plan-source-data.js';
@@ -45,6 +46,7 @@ import {
   PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
+  type PlanMoveWaitingAt,
   type PlanMoveInput,
   type PlanMoveRecord,
   type PlanMoveSnapshot,
@@ -75,6 +77,7 @@ import type { DockerRuntimeConfiguration } from './docker-employee-runtime.js';
 
 import type { SessionState } from './types.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { dockerReplacementKeepsLimits } from './docker-cpu-reservation-data.js';
 
 type Context = SessionPort &
   ConfigPort &
@@ -97,6 +100,8 @@ export interface DockerPlanMoveComposition {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly current: () => void;
   readonly revisions: DockerResourceRevisionStore;
+  /** The office's in-place limit repairs: their pool writers are part of every closed-writer census. */
+  readonly repairs?: DockerResourceRepairJournal;
   readonly renewPublishedView?: (row: DockerEmployeeContinuationRecord, session: Session, current: () => void) => Promise<void>;
   readonly requireReconciledSourcePool?: (row: DockerEmployeeContinuationRecord, current: () => void) => Promise<void>;
   readonly retain: (actor: DockerPlanMoveActor) => void;
@@ -505,8 +510,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     if (!nativeThreadProfile(state.seed.target.provider === 'anthropic' ? 'claude' : 'codex'))
       throw new PlanMoveError('The selected target protocol changed', 409);
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
-    if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
-      throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
+    if (!dockerReplacementKeepsLimits(policy, state.seed.source.record.policy))
+      throw new PlanMoveError(
+        'Plan moves cannot change shared pool or resource limits other than memory and CPU set',
+        409
+      );
     await this.#requireSourcePool(state.seed.source.record, () => journal.current());
     const target = await this.#snapshot(record, journal);
     try {
@@ -732,6 +740,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           helperImageId: this.#d.configuration.helperImageId,
           memoryHighHelperImageId: this.#d.configuration.memoryHighHelperImageId,
           poolRestoreHelperImageId: this.#d.configuration.poolRestoreHelperImageId,
+          leafWriterHelperImageId: this.#d.configuration.leafWriterHelperImageId,
           target: {
             imageId: state.seed.target.workerImage.imageId,
             clientManifestDigest: state.seed.target.workerImage.clientManifestDigest,
@@ -741,6 +750,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           canonical: this.#d.store,
           moves: this.#d.moves,
           revisions: this.#d.revisions,
+          repairs: this.#d.repairs,
           providerMode: state.seed.target.provider === 'anthropic' ? 'claude' : 'codex',
         },
         journal
@@ -959,8 +969,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         .length(1)
         .parse(JSON.parse(await this.#command.run(['container', 'inspect', seed.source.binding.containerId])))[0]!;
     journal.current();
-    if (!same(resourcePolicy, { ...seed.source.record.policy, memoryHighBytes: resourcePolicy.memoryHighBytes }))
-      throw new PlanMoveError('Plan moves cannot change non-memory resource limits', 409);
+    if (!dockerReplacementKeepsLimits(resourcePolicy, seed.source.record.policy))
+      throw new PlanMoveError(
+        'Plan moves cannot change shared pool or resource limits other than memory and CPU set',
+        409
+      );
     const ephemeral = ephemeralRetainedProjection(raw, seed.source.record.destination!);
     const networkIds = await this.#d.engine.planReplacementNetworkIds(seed.source.record, () => journal.current());
     journal.current();
@@ -1281,6 +1294,14 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       templateDigest: state.seed.target.templateDigest,
     });
   }
+  /** Description only, for a target read short of its composer: the provider start-up screen it shows, if the office
+   * can name one. One read-only pane capture; it types nothing and is no readiness or authority evidence. */
+  #waitingAt(record: Readonly<PlanMoveRecord>, session: Session): PlanMoveWaitingAt | undefined {
+    const screen = session.startupScreen();
+    if (!screen) return undefined;
+    const name = this.#d.company.store.view().employees.find((e) => e.id === record.employeeId)?.name;
+    return { who: name ? `${name}'s new session` : 'The new session', ...screen };
+  }
   #composerReady(session: Session, mark: string): boolean {
     if (recoveryComposerReady(session, mark)) return true;
     if (session.mode !== 'codex' || session.isWorking || session.paneDialog || !session.muxName) return false;
@@ -1425,7 +1446,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const mark = getCli(session.mode)?.capabilities.composerReadyMark;
     if (!mark) throw new PlanMoveError('The target provider has no protected composer', 409);
     if (!state.handoff && (!this.#composerReady(session, mark) || session.pid === null))
-      throw new PlanMoveComposerNotReady();
+      throw new PlanMoveComposerNotReady(this.#waitingAt(record, session));
     await this.#accountProbe(row, () => {
       journal.current();
       current();
@@ -1451,7 +1472,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     }
     await this.#canonicalAccount(journal, current);
     view.require(session.id, session.docker);
-    if (session.providerInputHeld && session.providerDispatchHoldKind === 'loaded-intent') {
+    // The Engine view itself, as before: a pane observation that admits input never stands in for its renewal here.
+    if (session.providerDispatchHoldKind === 'loaded-intent' && !session.dockerContinuationViewCurrent) {
       if (!this.#d.renewPublishedView) throw new PlanMoveError('The original published target reader cannot be renewed', 409);
       await this.#d.renewPublishedView(publishedWork(journal.read().work), session, () => {
         journal.current(); current();

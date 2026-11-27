@@ -373,20 +373,25 @@ it('uses one canonical snapshot per N-employee company render and one post-query
     research: {} as never,
   });
   const snapshots = vi.spyOn(store, 'snapshot');
+  // The census reads the shared view and copies only the employee rows.
+  const censusReads = vi.spyOn(store, 'view');
   try {
     await health.refresh();
     // Keep the pre-query binding fence and ONE fresh census after the await.
     expect(census).toHaveBeenCalledTimes(2);
-    expect(snapshots).toHaveBeenCalledTimes(2);
+    expect(censusReads).toHaveBeenCalledTimes(2);
+    expect(snapshots).not.toHaveBeenCalled();
     census.mockClear();
-    snapshots.mockClear();
+    censusReads.mockClear();
     for (let i = 0; i < 4; i++) {
       const view = service.view();
       expect(view.employees).toHaveLength(12);
       expect(view.employees.every((e) => e.providerHealth?.state === 'healthy')).toBe(true);
     }
     expect(project).toHaveBeenCalledTimes(48);
-    expect(snapshots).toHaveBeenCalledTimes(4);
+    // One shared read per render; the render copies only the rows it returns.
+    expect(censusReads).toHaveBeenCalledTimes(4);
+    expect(snapshots).not.toHaveBeenCalled();
     expect(census).not.toHaveBeenCalled();
 
     // Ambiguity across owners must still suppress the direct-row projection.
@@ -400,13 +405,14 @@ it('uses one canonical snapshot per N-employee company render and one post-query
         })
       );
     });
-    snapshots.mockClear();
+    censusReads.mockClear();
     census.mockClear();
     project.mockClear();
     expect(service.view().employees.find((e) => e.id === employees[0].id)?.providerHealth).toBeUndefined();
     expect(service.view('another-owner').employees[0].providerHealth).toBeUndefined();
     expect(project).toHaveBeenCalledTimes(11);
-    expect(snapshots).toHaveBeenCalledTimes(2);
+    expect(censusReads).toHaveBeenCalledTimes(2);
+    expect(snapshots).not.toHaveBeenCalled();
     expect(census).not.toHaveBeenCalled();
   } finally {
     health.close();

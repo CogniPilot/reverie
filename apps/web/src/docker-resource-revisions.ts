@@ -17,7 +17,7 @@ import { dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
-import { DockerContinuationTask, allowedDockerTaskTransition } from './docker-continuation-task.js';
+import { DockerSingleAttemptTask, allowedDockerTaskTransition } from './docker-continuation-task.js';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type {
   DockerEmployeeContinuationRecord,
@@ -174,30 +174,30 @@ function isPublicationRefusal(error: unknown) {
 export const DockerResourceAttempt = z.discriminatedUnion('state', [
   base.extend({
     state: z.literal('original-closed'),
-    task: DockerContinuationTask.refine((t) => t.role === 'leaf-helper'),
+    task: DockerSingleAttemptTask.refine((t) => t.role === 'leaf-helper'),
     originalClosure: DockerOriginalWriterReceipt,
   }),
   base.extend({
     state: z.literal('original-retired'),
-    task: DockerContinuationTask.refine(
+    task: DockerSingleAttemptTask.refine(
       (t) => t.role === 'leaf-helper' && ['create-issued', 'created'].includes(t.phase)
     ),
     originalRetirement: DockerOriginalPrestartReceipt,
   }),
   base.extend({
     state: z.literal('helper'),
-    task: DockerContinuationTask.refine((task) => task.role === 'leaf-helper'),
+    task: DockerSingleAttemptTask.refine((task) => task.role === 'leaf-helper'),
   }),
   base.extend({
     state: z.literal('unstarted-retired'),
-    task: DockerContinuationTask.refine(
+    task: DockerSingleAttemptTask.refine(
       (task) => task.role === 'leaf-helper' && ['create-issued', 'created'].includes(task.phase)
     ),
     retirement: DockerResourceRetiredIntent,
   }),
   base.extend({
     state: z.literal('observed-after-retirement'),
-    task: DockerContinuationTask.refine(
+    task: DockerSingleAttemptTask.refine(
       (task) => task.role === 'leaf-helper' && ['create-issued', 'created'].includes(task.phase)
     ),
     retirement: DockerResourceRetiredIntent,
@@ -209,18 +209,18 @@ export const DockerResourceAttempt = z.discriminatedUnion('state', [
     state: z.literal('applied'),
     identity: DockerResourceLeafIdentity,
     observationDigest: digest,
-    task: DockerContinuationTask.refine((task) => task.phase === 'completed' && task.role === 'leaf-helper'),
+    task: DockerSingleAttemptTask.refine((task) => task.phase === 'completed' && task.role === 'leaf-helper'),
   }),
   base.extend({
     state: z.literal('closed-writer'),
-    task: DockerContinuationTask.refine(
+    task: DockerSingleAttemptTask.refine(
       (task) => task.role === 'leaf-helper' && ['start-issued', 'running', 'completed'].includes(task.phase)
     ),
     closure: DockerResourceClosedWriter,
   }),
   base.extend({
     state: z.literal('observed-after-closure'),
-    task: DockerContinuationTask.refine(
+    task: DockerSingleAttemptTask.refine(
       (task) => task.role === 'leaf-helper' && ['start-issued', 'running', 'completed'].includes(task.phase)
     ),
     closure: DockerResourceClosedWriter,
@@ -291,7 +291,7 @@ export function dockerResourceCapacityWitnesses(): DockerResourceAttempt[] {
     { ...taskBase, phase: 'start-issued', containerId: hex },
     { ...taskBase, phase: 'running', containerId: hex, initPid: Number.MAX_SAFE_INTEGER, initStartTicks: decimalMax },
     { ...taskBase, phase: 'completed', containerId: hex, resultDigest: hex },
-  ].map((task) => DockerContinuationTask.parse(task));
+  ].map((task) => DockerSingleAttemptTask.parse(task));
   const make = (extra: Record<string, unknown>) => DockerResourceAttempt.parse({ ...key, ...extra });
   const result = tasks.map((task) => make({ state: 'helper', task }));
   result.push(make({ state: 'observed', identity, observationDigest: hex }));

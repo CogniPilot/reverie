@@ -23,7 +23,7 @@ import { EmployeeRecoveryService, registerEmployeeRecoveryRoutes, isEmployeeReco
 import { agentPlanJournalRecovery } from '../agent-plan-journal-recovery.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall, type CompanyEmployee } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall, type CompanyEmployee, modelLimitFallback } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -48,6 +48,12 @@ import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
 import {EmployeeGpuClient, registerEmployeeGpuRoutes} from '../employee-gpu-access.js';
+import { EmployeeDiskBudgetService, caseFolderMeasurer } from '../employee-disk-budget-service.js';
+import { registerEmployeeDiskBudgetRoutes } from './routes/employee-disk-budget-routes.js';
+import { EmployeeModelService } from '../employee-model-service.js';
+import { EmployeeModelStore } from '../employee-model-store.js';
+import { modelEmployee, registerEmployeeModelRoutes } from './routes/employee-model-routes.js';
+import { getCasesDir } from '../config/cases-dir.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
@@ -109,6 +115,13 @@ import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
 import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
+import { EmployeeSupervisor } from '../employee-supervisor.js';
+import { officeSupervisorPorts } from '../employee-supervisor-office.js';
+import { OfficeSelfRestart, OfficeSelfRestartRecord, operationHoldsRestart, ownRestartPolicy } from '../office-self-restart.js';
+import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
+import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
+import { PlanSignInReconciler, describePlanSignInNotice, type SignInHolderPort } from '../plan-signin-reconciler.js';
+import { ownerStopPending } from '../owner-stop-journal.js';
 import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
 import { planMoveHarness } from '../plan-move-launch.js';
@@ -127,8 +140,8 @@ import { normalizeBasePath, stripBasePath, joinBasePath } from '../config/base-p
 import { GLYPH, palette } from '../cli-style.js';
 import { getHookSecret } from '../config/hook-secret.js';
 import { EventEmitter } from 'node:events';
-import { Session, isExternalCliMode, type BackgroundTask } from '../session.js';
-import type { ClaudeMode, SessionAttachmentHistoryItem, SessionState, WorkflowRunInfo } from '../types.js';
+import { Session, cliTakesSessionModel, isExternalCliMode, type BackgroundTask } from '../session.js';
+import type { ClaudeMode, SessionAttachmentHistoryItem, SessionMode, SessionState, WorkflowRunInfo } from '../types.js';
 import { RespawnController, RespawnConfig } from '../respawn-controller.js';
 import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
@@ -160,6 +173,7 @@ import { getCli, enabledClis, listClis } from '../config/cli-registry/registry.j
 import { isCliEntryInstalled, probeStockCliAvailability } from '../utils/cli-installed-probes.js';
 import { readCustomModelHosts } from '../custom-model-hosts.js';
 import { applyCustomModelInjection, customModelConfigDir, removeConfigDir } from '../custom-model-injection-apply.js';
+import { absentLaptopViewRefusal } from '../absent-laptop-view.js';
 import type { CustomModelBookkeeping } from '../types/session.js';
 import { registerGeneratedArtifactAttachment } from '../generated-artifact-attachments.js';
 import {
@@ -282,6 +296,7 @@ import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.
 import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes, resumeOwnerStops } from './routes/session-runtime-routes.js';
+import { registerProviderHoldRoutes } from './routes/provider-hold-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
 import { registerHealthMetadataProviderRoutes } from './routes/session-health-provider-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
@@ -339,7 +354,7 @@ import {
 import { isLostWebviewFrameNavigation } from './webview-proxy.js';
 import { AuthorQuotaFile } from '../cron/author-quota.js';
 import { CronService } from '../cron/cron-service.js';
-import { ChatroomService } from '../chatroom-service.js';
+import { ChatroomService, type ChatroomServiceDeps } from '../chatroom-service.js';
 import { ChatBackupScheduler } from '../chat-backup.js';
 import { sendOwnerAlert } from '../owner-alert.js';
 import { DecisionAlerts, waitingForOwner } from '../decision-alert.js';
@@ -359,10 +374,13 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import { PlanMoveHandoffStore } from '../plan-move-handoff-store.js';
+import { PlanMoveOwedHandoffs } from '../plan-move-owed-handoff.js';
 import { dockerPlanSourceRetirementSubject, dockerPlanSourceViewRetired, requireDockerPlanSourceRetirement } from '../docker-plan-source-retirement.js';
 import {
   captureDockerPlanMoveRequester,
   captureDockerPlanMoveOriginalRequester,
+  captureDockerPlanMoveSupervisorRequester,
   requireDockerPlanMoveRequesterSource,
 } from '../docker-plan-move-requester.js';
 import { PlanMoveRequests } from '../plan-request.js';
@@ -413,6 +431,8 @@ const CUSTOM_MODEL_REDISCOVER_INTERVAL_MS = 5 * 60_000;
 // minutes. Cheap either way — one /running GET per distinct endpoint with at least
 // one live custom-model session, not per session.
 const CUSTOM_MODEL_SWAP_CHECK_INTERVAL_MS = 20_000;
+/** How often a session whose input a launch denial still holds has its terminal re-read. */
+const PROVIDER_HOLD_RECHECK_MS = 15_000;
 
 function escapeHtmlText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -519,6 +539,10 @@ export class WebServer extends EventEmitter {
   private companyWake!: CompanyWake;
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
+  /** Present only under the boxed laptop runtime. */
+  private employeeSupervisor?: EmployeeSupervisor;
+  private officeSelfRestart?: OfficeSelfRestart;
+  private planSignIn?: PlanSignInReconciler;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
@@ -1054,6 +1078,7 @@ export class WebServer extends EventEmitter {
       persistSessionStateNow: this._persistSessionStateNow.bind(this),
       reapplyPersistedSessionState: this.reapplyPersistedSessionState.bind(this),
       discardPartiallyBuiltSession: this.discardPartiallyBuiltSession.bind(this),
+      discardAbsentLaptopView: this.discardAbsentLaptopView.bind(this),
       retireDockerPlanSource: this.retireDockerPlanSource.bind(this),
       getSessionStateWithRespawn: this.getSessionStateWithRespawn.bind(this),
       // EventPort
@@ -1175,7 +1200,7 @@ export class WebServer extends EventEmitter {
     const ownerAuth = new OfficeAuthService({
       store: new OwnerAuthStore(dataPath('owner-auth.json')),
       auditFile: dataPath('owner-auth-audit.jsonl'),
-    }, () => ({ name: this.companyService?.view().settings.ownerName, avatar: this.companyService?.view().settings.ownerAvatar }));
+    }, () => ({ name: this.companyService?.settings().ownerName, avatar: this.companyService?.settings().ownerAvatar }));
     // A machine credential is verified before the human transport layer. An
     // unavailable/mixed boxed backend refuses startup rather than falling back.
     const dockerRuntime = openDockerEmployeeRuntime(dataPath('docker-runtime'));
@@ -1212,7 +1237,7 @@ export class WebServer extends EventEmitter {
         predecessor: runtimeLineage(
           process.env.REVERIE_RUNTIME_STATE || join(dirname(getDataDir()), 'controller-state.json')
         ),
-        employeeOf: (sessionId) => this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id,
+        employeeOf: (sessionId) => this.companyService?.employeeRefs().find((e) => e.sessionId === sessionId)?.id,
         keepers: () => ownerAuth.keepers(),
         admins: () => ownerAuth.admins(),
       }),
@@ -1232,7 +1257,7 @@ export class WebServer extends EventEmitter {
     await this.app.register(fastifyWebsocket);
     const ownerTerminal = createOwnerTerminalRuntime(verifiedOwner, ownerAuth);
     registerOwnerTerminalRoutes(this.app, verifiedOwner, (request, employeeId) =>
-      this.companyService?.view(ownerFor(request)).employees.some(employee => employee.id === employeeId) === true,
+      this.companyService?.employeeRefs(ownerFor(request)).some(employee => employee.id === employeeId) === true,
     ownerAuth, ownerTerminal);
 
     // Multipart parsing (used by paste-image). Replaces a hand-rolled
@@ -1565,7 +1590,7 @@ export class WebServer extends EventEmitter {
           .filter((row) => row.profileId === profileId)
           .flatMap((row) => row.sessions.map((s) => s.name));
         // A sleeping employee retains its configured plan, even without a live process.
-        const assigned = (this.companyService?.view().employees ?? [])
+        const assigned = (this.companyService?.employeeRefs() ?? [])
           .filter((employee) => this.store.getSession(employee.sessionId)?.subscriptionProfile?.id === profileId)
           .map((employee) => employee.name);
         return [...new Set([...running, ...assigned])];
@@ -1623,6 +1648,8 @@ export class WebServer extends EventEmitter {
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
     let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
+    // The projected cards per owner, rebuilt only when the Board or an employee name changes: a room view asks once per member.
+    const boardViewCache = new Map<string, { rev: number; names: string; cards: ReturnType<NonNullable<ChatroomServiceDeps['boardIssues']>> }>();
     // The employee journal: opened on first use, in its own file beside the chat database. Briefs read its highlights.
     let employeeJournal: EmployeeJournalStore | undefined;
     this.app.addHook('onClose', async () => employeeJournal?.close());
@@ -1642,7 +1669,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
+          ? employeeBriefContext(employee, this.companyService.settings(employee.owner).coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.settings(employee.owner).timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1657,20 +1684,25 @@ export class WebServer extends EventEmitter {
       workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
-      ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
+      ownerNames: (owner) => [this.companyService?.settings(owner).ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
-      timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
+      timeZone: (owner) => this.companyService?.settings(owner).timeZone,
       // An agent's digest lists its own Board cards and the cards they name, and room views show each member's 'doing'
       // cards (the Board store is created below, after chat).
       boardIssues: (owner) => {
-        const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
+        const names = new Map((this.companyService?.employeeRefs(owner) ?? []).map((e) => [e.id, e.name]));
         // One copy of the Board per revision, not one per room view.
         const store = this.boardStore;
         if (store && boardIssuesCache?.rev !== store.rev) boardIssuesCache = { rev: store.rev, issues: store.snapshot().issues };
-        return (boardIssuesCache?.issues ?? []).map((issue) => ({
+        const key = owner ?? '', rev = boardIssuesCache?.rev ?? -1, signature = JSON.stringify([...names]);
+        const cached = boardViewCache.get(key);
+        if (cached && cached.rev === rev && cached.names === signature) return cached.cards;
+        const cards = Object.freeze((boardIssuesCache?.issues ?? []).map((issue) => Object.freeze({
           id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
           ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt, end: issue.end,
-        }));
+        })));
+        boardViewCache.set(key, { rev, names: signature, cards });
+        return cards;
       },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000 }),
@@ -1695,7 +1727,7 @@ export class WebServer extends EventEmitter {
     this.chatBackup = new ChatBackupScheduler({
       database: dataPath('chat.db'),
       dir: dataPath('chat-backups'),
-      timeZone: () => this.companyService?.view(undefined).settings.timeZone,
+      timeZone: () => this.companyService?.settings(undefined).timeZone,
       notify: (text, failed) => {
         if (failed)
           void sendOwnerAlert(this.pushStore, 'Nightly chat backup failed. Details in #reverie and the console log.', {
@@ -1974,6 +2006,34 @@ export class WebServer extends EventEmitter {
     const employeeGpu = new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET, ownerAuth);
     registerEmployeeGpuRoutes(this.app, this.companyService, employeeGpu, verifiedOwner);
     this.app.addHook('onClose', async () => employeeGpu.close());
+    // Per-employee disk budget: measures case folders in the background and tells an employee that is over.
+    const employeeDiskBudget = new EmployeeDiskBudgetService({
+      employees: () => this.companyService.registeredEmployees(),
+      workingDir: (id) => this.sessions.get(id)?.workingDir ?? this.store.getSession(id)?.workingDir,
+      session: (id) => this.sessions.get(id),
+      measure: caseFolderMeasurer(getCasesDir),
+    });
+    registerEmployeeDiskBudgetRoutes(this.app, this.companyService, employeeDiskBudget, verifiedOwner);
+    employeeDiskBudget.start();
+    this.app.addHook('onClose', async () => employeeDiskBudget.stop());
+    // Employee models: a recorded choice per employee, applied with /model at an idle empty composer, and a switch off a
+    // model that reached its per-model usage limit (employee-model-service.ts). Owner and manageModels-granted agents only.
+    const employeeModels = new EmployeeModelService({
+      store: new EmployeeModelStore(dataPath('employee-models.json')),
+      employees: () => this.companyService.registeredEmployees().map(modelEmployee),
+      session: (id) => this.sessions.get(id),
+      takesModel: (mode) => cliTakesSessionModel(mode as SessionMode),
+      glyph: (mode) => getCli(mode)?.capabilities.workDetect?.promptGlyph ?? '❯',
+      fallbackModel: (owner) => modelLimitFallback(this.companyService.settings(owner)),
+      timeZone: (owner) => this.companyService.settings(owner).timeZone,
+      post: (owner, text) => {
+        const room = fullAccessAlertRoom(this.chatroomService.rooms(), owner);
+        if (room && !room.archivedAt) this.chatroomService.post(room.id, { kind: 'system', name: 'Models' }, text, 'all', { deliver: false });
+      },
+    });
+    registerEmployeeModelRoutes(this.app, { ctx, company: this.companyService, models: employeeModels, verifiedOwner });
+    employeeModels.start();
+    this.app.addHook('onClose', async () => employeeModels.stop());
     registerCompanyRoutes(
       this.app,
       ctx,
@@ -1985,6 +2045,7 @@ export class WebServer extends EventEmitter {
         verifiedOwner,
         boxedRuntime: this.dockerEmployeeRuntime !== undefined,
         boxedViewRestorations: () => this.dockerEmployeeRuntime?.restorationReports ?? [],
+        employeeSupervisor: (owner) => this.employeeSupervisor?.reports(owner) ?? [],
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
@@ -1996,6 +2057,7 @@ export class WebServer extends EventEmitter {
         },
       }
     );
+    registerProviderHoldRoutes(this.app, ctx, verifiedOwner);
     const startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       // Boxed creation/reattachment belongs to its authenticated runtime. A
       // missing saved row must never create a local control-plane employee.
@@ -2159,7 +2221,7 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       roles,
       (sessionId) =>
-        this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
+        this.companyService?.employeeRefs(this.sessions.get(sessionId)?.owner).find((e) => e.sessionId === sessionId)
           ?.id,
       { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), humanNames: room => ownerAuth.members(room).map(person => person.name), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
@@ -2173,9 +2235,9 @@ export class WebServer extends EventEmitter {
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
-      employees: () => companyStore.snapshot().employees,
-      timeZone: owner => this.companyService?.view(owner).settings.timeZone,
-      coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
+      employees: () => structuredClone(companyStore.view().employees),
+      timeZone: owner => this.companyService?.settings(owner).timeZone,
+      coordinatorId: owner => companyStore.view().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), title: 'Disk critical', timeoutMs: 5000 }),
@@ -2183,7 +2245,7 @@ export class WebServer extends EventEmitter {
     this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment, public issue and disk-space watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
-      timeZone: owner => this.companyService.view(owner).settings.timeZone,
+      timeZone: owner => this.companyService.settings(owner).timeZone,
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
       employee: (sessionId) => {
         const session = this.sessions.get(sessionId);
@@ -2395,7 +2457,8 @@ export class WebServer extends EventEmitter {
     });
     // Plans: every subscription account paced against its weekly window, plus the GPU.
     this.planService = new PlanService({
-      reader: this.subscriptionUsageReader,
+      // Pages answer from the last reading and refresh it behind the scenes; the five-minute refresh below keeps it warm.
+      reader: { read: (profile) => this.subscriptionUsageReader.readCached(profile) },
       sessions: () => this.sessions.values(),
       coordinatorIds: () =>
         this.chatroomService
@@ -2424,9 +2487,9 @@ export class WebServer extends EventEmitter {
       this.accountLogins,
       {
         callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-        timeZone: owner => this.companyService.view(owner).settings.timeZone,
+        timeZone: owner => this.companyService.settings(owner).timeZone,
         employees: (owner) =>
-          this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
+          this.companyService.employeeRefs(owner).map(({ id, name, sessionId, icon, avatar }) => ({
             id,
             name,
             sessionId,
@@ -2442,7 +2505,7 @@ export class WebServer extends EventEmitter {
             ) ||
           roles.can(
             {
-              employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
+              employeeId: this.companyService?.employeeRefs().find((e) => e.sessionId === id)?.id,
               leadOfAny: leadsALiveRoom(id),
               memberId: id,
             },
@@ -2518,8 +2581,195 @@ export class WebServer extends EventEmitter {
         claim: (...args) => planMoveStore.dockerClaim(...args),
         phase: (...args) => planMoveStore.dockerPhase(...args),
         closeRestored: (...args) => planMoveStore.closeRestoredDockerMove(...args),
+        abandonAbsent: (...args) => planMoveStore.abandonAbsentDockerMove(...args),
+        abandonOwner: (...args) => planMoveStore.abandonOwnerDockerMove(...args),
       },
     });
+    dockerRuntime?.bindPlanMoves(planMoves);
+    dockerRuntime?.bindSeatAccounts(this.planService);
+    if (dockerRuntime) {
+      // One Claude plan sign-in is held by the office and by every laptop that was given a copy of it, and each
+      // copy is renewed by a different client. This keeps them the same sign-in (plan-signin-sync.ts says how).
+      // An employee whose plan is being moved is left to the move, a held move included. The laptop holder is the
+      // employee's recorded laptop, filed under the plan they are on; a move's candidate keeps the sign-in of the
+      // plan it moves TO in a folder of its own, and the move verifies exactly the account material it reserved. A
+      // copy placed there from here would be another plan's, or one the move's own check refuses.
+      this.planSignIn = new PlanSignInReconciler({
+        now: Date.now,
+        ready: () => this.companyWakeReady && dockerRuntime.current(),
+        plans: async () => {
+          const laptops = new Map<string, SignInHolderPort[]>();
+          const moving = new Map<string | undefined, Set<string>>();
+          for (const employee of this.companyService.registeredEmployees()) {
+            const profile = employee.runtimeRecipe?.subscriptionProfile;
+            if (!profile || profile.provider !== 'anthropic' || employee.bindingMigration) continue;
+            if (!moving.has(employee.owner))
+              moving.set(
+                employee.owner,
+                new Set(
+                  (await planMoves.list(employee.owner))
+                    .filter((row) => !['completed', 'failed'].includes(row.phase))
+                    .map((row) => row.employeeId)
+                )
+              );
+            if (moving.get(employee.owner)!.has(employee.id)) continue;
+            const holder = dockerRuntime.signInHolder(employee.id, employee.name, profile.id);
+            if (holder) laptops.set(profile.id, [...(laptops.get(profile.id) ?? []), holder]);
+          }
+          return [...laptops].map(([accountId, holders]) => ({
+            accountId,
+            holders: [
+              new OfficeSignInCopy(async () => {
+                const account = await this.planService.account(accountId);
+                return account?.provider === 'anthropic' ? account.realDir : undefined;
+              }),
+              ...holders,
+            ],
+          }));
+        },
+        log: (line) => console.log(line),
+        // A plan that is signed in nowhere is told once in each owner's office room, with who runs on it, before
+        // those employees stop at a sign-in screen. Only the account holder can sign a plan in.
+        notice: ({ accountId, usable }) => {
+          const onPlan = this.companyService
+            .registeredEmployees()
+            .filter((employee) => employee.runtimeRecipe?.subscriptionProfile?.id === accountId);
+          for (const owner of new Set(onPlan.map((employee) => employee.owner))) {
+            const rows = onPlan.filter((employee) => employee.owner === owner);
+            const room = fullAccessAlertRoom(this.chatroomService.rooms(), owner);
+            if (!room || room.archivedAt) continue;
+            const line = describePlanSignInNotice(
+              rows[0]!.runtimeRecipe!.subscriptionProfile!.label,
+              rows.map((employee) => employee.name),
+              usable
+            );
+            this.chatroomService.post(room.id, { kind: 'system', name: 'Plans' }, line, 'all', { deliver: false });
+          }
+        },
+      });
+    }
+    if (dockerRuntime) {
+      // The office recovery supervisor. Every step it takes is a call to the service method behind the owner's
+      // own route for that step; what it presents instead of an owner request is documented in
+      // employee-supervisor-office.ts and docker-employee-supervisor-laptops.ts.
+      // A laptop runtime that is no longer the one the office started with is settled by a new office process and
+      // by nothing else. office-self-restart.ts says when the office may end itself for it, and how often.
+      const restartRecord = new OfficeSelfRestartRecord(dataPath('office-self-restart.json'));
+      const officeSelfRestart = new OfficeSelfRestart({
+        now: Date.now,
+        started: () => this.companyWakeReady,
+        stale: () => !dockerRuntime.current(),
+        stamp: () => dockerRuntime.identityStamp(),
+        startable: () => dockerRuntime.restartWouldKeepIdentity(),
+        allowed: () => this.companyService.view(undefined).settings.supervisorAutoRepair !== false,
+        // Every employee is asked, in the office or not: a move or a laptop operation of anyone is cut off by a restart.
+        operation: async () => {
+          const moves = await planMoves.list(undefined);
+          if (
+            moves.some(
+              (row) =>
+                !['completed', 'failed'].includes(row.phase) &&
+                (row.backend === 'docker' || row.phase !== 'recovery-required')
+            )
+          )
+            return 'a plan move that is open';
+          if (
+            this.companyService
+              .registeredEmployees()
+              .some((employee) => operationHoldsRestart(dockerRuntime.laptopOperations(employee.id), Date.now()))
+          )
+            return 'a laptop operation that is running';
+          // The supervisor's own steps: one for the pool every laptop shares belongs to no employee, and a wake, a
+          // sign-in put back or an owed handoff being typed is no laptop operation, so neither of the two checks
+          // above sees them. A handoff cut off while it is typed can never be typed again.
+          return this.employeeSupervisor?.stepInFlight();
+        },
+        restartPolicy: () => {
+          let mounts = '';
+          try {
+            mounts = readFileSync('/proc/self/mountinfo', 'utf8');
+          } catch {
+            /* the host name alone is tried */
+          }
+          return ownRestartPolicy((args) => dockerRuntime.engineRead(args), getHostname(), mounts);
+        },
+        load: () => restartRecord.load(),
+        save: (times) => restartRecord.save(times),
+        // The process's usual graceful shutdown, as for a stop signal from outside.
+        exit: () => void process.emit('SIGTERM'),
+        log: (line) => console.log(line),
+        audit: (entry) => void appendAdminAudit(entry),
+      });
+      this.officeSelfRestart = officeSelfRestart;
+      const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
+      // The handoff a closed plan move still owes: typed once, through the terminal's own guarded writer.
+      const owedHandoffs = new PlanMoveOwedHandoffs({
+        moves: planMoves,
+        store: new PlanMoveHandoffStore(dataPath('plan-move-handoffs.json')),
+        session: (id) => this.sessions.get(id),
+        capturePane: (muxName) => this.mux?.capturePaneText?.(muxName, undefined, { escapes: true }),
+      });
+      this.employeeSupervisor = new EmployeeSupervisor(
+        officeSupervisorPorts({
+          company: this.companyService,
+          session: (id) => this.sessions.get(id),
+          inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
+          ready: () => this.companyWakeReady && dockerRuntime.current(),
+          notReady: () => officeSelfRestart.status(),
+          officeRestart: {
+            request: (reason) => officeSelfRestart.request(reason),
+            lastAt: () => officeSelfRestart.lastAt(),
+            nextAt: () => officeSelfRestart.nextAllowedAt(),
+          },
+          laptops: dockerRuntime.supervisorLaptops({
+            // While a rebuild is about to stop a laptop its agent runs in, nothing may be typed into that session and
+            // chat for it stays queued. Both are the holds a plan move takes; the chat is delivered to the new laptop.
+            holdInput: (sessionId) => {
+              const releases = [
+                this.chatroomService.delivery.pauseForMigration(sessionId),
+                this.sessions.get(sessionId)?.pauseCapacityRetry() ?? (() => {}),
+              ];
+              return () => {
+                for (const release of releases) release();
+              };
+            },
+          }),
+          restorations: () => dockerRuntime.restorationReports,
+          providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+          ownerStopPending,
+          moves: planMoves,
+          // Only the original of a held move, and only while the supervisor may act: no new choice, no session
+          // start and no HTTP request of its own.
+          moveExecutor: (employee, current) =>
+            planMoveExecutor(
+              {
+                ...planMoveRuntime,
+                actor: 'office supervisor',
+                authorized: () => this.companyWakeReady && current(),
+                request: async () => {
+                  throw new PlanMoveError('The office supervisor cannot start or replay a session', 403);
+                },
+                dockerRequester: () => {
+                  throw new PlanMoveError('The office supervisor never chooses a plan', 403);
+                },
+                dockerOriginalRequester: (id) =>
+                  captureDockerPlanMoveSupervisorRequester(id, planMoveStore, this.companyService, requirePlanRuntime, {
+                    current: () => this.companyWakeReady && current(),
+                  }),
+              },
+              employee.owner
+            ),
+          ...(this.planSignIn ? { signIn: this.planSignIn } : {}),
+          planSignedIn: async (accountId) =>
+            (await this.planService.rows()).accounts.find((account) => account.id === accountId)?.signedIn,
+          handoffs: owedHandoffs,
+          wake: (id, options) => this.companyWake.wakeOne(id, options),
+          load: () => supervisorStore.load(),
+          save: (histories) => supervisorStore.save(histories),
+          audit: (entry) => void appendAdminAudit(entry),
+        })
+      );
+    }
     this.workerViewerReconnect = new WorkerViewerReconnect({
       company: this.companyService,
       session: id => this.sessions.get(id),
@@ -2661,7 +2911,7 @@ export class WebServer extends EventEmitter {
       save: (records) => planRequestStore.save(records),
       moves: planMoves,
       binding: (employeeId, owner) =>
-        this.companyService.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId,
+        this.companyService.employeeRefs(owner).find((employee) => employee.id === employeeId)?.sessionId,
       validateTarget: async (_snapshot, target) => availablePlanTarget(target),
       capability: {
         write: value => planRequestCapabilities.write(value),
@@ -4208,6 +4458,44 @@ export class WebServer extends EventEmitter {
     }
     this.closeCleanlyExitedSessions();
     void this.workerViewerReconnect?.tick().catch(() => undefined);
+    this.reconcileProviderHolds();
+  }
+
+  /** When each still-held session's terminal was last re-read. */
+  private providerHoldChecks = new Map<string, number>();
+
+  /**
+   * Re-read the terminal of every session whose input a launch denial still holds, so the hold releases itself
+   * once the pane shows the running agent (provider-hold-reconcile.ts). Runs after restore and on the pane-exit
+   * tick, at most once per {@link PROVIDER_HOLD_RECHECK_MS} per session. It only reads: nothing is typed, replayed,
+   * launched or retired, and a session the office cannot read stays held for the owner to settle.
+   */
+  private reconcileProviderHolds(): void {
+    const now = Date.now();
+    for (const id of this.providerHoldChecks.keys()) if (!this.sessions.has(id)) this.providerHoldChecks.delete(id);
+    for (const session of this.sessions.values()) {
+      if (!session.providerInputHeld) {
+        this.providerHoldChecks.delete(session.id);
+        continue;
+      }
+      const last = this.providerHoldChecks.get(session.id);
+      if (last !== undefined && now - last < PROVIDER_HOLD_RECHECK_MS) continue;
+      this.providerHoldChecks.set(session.id, now);
+      void session
+        .reconcileProviderHold()
+        .then((result) => {
+          if (this.sessions.get(session.id) !== session) return;
+          const held = session.providerInputHeld;
+          if (!held)
+            console.log(
+              `[provider-hold] session ${session.id.slice(0, 8)} terminal check: ${result.outcome}; input admitted, launch fence unchanged`
+            );
+          // A release always, and the first reading of a hold that stands (a restore, or a confirmation that
+          // lapsed with its pane): nothing else announces either.
+          if (!held || last === undefined) this.broadcastSessionStateDebounced(session.id);
+        })
+        .catch(() => undefined);
+    }
   }
 
   /**
@@ -4602,6 +4890,8 @@ export class WebServer extends EventEmitter {
       getHookSecret();
       await this.dockerEmployeeRuntime.restoreExistingViews();
     }
+    // A restored session whose saved launch intent holds its input is read once now, before chat replay.
+    this.reconcileProviderHolds();
     // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
     try {
       await this.chatroomService.startDelivery();
@@ -4716,8 +5006,16 @@ export class WebServer extends EventEmitter {
                 console.error('[company] crash recovery needs owner attention:', item.employeeId, item.reason);
           })
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
-      void tickWake();
-      this.cleanup.setInterval(() => void tickWake(), 30_000, { description: 'Company crash recovery' });
+      // The office supervisor rides the same half-minute pass, after the crash-recovery expert has had its turn.
+      // Neither promise rejects: each logs its own failure.
+      const tickRecovery = () =>
+        void tickWake()
+          .then(() => this.officeSelfRestart?.tick())
+          .then(() => this.employeeSupervisor?.tick());
+      tickRecovery();
+      this.cleanup.setInterval(tickRecovery, 30_000, { description: 'Company crash recovery' });
+      // Asked often, reads once a minute; every few seconds only around the renewal of a shared sign-in.
+      this.cleanup.setInterval(() => void this.planSignIn?.tick(), 5_000, { description: 'Plan sign-in copies' });
       void tickCompany();
       this.cleanup.setInterval(() => void tickCompany(), 30_000, { description: 'Company research schedule' });
       void this.refreshCodexPlanUsage();
@@ -5182,6 +5480,67 @@ export class WebServer extends EventEmitter {
       );
       if (this.sessions.has(sessionId))
         throw new Error('Partial cleanup required: a successor appeared before notification');
+      this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
+    } finally {
+      this.cleaningUp.delete(sessionId);
+      this.killingSessions.delete(sessionId);
+      if (current()) session.markClosing(false);
+    }
+  }
+
+  /**
+   * Forget the office-side viewer of a boxed laptop that no longer exists.
+   *
+   * {@link discardPartiallyBuiltSession} cannot do this: its guarded stop refuses
+   * a boxed viewer (a wrapper proves nothing about the native job behind it) and
+   * needs a live pane, while a laptop that is gone leaves a dead one. Here the
+   * caller's Engine listing is the authority: only when it positively reports no
+   * container under the exact ID this viewer was attached to is the ordinary
+   * local stop used, which ends this office's terminal client and its local
+   * pane and nothing else. The observers and the map entry are removed exactly
+   * as the partial discard removes them, and the persisted record is kept.
+   */
+  async discardAbsentLaptopView(
+    sessionId: string,
+    containerAbsent: (containerId: string) => Promise<boolean>
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    const owner = session.owner,
+      docker = session.docker;
+    const current = () =>
+      this.sessions.get(sessionId) === session && session.owner === owner && session.docker === docker;
+    const refusal = () => absentLaptopViewRefusal(session, sessionId, this.cleaningUp.has(sessionId));
+    const reason = refusal();
+    if (reason) throw new Error('Laptop viewer discard refused: ' + reason);
+    if (!(await containerAbsent(docker!.containerName)))
+      throw new Error('Laptop viewer discard refused: its laptop container still exists');
+    const changed = !current() ? 'the session changed' : refusal();
+    if (changed) throw new Error('Laptop viewer discard refused: ' + changed);
+    this.cleaningUp.add(sessionId);
+    this.killingSessions.add(sessionId);
+    session.markClosing(true);
+    try {
+      await this.tabLayouts.runFailedSessionRollback(
+        { id: sessionId, owner },
+        async () => {
+          if (!current()) throw new Error('Laptop viewer discard refused: the session changed');
+          await session.stop(true);
+          if (!current()) throw new Error('Laptop viewer discard unconfirmed: the session changed');
+          // From here to the map entry's removal nothing awaits, and the launch
+          // this viewer owned is released first: the state "viewer forgotten,
+          // its launch still live" cannot exist, and a repeat finds no live launch.
+          this.store.releaseAbsentLaptopViewLaunch(session);
+          this.discardPartialSessionObservers(session);
+          this.sessions.delete(sessionId);
+        },
+        () => {
+          if (this.sessions.has(sessionId))
+            throw new Error('Laptop viewer discard unconfirmed: a successor appeared before layout publication');
+        }
+      );
+      if (this.sessions.has(sessionId))
+        throw new Error('Laptop viewer discard unconfirmed: a successor appeared before notification');
       this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
     } finally {
       this.cleaningUp.delete(sessionId);
@@ -5847,6 +6206,8 @@ export class WebServer extends EventEmitter {
     this.muxMetadataService?.close();
     this.muxMetadataPublisher?.close();
     this.companyWakeReady = false;
+    this.employeeSupervisor?.close();
+    this.planSignIn?.close();
     this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();

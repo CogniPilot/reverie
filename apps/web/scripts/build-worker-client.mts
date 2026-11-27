@@ -91,7 +91,11 @@ for (const input of Object.keys(meta.inputs)) {
   }
 }
 let serial = 0;
-for (const root of [...packages].sort()) {
+// Store hashes are arbitrary: order by role, never by the absolute path, so an
+// unrelated source change cannot renumber the notices and change the manifest.
+const locked = (root: string) => (root.startsWith(modules + '/') ? 1 : 0);
+const ordered = [...packages].sort((a, b) => locked(a) - locked(b) || (a < b ? -1 : a > b ? 1 : 0));
+for (const root of ordered) {
   if (root.startsWith(modules + '/')) {
     const key = 'node_modules/' + root.slice(modules.length + 1),
       actual = installedLock.packages[key],

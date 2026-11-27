@@ -400,6 +400,20 @@ describe('owned boxed Docker employee continuation', () => {
     expect(await f.make().observe(eid, oid, f.authority)).toMatchObject({ state: 'ready' });
     expect(f.provider.launch).toHaveBeenCalledOnce();
   });
+  it('reports an unparsable read of a ready laptop as a failed read, not as an unconfirmed effect', async () => {
+    const f = fixture();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+    // A busy box can answer a pool read with output that does not parse.
+    f.engine.observePool.mockImplementationOnce(async () => JSON.parse('{"truncated'));
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'ready',
+      code: 'DOCKER_CONTINUATION_UNCONFIRMED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+    // The next read decides again.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+  });
   it('Observe can acknowledge owned pool metadata but cannot create or start a destination', async () => {
     const f = fixture(),
       original = f.engine.preparePool.getMockImplementation()!;
@@ -542,6 +556,114 @@ describe('same original proven-unissued helper continuation', () => {
     expect((await f.service.begin(eid, f.request, f.authority)).state).toBe('held');
     expect(f.engine.configureResources).toHaveBeenCalledOnce();
     expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+});
+
+describe('a resource writer that failed terminally', () => {
+  const leaf = (extra: Record<string, unknown>) =>
+    ({
+      role: 'leaf-helper',
+      name: 'reverie-boxed-leaf-' + oid,
+      imageId: 'sha256:' + '9'.repeat(64),
+      configurationDigest: '8'.repeat(64),
+      ...extra,
+    }) as NonNullable<DockerEmployeeContinuationRecord['tasks']>[number];
+  const failed = (failure: string, attempt?: number) =>
+    leaf({ phase: 'failed', containerId: '7'.repeat(64), exitCode: 1, failure, ...(attempt ? { attempt } : {}) });
+  it('holds with a sentence after three lost reads and is rerun by the same request sent again', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed('lost-process', 3)];
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED');
+    });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toMatchObject({
+      phase: 'resources-issued',
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED',
+      allowedActions: ['observe', 'continue', 'retry', 'rebuild-preview'],
+    });
+    expect(held.message).toContain('three times in a row');
+    // A read-only check names the same hold and starts nothing.
+    const seen = await f.service.observe(eid, oid, f.authority);
+    expect(seen).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_RETRY_PENDING',
+      allowedActions: ['observe', 'continue', 'retry', 'rebuild-preview'],
+    });
+    expect(seen.message).toContain('nothing is stuck');
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready' });
+    expect(f.engine.configureResources).toHaveBeenCalledTimes(2);
+    expect(f.engine.start).toHaveBeenCalledOnce();
+    expect(f.engine.createDestination).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['refused', 'DOCKER_RESOURCE_HELPER_REFUSED'],
+    ['close-unconfirmed', 'DOCKER_RESOURCE_HELPER_CLOSE_UNCONFIRMED'],
+    ['unknown', 'DOCKER_RESOURCE_HELPER_FAILURE_UNKNOWN'],
+  ])('holds a %s failure for a rebuild and never reruns it', async (failure, code) => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed(failure)];
+      throw new DockerEmployeeContinuationError(code);
+    });
+    const expected = { phase: 'resources-issued', state: 'held', code, allowedActions: ['observe', 'rebuild-preview'] };
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toMatchObject(expected);
+    expect(held.message).toContain('Rebuild laptop');
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject(expected);
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+  it('offers only a rebuild once every attempt of the operation is spent', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed('lost-process', 9)];
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT');
+    });
+    const expected = { state: 'held', code: 'DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT' };
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    const seen = await f.service.observe(eid, oid, f.authority);
+    expect(seen).toMatchObject({ ...expected, allowedActions: ['observe', 'rebuild-preview'] });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+  });
+  it('records a started writer that exited with an error before the next request reruns it; a read never does', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [leaf({ phase: 'start-issued', containerId: '7'.repeat(64) })];
+      throw Error('office stopped while the writer ran');
+    });
+    const settle = vi.fn(async () => {
+      expect(f.record()!.phase).toBe('resources-issued');
+      f.record()!.tasks = [failed('lost-process')];
+    });
+    Object.assign(f.engine, { settleResourceWriter: settle });
+    await f.service.begin(eid, f.request, f.authority);
+    expect((await f.service.observe(eid, oid, f.authority)).state).toBe('held');
+    expect(settle).not.toHaveBeenCalled();
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready' });
+    expect(settle).toHaveBeenCalledOnce();
+    expect(f.engine.configureResources).toHaveBeenCalledTimes(2);
+  });
+  it('leaves a started writer that is not proved failed exactly as held as before', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [leaf({ phase: 'start-issued', containerId: '7'.repeat(64) })];
+      throw Error('unknown actual start reply');
+    });
+    const settle = vi.fn(async () => {});
+    Object.assign(f.engine, { settleResourceWriter: settle });
+    await f.service.begin(eid, f.request, f.authority);
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      allowedActions: ['observe'],
+    });
+    expect(settle).toHaveBeenCalledOnce();
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
   });
 });
 
@@ -801,5 +923,336 @@ describe('published original resource revision consumption', () => {
     expect({ starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length }).toEqual(
       effects
     );
+  });
+});
+describe('a launch that cannot work, and one that died at once', () => {
+  const refusal = {
+    code: 'DOCKER_CONTINUATION_LOCAL_MODEL_ENDPOINT_MISSING',
+    message: "Synthetic's local model endpoint 'gone' is no longer saved in this office.",
+  };
+  it('refuses before the launch is recorded as issued, and the same step can be continued', async () => {
+    const f = fixture();
+    const preflight = vi.fn(async (): Promise<typeof refusal | undefined> => refusal);
+    Object.assign(f.provider, { preflight });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toEqual({
+      operationId: oid,
+      phase: 'identity-ready',
+      state: 'held',
+      allowedActions: ['observe', 'continue'],
+      ...refusal,
+    });
+    expect(preflight).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'identity-ready' }),
+      { modelSocketMounted: undefined },
+      expect.any(Function)
+    );
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    expect(f.binding()).toBeUndefined();
+    expect(f.journal).not.toContain('provider-issued');
+    expect(f.record()?.phase).toBe('identity-ready');
+    // Reading it again spends nothing and still offers the step.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'pending',
+      phase: 'identity-ready',
+      allowedActions: ['observe', 'continue'],
+    });
+    expect(preflight).toHaveBeenCalledOnce();
+    // Still broken: refused again, still nothing launched.
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'held', ...refusal });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    // Repaired: the one launch happens now.
+    preflight.mockResolvedValue(undefined);
+    f.setDestination({ ...f.destination()!, modelSocketMounted: true });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+    expect(preflight).toHaveBeenLastCalledWith(expect.anything(), { modelSocketMounted: true }, expect.any(Function));
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+  });
+  it('a preflight that fails outright launches nothing and leaves the step where it was', async () => {
+    const f = fixture();
+    Object.assign(f.provider, {
+      preflight: vi.fn(async () => {
+        throw Error('endpoint store unavailable');
+      }),
+    });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'identity-ready',
+      code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+    });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    expect(f.record()?.phase).toBe('identity-ready');
+  });
+  it('attaches how the provider ended to the hold, and keeps it after the laptop has let go of it', async () => {
+    const f = fixture();
+    const exit = {
+      status: 1,
+      signal: null,
+      lines: ['Reverie Admin Harness could not start: Reverie API rejected the session lookup', 'Pane is dead (status 1)'],
+    };
+    f.provider.launch.mockImplementation(async () => {
+      f.setDestination({ ...f.destination()!, provider: { kind: 'exited', exit } });
+    });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toEqual({
+      operationId: oid,
+      phase: 'provider-issued',
+      state: 'held',
+      allowedActions: ['observe'],
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+      providerExit: exit,
+    });
+    // The laptop keeps the dead pane only for a bounded time.
+    f.setDestination({ ...f.destination()!, provider: { kind: 'absent' } });
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+      providerExit: exit,
+    });
+    // An exited provider is never a second launch, whoever asks.
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'held', providerExit: exit });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+    // A provider seen running again owes nobody the old exit.
+    f.setDestination({ ...f.destination()!, provider: { kind: 'running', operationId: oid, sessionId: sid } });
+    const ready = await f.service.observe(eid, oid, f.authority);
+    expect(ready).toMatchObject({ state: 'ready', phase: 'ready' });
+    expect(ready.providerExit).toBeUndefined();
+    f.setDestination({ ...f.destination()!, provider: { kind: 'absent' } });
+    expect((await f.service.observe(eid, oid, f.authority)).providerExit).toBeUndefined();
+  });
+  it('a retained dead pane before any launch is still a foreign provider', async () => {
+    const f = fixture();
+    const start = f.engine.start.getMockImplementation()!;
+    f.engine.start.mockImplementation(async () => {
+      await start();
+      f.setDestination({
+        ...f.destination()!,
+        provider: { kind: 'exited', exit: { status: 1, signal: null, lines: [] } },
+      });
+    });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_FOREIGN_PROVIDER',
+    });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+});
+
+describe('limits put back without stopping a laptop', () => {
+  const task = (role: string, extra: Record<string, unknown>) =>
+    ({
+      role,
+      name: 'reverie-boxed-' + role + '-' + '6'.repeat(64),
+      imageId: 'sha256:' + '9'.repeat(64),
+      configurationDigest: '8'.repeat(64),
+      ...extra,
+    }) as NonNullable<DockerEmployeeContinuationRecord['tasks']>[number];
+  const anchor = task('anchor', {
+    phase: 'running',
+    containerId: '1'.repeat(64),
+    initPid: 100,
+    initStartTicks: '10',
+  });
+  const started = task('pool-helper', { phase: 'start-issued', containerId: '7'.repeat(64) });
+
+  it('records a set-up’s failed pool writer before the pool is read, then prepares the pool again', async () => {
+    const f = fixture();
+    f.engine.preparePool.mockImplementationOnce(async () => {
+      f.record()!.tasks = [anchor, started];
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_FAILED');
+    });
+    const settle = vi.fn(async () => {
+      expect(f.record()!.phase).toBe('pool-issued');
+      f.record()!.tasks = [
+        anchor,
+        task('pool-helper', { phase: 'failed', containerId: '7'.repeat(64), exitCode: 1, failure: 'refused' }),
+      ];
+    });
+    Object.assign(f.engine, { settlePoolWriter: settle });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      phase: 'pool-issued',
+      state: 'held',
+      allowedActions: ['observe', 'continue'],
+    });
+    // A read names the hold, offers the request again and records nothing.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_POOL_UNCONFIRMED',
+      allowedActions: ['observe', 'continue'],
+    });
+    expect(settle).not.toHaveBeenCalled();
+    expect(f.engine.preparePool).toHaveBeenCalledOnce();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready' });
+    expect(settle).toHaveBeenCalledOnce();
+    expect(f.engine.preparePool).toHaveBeenCalledTimes(2);
+  });
+
+  it('never prepares the pool again beside a pool writer that is not proved failed', async () => {
+    const f = fixture();
+    f.engine.preparePool.mockImplementationOnce(async () => {
+      f.record()!.tasks = [anchor, started];
+      throw Error('unknown actual start reply');
+    });
+    f.engine.preparePool.mockImplementationOnce(async () => {
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED');
+    });
+    Object.assign(f.engine, { settlePoolWriter: vi.fn(async () => {}) });
+    await f.service.begin(eid, f.request, f.authority);
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      phase: 'pool-issued',
+      state: 'held',
+      code: 'DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED',
+    });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+
+  async function published() {
+    const f = fixture();
+    expect((await f.service.begin(eid, f.request, f.authority)).state).toBe('ready');
+    const repairResources = vi.fn(async () => {
+      f.setDestination({ ...f.destination()!, resources: structuredClone(f.policy) });
+    });
+    Object.assign(f.engine, { repairResources });
+    const effects = () =>
+      [f.engine.preparePool, f.engine.createDestination, f.engine.start, f.engine.configureResources, f.provider.launch].map(
+        (mock) => mock.mock.calls.length
+      );
+    return { f, repairResources, effects: effects(), count: effects };
+  }
+
+  it('offers the pool repair for a running laptop whose shared pool is unconfirmed, and writes no leaf before it', async () => {
+    const { f, repairResources, effects, count } = await published();
+    const pool = f.pool()!;
+    f.engine.observePool.mockImplementation(async () => null);
+    const held = await f.service.observe(eid, oid, f.authority);
+    expect(held).toMatchObject({
+      phase: 'ready',
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_POOL_UNCONFIRMED',
+      allowedActions: ['observe', 'repair-pool'],
+    });
+    expect(held.message).toContain('docker-pool/repair');
+    // A laptop repair does not write the pool, and leaves the laptop's own limits alone until the pool is confirmed.
+    expect(await f.service.repair(eid, oid, f.authority)).toMatchObject({ state: 'held', allowedActions: ['observe', 'repair-pool'] });
+    expect(repairResources).not.toHaveBeenCalled();
+    f.engine.observePool.mockImplementation(async () => structuredClone(pool));
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ state: 'ready' });
+    expect(count()).toEqual(effects);
+  });
+
+  it.each([
+    ['limits the kernel no longer shows', null, 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED'],
+    ['an acknowledgement that is gone', 'DOCKER_RESOURCE_LEAF_ACK_MISSING', 'DOCKER_RESOURCE_LEAF_ACK_MISSING'],
+  ] as const)('puts a running laptop’s own limits back in place for %s', async (_name, thrown, code) => {
+    const { f, repairResources, effects, count } = await published();
+    const ready = f.destination()!;
+    if (thrown)
+      f.engine.observeDestination.mockImplementation(async () => {
+        if (f.destination()!.resources) return structuredClone(f.destination());
+        throw new DockerEmployeeContinuationError(thrown);
+      });
+    f.setDestination({ ...ready, resources: null });
+    const held = await f.service.observe(eid, oid, f.authority);
+    expect(held).toMatchObject({ phase: 'ready', state: 'held', code, allowedActions: ['observe', 'repair'] });
+    expect(held.message).toContain('docker-continuation/repair');
+    expect(repairResources).not.toHaveBeenCalled();
+    const record = structuredClone(f.record());
+    expect(await f.service.repair(eid, oid, f.authority)).toMatchObject({ phase: 'ready', state: 'ready' });
+    expect(repairResources).toHaveBeenCalledOnce();
+    // Nothing of the set-up is issued again, and the record is exactly as it was.
+    expect(count()).toEqual(effects);
+    expect(f.record()).toEqual(record);
+    expect(f.journal.filter((phase) => phase === 'provider-issued')).toHaveLength(1);
+  });
+
+  it('reports a refused repair as a hold and leaves the laptop as it was', async () => {
+    const { f, repairResources, effects, count } = await published();
+    f.setDestination({ ...f.destination()!, resources: null });
+    repairResources.mockImplementationOnce(async () => {
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_FAILED');
+    });
+    expect(await f.service.repair(eid, oid, f.authority)).toMatchObject({
+      phase: 'ready',
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_FAILED',
+    });
+    expect(count()).toEqual(effects);
+    // The read after it offers the repair again.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ allowedActions: ['observe', 'repair'] });
+  });
+
+  it('repairs only a laptop whose set-up has finished, under the authority of its own record', async () => {
+    const f = fixture();
+    const repairResources = vi.fn(async () => {});
+    Object.assign(f.engine, { repairResources });
+    f.engine.preparePool.mockImplementationOnce(async () => {
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_FAILED');
+    });
+    await f.service.begin(eid, f.request, f.authority);
+    await expect(f.service.repair(eid, oid, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_RESOURCE_REPAIR_SCOPE_UNSUPPORTED',
+    });
+    await expect(f.service.repair(eid, '40000000-0000-4000-8000-000000000004', f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_UNKNOWN_OPERATION',
+    });
+    f.revoke();
+    await expect(f.service.repair(eid, oid, f.authority)).rejects.toThrow('revoked');
+    expect(repairResources).not.toHaveBeenCalled();
+  });
+});
+
+describe('an office restart in the middle of a set-up step', () => {
+  /** Each effect of a set-up, by the mock that carries it out. */
+  const effects = (f: ReturnType<typeof fixture>) =>
+    ({
+      preparePool: f.engine.preparePool,
+      createDestination: f.engine.createDestination,
+      start: f.engine.start,
+      configureResources: f.engine.configureResources,
+      provisionIdentity: f.engine.provisionIdentity,
+      launch: f.provider.launch,
+    }) as Record<string, ReturnType<typeof vi.fn>>;
+
+  it.each(['preparePool', 'createDestination', 'start', 'configureResources', 'provisionIdentity', 'launch'])(
+    'leaves a record that the next office continues after %s, without repeating a launch',
+    async (step) => {
+      const f = fixture();
+      const effect = effects(f)[step]!;
+      const original = effect.getMockImplementation()!;
+      // The office stops for good while this effect is in flight: it never returns.
+      effect.mockImplementationOnce(async (...args: unknown[]) => {
+        await (original as (...values: unknown[]) => Promise<void>)(...args);
+        await new Promise(() => {});
+      });
+      void f.service.begin(eid, f.request, f.authority).catch(() => undefined);
+      for (let tries = 0; tries < 200 && effect.mock.calls.length === 0; tries++)
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      expect(effect).toHaveBeenCalledOnce();
+      expect(f.service.flightSince(eid)).toEqual(expect.any(Number));
+      // A new office process reads the record and goes on from it.
+      const next = f.make();
+      const result = await next.begin(eid, f.request, f.authority);
+      expect(result).toMatchObject({ state: 'ready', phase: 'ready' });
+      expect(f.provider.launch).toHaveBeenCalledOnce();
+      expect(effect).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('never launches again a provider whose launch was cut off before it was seen running', async () => {
+    const f = fixture();
+    // The launch is on record as issued, and the office stops before the provider shows.
+    f.provider.launch.mockImplementationOnce(async () => {
+      await new Promise(() => {});
+    });
+    void f.service.begin(eid, f.request, f.authority).catch(() => undefined);
+    for (let tries = 0; tries < 200 && f.provider.launch.mock.calls.length === 0; tries++)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    const next = f.make();
+    expect(await next.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'provider-issued',
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
   });
 });

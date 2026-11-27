@@ -1,19 +1,29 @@
 { pkgs, src }:
 let
+  lib = pkgs.lib;
   original = src.origSrc or src;
-  keep = import ./source-filter-policy.nix { inherit (pkgs) lib; };
+  # Only the modules the client entry can import, so an edit to any other file
+  # under apps/web/src leaves this source, the bundle and the capsule unchanged.
+  # A module the scan misses is absent here and esbuild refuses the bundle.
+  imported = map (file: "apps/web/src/${file}") (import ./typescript-import-closure.nix {
+    inherit lib;
+    root = original + "/apps/web/src";
+    entry = "worker-client-cli.ts";
+  });
+  ancestors = file: let parts = lib.splitString "/" file; in
+    lib.genList (count: lib.concatStringsSep "/" (lib.take (count + 1) parts)) (builtins.length parts - 1);
+  selected = lib.genAttrs ([
+    "THIRD_PARTY_NOTICES.md" "apps/web/LICENSE"
+    "apps/web/package.json" "apps/web/package-lock.json" "apps/web/tsconfig.json"
+    "apps/web/scripts/build-worker-client.mts"
+  ] ++ imported) (_: true);
+  directories = lib.genAttrs (lib.concatMap ancestors (builtins.attrNames selected)) (_: true);
   source = builtins.path {
     path = original;
     name = "reverie-worker-client-source";
     filter = path: type:
-      let rel = pkgs.lib.removePrefix ((toString original) + "/") (toString path); in
-      builtins.elem rel [
-        "THIRD_PARTY_NOTICES.md" "apps" "apps/web" "apps/web/LICENSE"
-        "apps/web/package.json" "apps/web/package-lock.json" "apps/web/tsconfig.json"
-        "apps/web/scripts" "apps/web/scripts/build-worker-client.mts" "apps/web/src"
-      ] || (pkgs.lib.hasPrefix "apps/web/src/" rel
-        && rel != "apps/web/src/web/public"
-        && keep rel type);
+      let rel = lib.removePrefix ((toString original) + "/") (toString path); in
+      if type == "directory" then directories ? ${rel} else selected ? ${rel};
   };
   lock = builtins.fromJSON (builtins.readFile (original + "/apps/web/package-lock.json"));
   # The bundled client imports these npm packages. esbuild rejects unresolved imports.

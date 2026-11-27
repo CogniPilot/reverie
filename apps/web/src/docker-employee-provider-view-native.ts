@@ -1,5 +1,6 @@
 /** Fixed read/attach-only native protocol. These bytes and returned descriptors
  * are DATA; the original Engine-minted view still owns application admission. */
+import { PROVIDER_EXIT_MAX_LINES } from './docker-provider-exit.js';
 export type DockerProviderRuntimeNamespace = 'session-v1';
 /** Placement DATA only. Callers retain their original private native authority. */
 export function dockerProviderSocketLabel(
@@ -67,6 +68,45 @@ export const DOCKER_PROVIDER_VIEW_ENV = Object.freeze([
   '--env',
   'LD_LIBRARY_PATH=',
 ]);
+/**
+ * Whether a tmux process of the laptop user is alive, read from the process table. It is what stands behind the
+ * answer "no agent runs here" when the tmux socket FILE is missing: the laptop's /tmp is a bind on the scratch
+ * disk, so anything that clears it removes the file under a server that still runs, with the agent in it. A missing
+ * file alone therefore proves nothing. No tmux process of that user is a finding: the office starts an agent only
+ * inside tmux, and without a server its pane is gone. Any tmux process, or a table that cannot be read, means the
+ * probe does not know, and it says so by refusing.
+ *
+ * This function is put into `DOCKER_PROVIDER_VIEW_PROGRAM` by its text. It must not use anything from outside its
+ * own body, and it has no inner function.
+ */
+export function dockerProviderTmuxMayRun(
+  files: {
+    readdirSync(path: string): string[];
+    statSync(path: string): { uid: number };
+    readFileSync(path: string, encoding: 'utf8'): string;
+  },
+  uid: number,
+  self: number
+): boolean {
+  let names: string[];
+  try {
+    names = files.readdirSync('/proc');
+  } catch {
+    return true;
+  }
+  for (const name of names) {
+    if (!/^[1-9][0-9]*$/.test(name) || Number(name) === self) continue;
+    try {
+      if (files.statSync('/proc/' + name).uid !== uid) continue;
+      if (/^tmux/.test(files.readFileSync('/proc/' + name + '/comm', 'utf8'))) return true;
+    } catch (error) {
+      // A process that ended while it was read is gone. One that cannot be read may be the server.
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code !== 'ENOENT' && code !== 'ESRCH') return true;
+    }
+  }
+  return false;
+}
 export const DOCKER_PROVIDER_VIEW_TMUX = '/opt/reverie-worker-tools/bin/tmux';
 export const DOCKER_PROVIDER_VIEW_PROGRAM = String.raw`
 const fs = require('node:fs');
@@ -79,7 +119,7 @@ const tmuxProgram = ${JSON.stringify(DOCKER_PROVIDER_VIEW_TMUX)};
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 function refuse() { throw Error('Existing Docker provider view unavailable'); }
 if (!uuid.test(sid || '') || !uuid.test(operation || '') ||
-    !['presence', 'observe', 'attach'].includes(mode) ||
+    !['presence', 'observe', 'attach', 'work'].includes(mode) ||
     !['none', 'generation'].includes(hookKind) ||
     argv.length !== (mode === 'attach' ? 8 : 4)) refuse();
 for (const path of ['/', '/opt', '/opt/reverie-worker-tools', '/opt/reverie-worker-tools/bin']) {
@@ -102,9 +142,9 @@ const childEnvironment = {
   LOCALE_ARCHIVE: '/opt/reverie-worker-tools/share/locale/locale-archive',
 };
 const target = '=reverie-dkr-' + sid;
-function tmux(args, optional = false) {
+function tmux(args, optional = false, maxBuffer = 4096) {
   const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, ...args],
-    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer });
   if (result.error || result.signal) refuse();
   if (optional && result.status === 1) return undefined;
   if (result.status !== 0) refuse();
@@ -125,6 +165,99 @@ function selected() {
   if (!hook) refuse();
   return { paneId: match[1], panePid: Number(match[2]), hooks: { kind: 'generation', generation: hook[1] } };
 }
+// Whether anything of the laptop's user runs that is neither the agent nor part of the laptop itself. A laptop
+// runs these and nothing else by itself:
+//   - PID 1, the laptop's init: an idle reaper that starts nothing;
+//   - the tmux server of the laptop's own provider socket;
+//   - the agent: the process of the provider session's pane and everything that descends from it;
+//   - the fixed image's model relay, which is started with the agent in its pane;
+//   - whatever an Engine exec started from outside: this read, the office's other reads and a terminal viewer's
+//     tmux client. Inside the laptop's process namespace the first process of such a tree has parent 0, and
+//     nothing that runs inside a laptop can make one: a job that leaves its parent is given to PID 1.
+// Every other live process of the laptop's user is other work: a job started with nohup, setsid or disown that
+// outlived its shell, a tmux server of the employee's own, or another window or session on the provider's
+// server. Only what is there in two looks a quarter of a second apart is counted, by PID and start time.
+if (mode === 'work') {
+  const uid = process.getuid();
+  const ask = (args) => {
+    const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, 'display-message', '-p', ...args],
+      { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+    if (result.error || result.signal) refuse();
+    return result.status === 0 ? result.stdout : undefined;
+  };
+  // No server, or no provider session on it: there is no agent, and what else runs is still counted.
+  const served = /^([1-9][0-9]{0,9})\n$/.exec(ask(['#{pid}']) || '');
+  const shown = served ? /^([1-9][0-9]{0,9}) ([01])\n$/.exec(ask(['-t', target + ':', '#{pane_pid} #{pane_dead}']) || '') : null;
+  // tmux did not answer for the laptop's own socket. With no tmux process of this user alive there is no agent,
+  // and whatever else runs is counted. With one alive it may be the provider's own server under a socket file
+  // that was cleared (see dockerProviderTmuxMayRun): which processes are the agent's is not known then, and a
+  // guess would call the agent itself other work. The read refuses, which every caller takes for unknown.
+  const tmuxMayRun = served ? false : (${dockerProviderTmuxMayRun.toString()})(fs, uid, process.pid);
+  if (tmuxMayRun) refuse();
+  const serverPid = served ? Number(served[1]) : undefined;
+  const agentPid = shown && shown[2] === '0' ? Number(shown[1]) : undefined;
+  function table() {
+    const rows = new Map();
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^[1-9][0-9]{0,9}$/.test(name)) continue;
+      try {
+        const owner = fs.statSync('/proc/' + name).uid;
+        const raw = fs.readFileSync('/proc/' + name + '/stat', 'utf8');
+        const open = raw.indexOf('('), end = raw.lastIndexOf(') ');
+        const fields = raw.slice(end + 2).trim().split(/\s+/);
+        if (open < 0 || end < open || !/^[0-9]{1,10}$/.test(fields[1] || '') ||
+            !/^[1-9][0-9]{0,19}$/.test(fields[19] || '')) refuse();
+        let program = '';
+        try { program = fs.readlinkSync('/proc/' + name + '/exe'); } catch (error) { program = ''; }
+        rows.set(Number(name), { parent: Number(fields[1]), state: fields[0], born: fields[19],
+          name: raw.slice(open + 1, end), owner, program });
+      } catch (error) {
+        // It ended between the listing and the read.
+        if (!error || (error.code !== 'ENOENT' && error.code !== 'ESRCH')) throw error;
+      }
+    }
+    return rows;
+  }
+  function others(rows) {
+    const found = new Map();
+    for (const [pid, row] of rows) {
+      if (row.owner !== uid || ['Z', 'X', 'x'].includes(row.state)) continue;
+      if (pid === 1 || pid === serverPid || row.program === '/bin/reverie-model-relay') continue;
+      let at = pid, top = pid, agent = false, whole = false;
+      for (let steps = 0; steps < 256; steps++) {
+        if (at === agentPid) agent = true;
+        const entry = rows.get(at);
+        if (!entry) break;
+        top = at;
+        if (entry.parent === 0) { whole = true; break; }
+        at = entry.parent;
+      }
+      if (agent || (whole && top !== 1)) continue;
+      found.set(pid + ':' + row.born, row.name);
+    }
+    return found;
+  }
+  const first = others(table());
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  const second = others(table());
+  const names = [];
+  let count = 0;
+  for (const [key, name] of second) {
+    if (!first.has(key)) continue;
+    count++;
+    const plain = name.replace(/[^A-Za-z0-9._+-]/g, '?').slice(0, 16);
+    if (names.length < 5 && !names.includes(plain)) names.push(plain);
+  }
+  // What the whole laptop has used of the CPU so far, from its own cgroup, where the laptop can read it.
+  let cpuUsec = null;
+  try {
+    const used = /^usage_usec ([0-9]{1,20})$/m.exec(fs.readFileSync('/sys/fs/cgroup/cpu.stat', 'utf8'));
+    if (used) cpuUsec = used[1];
+  } catch (error) { cpuUsec = null; }
+  process.stdout.write(JSON.stringify({ version: 1, purpose: 'reverie-laptop-other-work-v1',
+    agent: agentPid !== undefined, others: count, names, cpuUsec }) + '\n');
+  process.exit(0);
+}
 if (mode === 'presence') {
   try {
     const directory = '/tmp/tmux-' + process.getuid();
@@ -134,16 +267,53 @@ if (mode === 'presence') {
     if (!socket.isSocket() || socket.uid !== process.getuid()) refuse();
   } catch (error) {
     if (!error || error.code !== 'ENOENT') throw error;
+    // The file is gone. That alone says nothing: see dockerProviderTmuxMayRun.
+    const tmuxMayRun = (${dockerProviderTmuxMayRun.toString()})(fs, process.getuid(), process.pid);
+    if (tmuxMayRun) refuse();
     process.stdout.write('ABSENT\n');
     process.exit(0);
   }
-  const matches = tmux(['list-sessions', '-F', '#{session_name}']).split('\n')
+  // A socket file outlives its server across a container replacement or host
+  // restart. tmux names that exact condition; no provider can be attached to it.
+  const listed = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, 'list-sessions', '-F', '#{session_name}'],
+    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+  if (listed.error || listed.signal) refuse();
+  if (listed.status === 1 && listed.stdout === '' &&
+      listed.stderr === 'no server running on /tmp/tmux-' + process.getuid() + '/' + socketLabel + '\n') {
+    process.stdout.write('ABSENT\n');
+    process.exit(0);
+  }
+  if (listed.status !== 0) refuse();
+  const matches = listed.stdout.split('\n')
     .filter(value => value === 'reverie-dkr-' + sid);
   if (matches.length === 0) {
     process.stdout.write('ABSENT\n');
     process.exit(0);
   }
   if (matches.length !== 1) refuse();
+  // A provider that exited non-zero inside its launch window keeps its pane for
+  // a bounded time. That pane proves the exit and holds the last screen; it is
+  // reported as such and is never a running provider.
+  const ended = () => /^1\|([0-9]{0,3})\|([0-9]{0,3})\n$/.exec(
+    tmux(['display-message', '-p', '-t', target + ':', '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}']));
+  const dead = ended();
+  if (dead) {
+    if (tmux(['show-environment', '-t', target, 'REVERIE_DOCKER_OPERATION_ID']) !==
+        'REVERIE_DOCKER_OPERATION_ID=' + operation + '\n' ||
+        tmux(['show-environment', '-t', target, 'REVERIE_SESSION_ID']) !==
+        'REVERIE_SESSION_ID=' + sid + '\n') refuse();
+    const screen = tmux(['capture-pane', '-p', '-J', '-S', '-200', '-t', target + ':'], false, 262144);
+    const again = ended();
+    if (!again || again[0] !== dead[0]) refuse();
+    const lines = screen.split('\n').map(line => line.trimEnd()).filter(line => line !== '')
+      .slice(-${PROVIDER_EXIT_MAX_LINES}).map(line => line.slice(0, 1024));
+    process.stdout.write('EXITED ' + JSON.stringify({
+      status: dead[1] === '' ? null : Number(dead[1]),
+      signal: dead[2] === '' ? null : Number(dead[2]),
+      lines,
+    }) + '\n');
+    process.exit(0);
+  }
 }
 function birth(pid) {
   const directory = '/proc/' + pid;

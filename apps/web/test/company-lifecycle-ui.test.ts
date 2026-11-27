@@ -202,7 +202,7 @@ it('reports a network failure and restores controls for another attempt', async 
   expect(error()).toBe('Could not update River. Try again.');
   expect(button('Leave office: River').disabled).toBe(false);
   expect((button('Leave office: River') as unknown as HTMLInputElement).checked).toBe(true);
-  expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('Connected');
+  expect(h.document.querySelector('.ca-company-state')!.textContent).toBe('Idle');
 });
 
 it('does not offer to repeat a saved change when the subsequent refresh fails', async () => {

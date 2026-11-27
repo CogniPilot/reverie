@@ -231,7 +231,8 @@ for (const width of [320, 1280])
             body: { sessionId, sessionGeneration: 2 },
           },
         ]);
-        expect(await company.locator('.ca-company-state').textContent()).toBe('Agent health unknown');
+        expect(await company.locator('.ca-company-state').textContent()).toBe('Unknown');
+        expect(await company.locator('.ca-company-reason').textContent()).toBe('Health not confirmed');
         expect(errors).toEqual([]);
       } finally {
         await browser.close();

@@ -23,6 +23,7 @@ async function fixture(
     approved?: boolean;
     owner?: boolean;
     stoppedPool?: boolean;
+    driftedPool?: boolean;
     action?: string[];
     reply?: (path: string, body: unknown) => unknown | Promise<unknown>;
     malformed?: boolean;
@@ -145,7 +146,14 @@ async function fixture(
             sessionGeneration: employee.sessionGeneration,
             ...(options.stoppedPool
               ? { state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', allowedActions: [] }
-              : { state: 'reconciliation-required', allowedActions: ['reconcile-pool'], scopeDigest: 'a'.repeat(64) }),
+              : options.driftedPool
+                ? {
+                    state: 'held',
+                    code: 'DOCKER_POOL_POLICY_CHANGED',
+                    allowedActions: ['repair-pool'],
+                    scopeDigest: 'c'.repeat(64),
+                  }
+                : { state: 'reconciliation-required', allowedActions: ['reconcile-pool'], scopeDigest: 'a'.repeat(64) }),
           },
         };
       if (path === profileBase + '/docker-pool/cold-preview' && options.stoppedPool)
@@ -310,6 +318,22 @@ it('uses the exact API pool scope/currentSID/gen without requesting limits or st
   await f.click('Reconcile shared pool observation');
   expect(f.writes()).toHaveLength(1);
   expect(f.writes()[0]!.path).not.toMatch(/continuation|apply/);
+});
+it('offers to put the approved pool limits back when the running pool no longer shows them', async () => {
+  const f = await fixture({
+    driftedPool: true,
+    reply: async (path, body) => {
+      expect(path).toBe(base + '/docker-pool/repair');
+      // The request carries the hold it confirms and nothing else: no limit, no policy.
+      expect(body).toEqual({ sessionId: sid, sessionGeneration: 9, expectedScopeDigest: 'c'.repeat(64) });
+      return { ok: true, data: { sessionId: sid, sessionGeneration: 9, state: 'retained', allowedActions: [] } };
+    },
+  });
+  expect(f.panel().textContent).toContain('Laptops keep running');
+  expect(f.button('Reconcile shared pool observation')).toBeUndefined();
+  await f.click('Put approved pool limits back');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.writes()[0]!.path).not.toMatch(/continuation|apply|reconcile/);
 });
 it('requires explicit owner confirmation before submitting the stopped pool recovery preview', async () => {
   const f = await fixture({

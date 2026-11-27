@@ -11,6 +11,8 @@ mod claim;
 mod diagnostic;
 mod invalid_create;
 pub(crate) use invalid_create::PROOF as INVALID_CREATE_PROOF;
+mod retention;
+pub(crate) use retention::RecordedRoot;
 #[cfg(test)]
 mod tests;
 
@@ -308,6 +310,7 @@ impl Operation {
                 None
             },
             diagnostic: self.snapshot_diagnostic()?,
+            automatic_restore: self.automatic_restore()?,
             readiness_failure: None,
         })
     }

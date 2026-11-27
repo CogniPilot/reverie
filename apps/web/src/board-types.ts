@@ -276,3 +276,12 @@ export interface BoardView extends BoardState {
   pins: BoardPin[];
   pace: { owners: Record<string, Pace>; milestones: Record<string, Pace & { done: number; total: number }> };
 }
+
+/** The stored part of a Board view: it changes only with the state key (board revision plus employee names). */
+type StoredBoardField = Exclude<keyof BoardState, 'rev' | 'pollNotes'> | 'ownerIds';
+
+/**
+ * GET /api/board?known=<stateKey> when the caller already holds that state key: the live part of the view only. The
+ * caller keeps its own cards, decisions and display owners.
+ */
+export type BoardRefresh = Omit<BoardView, StoredBoardField> & { stateKey: string; unchanged: true };

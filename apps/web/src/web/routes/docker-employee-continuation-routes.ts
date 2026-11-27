@@ -1,5 +1,7 @@
 import type { DockerWorkerReattachHelper } from '../../docker-worker-reattach-helper.js';
 import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
+import type { DockerLaptopLimitUpkeep } from '../../docker-laptop-limit-upkeep.js';
+import { dockerReprovisionHoldDetail, type DockerAbsentReprovision } from '../../docker-absent-reprovision.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -10,13 +12,16 @@ import {
   DockerEmployeeContinuationError,
   dockerContinuationDigest,
   type DockerContinuationAuthority,
+  type DockerContinuationResult,
 } from '../../docker-employee-continuation.js';
+import { describeDockerProviderExit } from '../../docker-provider-exit.js';
 import {
   DockerEmployeeContinuationRequest,
   DockerEmployeeResourcePolicy,
 } from '../../docker-employee-continuation-data.js';
 import { CompanyDockerContinuationStore } from '../../docker-employee-store.js';
 import { sameOrigin } from '../../owner-auth/policy.js';
+import { dockerRecoveryGuidance } from '../../docker-recovery-guidance.js';
 const uuid = z
   .string()
   .uuid()
@@ -33,6 +38,13 @@ const policyApproval = z
 const start = z
   .object({ request: DockerEmployeeContinuationRequest, policyApproval: policyApproval.optional() })
   .strict();
+/** A hold whose provider is known to have exited says so in a sentence. The
+ * code stays the contract; the sentence is for the person reading it. */
+function described(result: DockerContinuationResult): DockerContinuationResult {
+  return result.providerExit && !result.message
+    ? { ...result, message: describeDockerProviderExit(result.providerExit) }
+    : result;
+}
 export interface DockerContinuationVerifiedWorker {
   readonly owner: string | undefined;
   readonly sessionId: string;
@@ -52,7 +64,9 @@ export function registerDockerEmployeeContinuationRoutes(
   auth: DockerContinuationRouteAuthentication,
   proposal?: (employeeId: string) => DockerPolicyProposal | undefined,
   pool?: DockerPoolReconciliation,
-  recoveryHelper?: DockerWorkerReattachHelper
+  recoveryHelper?: DockerWorkerReattachHelper,
+  absent?: DockerAbsentReprovision,
+  limits?: DockerLaptopLimitUpkeep
 ): void {
   const human = (req: FastifyRequest) =>
     req.headers['x-reverie-parent-session'] === undefined &&
@@ -87,8 +101,33 @@ export function registerDockerEmployeeContinuationRoutes(
     try {
       return { success: true, data: await body() };
     } catch (error) {
-      if (error instanceof DockerEmployeeContinuationError)
-        return reply.code(error.status).send({ success: false, error: { code: error.code } });
+      if (error instanceof DockerEmployeeContinuationError) {
+        // The code stays the contract; a sentence and the next step ride along
+        // for the refusals a person or managing agent has to act on.
+        const guidance = dockerRecoveryGuidance(error.code),
+          detail = error.cause as
+            | { networkCandidates?: unknown; pendingOperationId?: unknown; foreignHelpers?: unknown }
+            | undefined,
+          candidates = detail?.networkCandidates,
+          pending = detail?.pendingOperationId,
+          helpers = detail?.foreignHelpers;
+        return reply.code(error.status).send({
+          success: false,
+          error: {
+            code: error.code,
+            ...(guidance ? { message: guidance.message, allowedActions: guidance.allowedActions } : {}),
+            ...(Array.isArray(candidates) && candidates.every((name) => typeof name === 'string')
+              ? { networkCandidates: candidates }
+              : {}),
+            ...(typeof pending === 'string' && /^[0-9a-f-]{36}$/.test(pending) ? { pendingOperationId: pending } : {}),
+            ...(Array.isArray(helpers) && helpers.every((id) => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id))
+              ? { foreignHelpers: helpers }
+              : {}),
+            // A refusal before anything was recorded names the same two facts a hold does.
+            ...dockerReprovisionHoldDetail(error),
+          },
+        });
+      }
       if (error instanceof CompanyError)
         return reply
           .code(error.status)
@@ -118,6 +157,72 @@ export function registerDockerEmployeeContinuationRoutes(
       })
     );
   }
+  if (absent) {
+    // Owner only. A worker identity, parent session or service token never
+    // retires a record or defines a laptop, whatever its recovery permission.
+    const owner = (req: FastifyRequest) => {
+      if (!human(req) || !sameOrigin(req))
+        throw new CompanyError('Verified same-origin owner required to reprovision an absent laptop', 403);
+      const id = uuid.parse((req.params as { id: string }).id);
+      return { id, authority: capture(req, id) };
+    };
+    app.post('/api/company/employees/:id/docker-absent/preview', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const body = z.object({ template: z.unknown() }).strict().parse(req.body);
+        const preview = await absent.preview(id, body.template, authority);
+        // A preview that offers no action says why and where to go instead.
+        const guidance = preview.code ? dockerRecoveryGuidance(preview.code) : undefined;
+        return guidance ? { ...preview, message: guidance.message, nextActions: guidance.allowedActions } : preview;
+      })
+    );
+    app.post('/api/company/employees/:id/docker-absent/reprovision', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const result = await absent.reprovision(id, req.body, authority);
+        // A held operation says why, as the rebuild below does.
+        const guidance = result.code ? dockerRecoveryGuidance(result.code) : undefined;
+        return guidance ? { ...result, message: guidance.message, nextActions: guidance.allowedActions } : result;
+      })
+    );
+    // "Rebuild laptop": the same owner-only authentication, on its own routes so
+    // that nothing sent to the absent-laptop workflow above can ever select the
+    // authority to stop a running laptop or discard a live terminal.
+    app.post('/api/company/employees/:id/docker-rebuild/preview', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const body = z.object({ template: z.unknown() }).strict().parse(req.body);
+        const preview = await absent.previewRebuild(id, body.template, authority);
+        const guidance = 'code' in preview && preview.code ? dockerRecoveryGuidance(preview.code) : undefined;
+        return {
+          ...preview,
+          message:
+            guidance?.message ??
+            'Rebuilding discards the listed containers and the conversation in the laptop terminal. The employee, ' +
+              'their home directory, shared Nix store, scratch space, memories and session identity are kept, and a ' +
+              'fresh laptop source is created on their current plan. Confirm with the scope digest, then continue ' +
+              'the laptop until it is ready.',
+        };
+      })
+    );
+    app.post('/api/company/employees/:id/docker-rebuild/apply', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const result = await absent.rebuild(id, req.body, authority);
+        const guidance = result.code ? dockerRecoveryGuidance(result.code) : undefined;
+        return {
+          ...result,
+          message:
+            result.state === 'ready'
+              ? 'The old laptop is discarded and a fresh source exists. Read the resource policy, then continue the ' +
+                'laptop until it reports ready.'
+              : (guidance?.message ??
+                'The rebuild is recorded but not finished. Send the same request again to continue it.'),
+          allowedActions: result.state === 'ready' ? ['continue'] : (guidance?.allowedActions ?? ['retry']),
+        };
+      })
+    );
+  }
   if (pool) {
     app.get('/api/company/employees/:id/docker-pool/cold-preview', async (req, reply) =>
       run(reply, async () => {
@@ -140,10 +245,50 @@ export function registerDockerEmployeeContinuationRoutes(
         return pool.coldRecover(id, input, capture(req, id));
       })
     );
+    // Finishes a recovery that was issued and has not finished, as itself. It
+    // takes nothing: what is left to do is decided from the journal and from
+    // fresh reads. With no unfinished recovery it answers with the pool status.
+    app.post('/api/company/employees/:id/docker-pool/cold-resume', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        z.object({}).strict().parse(req.body ?? {});
+        return pool.coldResume(id, capture(req, id));
+      })
+    );
+    // Removes the pool's anchor while the Engine reports it dead, which the
+    // supervisor also does. It takes nothing: every fact is read again.
+    app.post('/api/company/employees/:id/docker-pool/remove-dead-anchor', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        z.object({}).strict().parse(req.body ?? {});
+        return pool.removeDeadAnchor(id, capture(req, id));
+      })
+    );
     app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);
         return pool.status(id, capture(req, id));
+      })
+    );
+    // Puts the already approved limits of the running pool back in place. It
+    // takes no policy: the only thing a caller chooses is to confirm the hold
+    // that the status read named. The same recovery permission as reconcile.
+    app.post('/api/company/employees/:id/docker-pool/repair', async (req, reply) =>
+      run(reply, async () => {
+        const id = uuid.parse((req.params as { id: string }).id);
+        const input = z
+          .object({
+            sessionId: uuid,
+            sessionGeneration: z.number().int().positive().safe(),
+            expectedScopeDigest: digest,
+          })
+          .strict()
+          .parse(req.body);
+        return pool.repair(id, input, capture(req, id));
       })
     );
     app.post('/api/company/employees/:id/docker-pool/reconcile', async (req, reply) =>
@@ -263,14 +408,31 @@ export function registerDockerEmployeeContinuationRoutes(
         await store.savePolicy(employeeId, authority.owner, approval.policy, current);
         current();
       }
-      return service.begin(employeeId, body.request, authority);
+      return described(await service.begin(employeeId, body.request, authority));
+    })
+  );
+  // Re-applies the already approved limits of one running laptop in place. The set-up service answers every step
+  // for an employee who is out of the office or stopped with DOCKER_CONTINUATION_OFFICE_CHANGED before it reads the
+  // laptop, so for such an employee the repair that does not ask about attendance answers: `{ operationId, limits }`
+  // with `unchanged` or `restored`. It attaches nothing, starts nothing and changes no attendance.
+  app.post('/api/company/employees/:id/docker-continuation/repair', async (req, reply) =>
+    run(reply, async () => {
+      const employeeId = uuid.parse((req.params as { id: string }).id),
+        body = z.object({ operationId: uuid }).strict().parse(req.body),
+        authority = capture(req, employeeId),
+        employee = company.store
+          .snapshot()
+          .employees.find((member) => member.id === employeeId && member.owner === authority.owner);
+      if (limits && employee && (employee.onVacation || employee.desiredRunning !== true))
+        return limits.restore(employeeId, body.operationId, authority);
+      return described(await service.repair(employeeId, body.operationId, authority));
     })
   );
   app.post('/api/company/employees/:id/docker-continuation/observe', async (req, reply) =>
     run(reply, async () => {
       const employeeId = uuid.parse((req.params as { id: string }).id),
         body = z.object({ operationId: uuid }).strict().parse(req.body);
-      return service.observe(employeeId, body.operationId, capture(req, employeeId));
+      return described(await service.observe(employeeId, body.operationId, capture(req, employeeId)));
     })
   );
 }

@@ -2,18 +2,48 @@
  * cleanup/rebind path is never a fallback for a boxed worker. */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
+import { dockerRecoveryGuidance } from './docker-recovery-guidance.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import type { PlanMoveDockerJournal, PlanMoveDockerJournalStore } from './plan-move-docker.js';
 import {
   PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
+  PlanMoveStepTimedOut,
+  planMoveComposerWaitContinues,
   type PlanMoveInput,
   type PlanMoveRecord,
   type PlanMoveExecutor,
   type PlanMoveSourceViewRetirement,
 } from './plan-move.js';
+/** Why a move is held. A held resource step is told in a sentence, with what
+ * the owner can do about it on a plan move; its code stays in the text. */
+export function dockerPlanMoveFailureMessage(error: unknown): string {
+  if (
+    error instanceof DockerEmployeeContinuationError &&
+    (error.code.startsWith('DOCKER_RESOURCE_HELPER_') ||
+      error.code.startsWith('DOCKER_STORAGE_HOLDER_STATUS_') ||
+      error.code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE')
+  ) {
+    const guidance = dockerRecoveryGuidance(error.code);
+    // A failed holder read also says how it ended: an exit status and, when the helper refused, its own code.
+    const detail = error.cause as { exitCode?: unknown; helper?: unknown } | undefined,
+      ended = [
+        ...(Number.isInteger(detail?.exitCode) ? [`exit ${detail!.exitCode as number}`] : []),
+        ...(typeof detail?.helper === 'string' && /^BOXED_[A-Z0-9_]{1,64}$/.test(detail.helper) ? [detail.helper] : []),
+      ];
+    if (guidance)
+      return (
+        `${guidance.message} This step belongs to a plan move: ` +
+        (guidance.allowedActions.includes('retry')
+          ? 'continue the move to try again, or abandon it.'
+          : 'abandon the move first.') +
+        ` (${[error.code, ...ended].join(', ')})`
+      );
+  }
+  return error instanceof Error ? error.message : 'Docker plan move failed';
+}
 function frozen<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object') {
     Object.values(value).forEach((child) => frozen(child));
@@ -56,6 +86,9 @@ export interface DockerPlanMoveFlight {
   /** Exact in-memory original owner. No native effect authority is conferred. */
   current(): void;
   signal: AbortSignal;
+  /** The move was taken from this flight because its step never returned. It must not touch the record any more:
+   * the move is held by its owner, and may already be in another flight's hands. */
+  released?(): boolean;
 }
 function checkedFence(fence: unknown): () => void {
   if (typeof fence !== 'function') throw new PlanMoveError('Native plan verification is unavailable');
@@ -145,8 +178,11 @@ export async function runDockerPlanMove(
   };
   // Only a genuine, positively observed pending composer permits another read.
   // Unknown native outcomes never retry STOP, CREATE, START or the work handoff.
+  // A candidate the office is still walking through its provider's first-run
+  // screens is starting, not failed: it gets a bounded grace, and the refusal
+  // that finally ends a wait names the screen it stopped on.
   const readyRead = async <T>(read: () => Promise<T>): Promise<T> => {
-    const deadline = performance.now() + 120_000;
+    const started = performance.now();
     for (;;) {
       journal.current();
       flight.signal.throwIfAborted();
@@ -156,7 +192,11 @@ export async function runDockerPlanMove(
         flight.signal.throwIfAborted();
         return result;
       } catch (error) {
-        if (!(error instanceof PlanMoveComposerNotReady) || performance.now() >= deadline) throw error;
+        if (
+          !(error instanceof PlanMoveComposerNotReady) ||
+          !planMoveComposerWaitContinues(error, performance.now() - started)
+        )
+          throw error;
         journal.current();
         await delay(1000, undefined, { signal: flight.signal });
       }
@@ -246,6 +286,7 @@ export async function runDockerPlanMove(
     return retireSource();
   } catch (error) {
     publication = 'failed';
+    if (flight.released?.()) return undefined;
     if (mode === 'reconcile' && completedBefore) {
       record.phase = 'completed';
       return {
@@ -255,8 +296,14 @@ export async function runDockerPlanMove(
     }
     // A changed credential snapshot cannot satisfy the original reservation.
     // Release it only after the store's exact-cursor CAS confirms nothing was issued.
+    // A step the watch told to stop is not a cancellation: the move stays held, as an office restart would leave it.
+    // A wait that was cut short reports only that it was aborted, so the watch's own sentence is recorded instead.
+    const reason: unknown = flight.signal.aborted ? flight.signal.reason : undefined,
+      timedOut = reason instanceof PlanMoveStepTimedOut ? reason : undefined,
+      cancelled = flight.signal.aborted && !timedOut,
+      cut = error === timedOut || (error instanceof Error && error.name === 'AbortError');
     const failedBeforeEffects =
-      ((flight.signal.aborted && record.phase === 'waiting') ||
+      ((cancelled && record.phase === 'waiting') ||
         (error instanceof PlanMoveAccountSnapshotChanged && (mode === 'new' || mode === 'continue'))) &&
       !cursor.material &&
       !cursor.sourceStop &&
@@ -265,7 +312,7 @@ export async function runDockerPlanMove(
       !cursor.paidDispatch &&
       !cursor.companyPublication &&
       !cursor.handoff;
-    const message = (error instanceof Error ? error.message : 'Docker plan move failed').slice(0, 4000);
+    const message = dockerPlanMoveFailureMessage(timedOut && cut ? timedOut : error).slice(0, 4000);
     record.phase = 'recovery-required';
     record.error = message;
     try {

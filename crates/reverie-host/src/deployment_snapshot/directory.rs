@@ -46,15 +46,7 @@ impl Directory {
                 .ok_or_else(|| super::SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
         )?;
         let result = (|| {
-            let info = parent.file().metadata()?;
-            require(
-                info.uid() == native::uid() && info.mode() & 0o022 == 0,
-                "SNAPSHOT_DESTINATION_CUSTODY",
-            )?;
-            let name = path
-                .file_name()
-                .ok_or_else(|| super::SnapshotError::refused("SNAPSHOT_DESTINATION"))?;
-            let anchored = parent.fd_path().join(name);
+            let anchored = parent.new_child(path)?;
             fs::DirBuilder::new().mode(0o700).create(&anchored)?;
             let directory = Self::open(path)?;
             let checked = (|| {
@@ -77,6 +69,37 @@ impl Directory {
             (Ok(directory), Err(error)) => combine(Err(error), directory.close()),
             (Err(error), closed) => combine(Err(error), closed),
         }
+    }
+    /// This directory may hold a new private child: the caller owns it and
+    /// nobody else can write to it. Returns the child's descriptor-anchored path.
+    fn new_child(&self, path: &Path) -> Result<PathBuf> {
+        let info = self.file().metadata()?;
+        require(
+            info.uid() == native::uid() && info.mode() & 0o022 == 0,
+            "SNAPSHOT_DESTINATION_CUSTODY",
+        )?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| super::SnapshotError::refused("SNAPSHOT_DESTINATION"))?;
+        Ok(self.fd_path().join(name))
+    }
+    /// Whether `create` would accept this path now, without creating it.
+    pub(super) fn admits(path: &Path) -> Result<()> {
+        let parent = Self::open(
+            path.parent()
+                .ok_or_else(|| super::SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
+        )?;
+        let unused =
+            parent
+                .new_child(path)
+                .and_then(|anchored| match fs::symlink_metadata(anchored) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(error) => Err(error.into()),
+                    Ok(_) => Err(super::SnapshotError::refused(
+                        "SNAPSHOT_DESTINATION_OCCUPIED",
+                    )),
+                });
+        combine(unused, parent.close())
     }
     pub(super) fn create_child(&self, name: &str) -> Result<Self> {
         self.check()?;

@@ -122,6 +122,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
       officeEnter: 'reverie agent office "<employee-id>" --in --json',
       officeLeave: 'reverie agent office "<employee-id>" --out --json',
       restartEmployee: 'reverie agent restart-employee "<employee-id>" --json',
+      employeeModel: 'reverie agent model "<employee-id>" ["<model-id>"] --json',
       wakeEmployee: 'reverie agent wake-employee "<employee-id>" --json',
       reconnectViewer: 'reverie agent reconnect-viewer "<employee-id>" --json',
       viewerStatus: 'reverie agent viewer-status "<employee-id>" --json',
@@ -161,6 +162,7 @@ export async function agentCapabilities(deps: AgentDeps, references = githubCred
     deps.io.out(`Plan preconditions: ${capabilities.company.planPreconditions}`);
     deps.io.out(`Canonical team Goal management: ${capabilities.company.manageGoals === true ? 'allowed' : capabilities.company.manageGoals === false ? 'denied' : 'unknown (server does not report this grant)'}`);
     deps.io.out(`Goal preconditions: ${capabilities.company.goalPreconditions ?? 'Requires the separately authenticated canonical Goal broker and current grants; not provider-native /goal or PAUSED control.'}`);
+    deps.io.out(`Set employee models: ${capabilities.company.manageModels === true ? 'allowed' : capabilities.company.manageModels === false ? 'denied' : 'unknown (server does not report this grant)'}; read or set with ${report.commands.employeeModel}`);
     deps.io.out(
       `Website restart: host grant must be checked. Redeploy: host operator required; restart does not install new code.`
     );

@@ -153,6 +153,48 @@ export async function requireDockerMemoryHighHelperImage(
     refuse('DOCKER_RESOURCE_MEMORY_HIGH_WRITE_UNSUPPORTED');
 }
 
+/** Deny-only qualification of the separately operator-pinned image for new
+ * `configure-high` leaf writers. A created container inherits its image's
+ * labels, and the fixed leaf writer configuration carries the purpose label
+ * alone, so an image built for another writer cannot be selected here. */
+export async function requireDockerLeafWriterHelperImage(
+  command: Pick<DockerEngineCommand, 'run'>,
+  selected: string,
+  current: () => void
+): Promise<void> {
+  if (!/^sha256:[a-f0-9]{64}$/.test(selected)) refuse();
+  current();
+  let inspected: unknown;
+  try {
+    inspected = JSON.parse(await command.run(['image', 'inspect', selected]));
+  } catch {
+    // The Engine's own text is not kept. An image that cannot be read is not selected.
+    return refuse('DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE');
+  }
+  current();
+  const raw = z
+    .array(
+      z.object({
+        Id: z.string(),
+        Config: z.object({
+          User: z.string(),
+          Entrypoint: z.array(z.string()),
+          Labels: z.record(z.string(), z.string()),
+        }),
+      })
+    )
+    .length(1)
+    .safeParse(inspected);
+  if (
+    !raw.success ||
+    raw.data[0]!.Id !== selected ||
+    raw.data[0]!.Config.User !== '0:0' ||
+    !isDeepStrictEqual(raw.data[0]!.Config.Entrypoint, ['/bin/reverie-docker-resources']) ||
+    !isDeepStrictEqual(raw.data[0]!.Config.Labels, { 'org.reverie.purpose': 'boxed-resource-helper-v1' })
+  )
+    refuse('DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE');
+}
+
 /** Deny-only qualification of the separately operator-pinned restore image. */
 export async function requireDockerPoolRestoreHelperImage(
   command: Pick<DockerEngineCommand, 'run'>,

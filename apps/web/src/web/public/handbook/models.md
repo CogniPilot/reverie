@@ -10,6 +10,8 @@ An expert's identity, memory and room membership are distinct from its selected 
 
 Keep owner choices outside shareable project source. Provider sign-in belongs in Plans; changing a runtime is a separate action.
 
+Experts with **Set employee models** use `reverie agent model EMPLOYEE_ID [MODEL_ID]`; it applies at an idle, empty composer.
+
 A configured local-model endpoint appears alongside subscription plans. Its Company card shows model and shared hardware readings rather than a weekly subscription reset. GPU capacity and memory are shared; local inference does not have unlimited hardware capacity.
 
 OpenCode can use an OpenAI-compatible endpoint through its environment configuration. Some harnesses require an isolated configuration directory; the in-place runtime-switch route may refuse those changes rather than overwrite credentials or configuration unsafely.

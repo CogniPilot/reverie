@@ -240,3 +240,32 @@ it.each(['debug','transient-debug','hidden','hidden-before-event'])('cannot acti
   expect(cache.panel.hidden).toBe(true);expect(cache.frame.dataset.boardActive).toBe('false');
   if(mode!=='transient-debug') {h.shell.notifyBoard(true);expect(cache.frame.dataset.boardActive).toBe('false');}
 });
+
+it('keeps one owner-bound Workspace loaded beside the Board and shows it at once, refreshing it behind', async () => {
+  const { h, warm, writes } = await warmBoardFixture(); h.window.__REVERIE_BASE__ = '/office'; await warm();
+  const cache = h.shell._warmPages.get('workspace'); const frame = cache.frame;
+  expect(cache.owner).toBe('owner:true'); expect(cache.panel.hidden).toBe(true); expect(frame.getAttribute('src')).toBe('/office/workspace');
+  expect(frame.dataset.workspaceActive).toBe('false'); expect(h.shell.embed).toBeNull();
+  const sent: unknown[] = []; frame.contentWindow!.postMessage = ((data: unknown) => sent.push(data)) as never;
+  h.shell.openPage('workspace'); await h.flush(); await h.flush();
+  expect(h.shell.embed).toBe('workspace'); expect(cache.panel.hidden).toBe(false); expect(h.shell._boardCache.panel.hidden).toBe(true);
+  expect(h.document.querySelector('.ca-page')?.hidden ?? true).toBe(true);
+  expect(sent).toEqual([{ type: 'workspace-visibility', active: true }]);
+  expect(cache.panel.querySelector('.ca-tool-page-head button')?.textContent).toContain('Back to Company / tools');
+  h.shell.closePage(); expect(frame.getAttribute('src')).toBe('/office/workspace'); expect(cache.panel.hidden).toBe(true);
+  expect(sent.at(-1)).toEqual({ type: 'workspace-visibility', active: false });
+  await h.shell.openWarmBoard(); expect(h.shell.embed).toBe('board'); expect(cache.panel.hidden).toBe(true);
+  h.shell.openPage('workspace'); await h.flush(); await h.flush();
+  expect(h.shell._warmPages.get('workspace').frame).toBe(frame); expect(h.shell._boardCache.panel.hidden).toBe(true);
+  expect(h.document.querySelectorAll('.ca-warm-frame')).toHaveLength(1); expect(writes).toEqual([]);
+});
+
+it('drops the retained Workspace with the Board on owner loss, and on its own frame reporting a lost sign-in', async () => {
+  const { h, warm, revoke } = await warmBoardFixture(); await warm(); const workspace = h.shell._warmPages.get('workspace').frame;
+  revoke(); h.shell.openPage('workspace'); await h.flush(); await h.flush();
+  expect(h.shell._warmPages).toBeNull(); expect(workspace.isConnected).toBe(false);
+  const next = await warmBoardFixture(); await next.warm(); const frame = next.h.shell._warmPages.get('workspace').frame;
+  const send = (type: string, source: Window) => next.h.window.dispatchEvent(new next.h.window.MessageEvent('message', { origin: next.h.window.location.origin, source, data: { type } }));
+  send('board-auth-lost', frame.contentWindow!); send('workspace-auth-lost', next.h.window); expect(next.h.shell._warmPages).not.toBeNull();
+  send('workspace-auth-lost', frame.contentWindow!); expect(next.h.shell._warmPages).toBeNull(); expect(frame.isConnected).toBe(false);
+});

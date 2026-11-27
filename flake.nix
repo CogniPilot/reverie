@@ -10,9 +10,18 @@
       pkgsFor = system: import nixpkgs {
         inherit system;
       };
-      packagesFor = system:
+      # The default set runs every test suite inside its artefact build.
+      packagesFor = system: packageSetFor system true;
+      # One evaluation per system and variant; lib functions select by the same knob.
+      selectPackages = system: runChecks: assert builtins.isBool runChecks;
+        if runChecks then self.packages.${system} else self.legacyPackages.${system}.unchecked;
+      # runChecks is the single knob; nix/build-policy.nix owns what it changes.
+      # Every first-party recipe receives its package set through this function.
+      recipePkgsFor = system: runChecks:
+        import ./nix/build-policy.nix { pkgs = pkgsFor system; inherit runChecks; };
+      packageSetFor = system: runChecks:
         let
-          pkgs = pkgsFor system;
+          pkgs = recipePkgsFor system runChecks;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
           workerImageArtifacts = import ./nix/native-worker-packages.nix {
             inherit pkgs; src = source;
@@ -35,7 +44,8 @@
             runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client pkgs.jq pkgs.curl pkgs.coreutils (pkgs.lib.getBin pkgs.util-linux) ];
             text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ./scripts/reverie-update);
           };
-        in packages // workerImageArtifacts // {
+          # Members refer to their own variant, never to the default set.
+          set = packages // workerImageArtifacts // {
           default = packages.reverie;
           workerClientCapsule = import ./nix/worker-client-capsule.nix {
             inherit pkgs;
@@ -46,8 +56,15 @@
           docker-pool-restore-helper-image = import ./nix/docker-pool-restore-helper-image.nix { inherit pkgs; src = source; };
           docker-recovery-helper-image = import ./nix/docker-resource-helper-image.nix {
             inherit pkgs;
-            helper = self.packages.${system}.docker-memory-high-helper;
+            helper = set.docker-memory-high-helper;
             name = "reverie-boxed-recovery-helper";
+          };
+          # Baseline labels, so a leaf writer container created from it has the fixed
+          # configuration. Selected only by the separate leafWriterHelperImageId pin.
+          docker-leaf-writer-helper-image = import ./nix/docker-resource-helper-image.nix {
+            inherit pkgs;
+            helper = set.docker-memory-high-helper;
+            name = "reverie-boxed-leaf-writer-helper";
           };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           recoveryLedger = import ./nix/recovery-ledger.nix { inherit pkgs; src = source; };
@@ -68,8 +85,8 @@
           humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
           codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
-          codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
-          codexObserverNativeCheck = self.packages.${system}.codexObserver.tests.native;
+          codexObserverVendor = set.codexObserver.cargoDeps;
+          codexObserverNativeCheck = set.codexObserver.tests.native;
           workerIdmap = import ./nix/worker-idmap.nix { inherit pkgs; };
           policyArtifacts = import ./nix/policy-artifacts.nix { inherit pkgs; src = source; };
           workerDocker = import ./nix/worker-docker-tools.nix { inherit pkgs; src = source; };
@@ -105,7 +122,7 @@
             src = source;
             inherit (packages) reverie console runtime entrypoint;
             worker = true;
-            browserRuntime = self.packages.${system}.browserRuntime;
+            browserRuntime = set.browserRuntime;
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
@@ -114,7 +131,7 @@
           };
           resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
             inherit pkgs; src = source;
-            image = self.packages.${system}.resourceActorImage;
+            image = set.resourceActorImage;
             console = packages.console;
             clientManifest = packages.workerResourceClientManifest;
           };
@@ -126,27 +143,32 @@
           }).image;
           resourceNativeQFixtureProvenance = import ./nix/website-image-provenance.nix {
             inherit pkgs; src = source;
-            image = self.packages.${system}.resourceNativeQFixtureImage;
-            console = self.packages.${system}.resourceNativeQFixtureConsole;
+            image = set.resourceNativeQFixtureImage;
+            console = set.resourceNativeQFixtureConsole;
             clientManifest = packages.workerResourceClientManifest;
           };
         };
+        in set;
     in {
-      lib.mkBoxedWebsiteImage = { system, runtimeConfiguration,
-        baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig,
-        privateAccessRuntime ? null, clientCapsule ? self.packages.${system}.workerClientCapsule }:
+      # runChecks = false selects the same recipes without their test phases
+      # (nix/build-policy.nix). It chooses the defaults below; an argument the
+      # caller passes explicitly, such as baseImage, keeps the variant it was built with.
+      lib.mkBoxedWebsiteImage = { system, runtimeConfiguration, runChecks ? true,
+        baseImage ? (selectPackages system runChecks).dockerImage, baseConfig ? baseImage.reverieConfig,
+        privateAccessRuntime ? null, clientCapsule ? (selectPackages system runChecks).workerClientCapsule }:
         import ./nix/boxed-website-image.nix {
-          pkgs = pkgsFor system;
+          pkgs = recipePkgsFor system runChecks;
           inherit baseImage baseConfig runtimeConfiguration privateAccessRuntime clientCapsule;
-          gpuProjectionCompiler = self.packages.${system}.containerRuntime;
+          gpuProjectionCompiler = (selectPackages system runChecks).containerRuntime;
         };
-      lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
+      lib.mkContainerGpuImage = { system, capability ? "", runChecks ? true,
+        baseImage ? (selectPackages system runChecks).dockerImage,
         baseConfig ? baseImage.reverieConfig }:
         import ./nix/container-gpu-image.nix {
-          pkgs = pkgsFor system;
+          pkgs = recipePkgsFor system runChecks;
           src = source;
           inherit baseImage baseConfig;
-          inherit (self.packages.${system}) containerRuntime entrypoint;
+          inherit (selectPackages system runChecks) containerRuntime entrypoint;
           inferenceRuntime = import ./nix/local-model-runtime.nix {
             nixpkgs = toString llama-nixpkgs;
             inherit system capability;
@@ -157,36 +179,41 @@
         observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
       };
       packages = forAllSystems packagesFor;
+      # Every package above without its test phase, for example `.#unchecked.workerImage`.
+      # Their suites are checks.deployPathSuites, built from the default set.
+      legacyPackages = forAllSystems (system: { unchecked = packageSetFor system false; });
       lib.workerRuntimePackages = { system, runtimeSource ? source, runtimePkgs ? pkgsFor system, runChecks ? true }:
         import ./nix/worker-runtime-packages.nix {
           pkgs = runtimePkgs; src = runtimeSource; artifactSource = source; inherit runChecks;
         };
-      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
-        let pkgs = pkgsFor system; packages = runtimePackages;
+      lib.workerDockerImage = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runChecks ? true, runtimePackages ? selectPackages system runChecks, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
+        let pkgs = recipePkgsFor system runChecks; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs runtimePackages; src = source;
           inherit (packages) reverie console runtime;
-          entrypoint = self.packages.${system}.entrypoint;
+          entrypoint = (selectPackages system runChecks).entrypoint;
           worker = true;
           inherit perfGuestCapsule;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
           browserRuntime = if browser then packages.browserRuntime else null;
         };
-      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runtimePackages ? packagesFor system, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
+      # The factory record has a fixed shape and names neither runtimePackages nor
+      # runChecks; the facts bind the archive bytes of whichever variant was built.
+      lib.workerDockerImageProvenance = { system, uid, gid, subuidStart ? 100000, subgidStart ? 100000, subidCount ? 65536, browser ? false, runChecks ? true, runtimePackages ? selectPackages system runChecks, perfGuestCapsule ? runtimePackages.nativePerfGuestCapsule }:
         let
-          pkgs = pkgsFor system;
+          pkgs = recipePkgsFor system runChecks;
           arguments = { inherit system uid gid subuidStart subgidStart subidCount browser; };
         in import ./nix/worker-image-provenance.nix {
           inherit pkgs; src = source;
-          image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule runtimePackages; });
+          image = self.lib.workerDockerImage (arguments // { inherit perfGuestCapsule runtimePackages runChecks; });
           toolkit = runtimePackages.humanTerminalToolkit;
           workerChild = runtimePackages.workerChild;
           artifacts = runtimePackages.policyArtifacts;
           factory = { name = "lib.workerDockerImage"; } // arguments;
         };
-      lib.workerChildImageAnnex = { system, baseProvenance }:
+      lib.workerChildImageAnnex = { system, baseProvenance, runChecks ? true }:
         import ./nix/worker-child-image-annex.nix {
-          pkgs = pkgsFor system; src = source; inherit baseProvenance;
+          pkgs = recipePkgsFor system runChecks; src = source; inherit baseProvenance;
         };
       apps = forAllSystems (system: {
         lease = { type = "app"; program = "${self.packages.${system}.leaseCli}/bin/reverie-lease"; meta.description = "Lease disposable work directories during active jobs"; };
@@ -205,6 +232,18 @@
         in {
           inherit (packages) reverie start update cleanupObservations;
           inherit (packages.console) workerWebFixtures;
+          # The suites an unchecked deploy-path build skips, from the default set and
+          # in the same build sandbox. Each entry is its own derivation, so
+          # `nix build .#checks.SYSTEM.deployPathSuites --keep-going` runs them
+          # side by side and names every one that fails. No image archive is assembled.
+          deployPathSuites = pkgs.linkFarm "reverie-deploy-path-suites" (pkgs.lib.mapAttrsToList
+            (name: path: { inherit name path; }) {
+              inherit (packages) reverie console runtime containerRuntime entrypoint
+                backendNativeCli workerExec leaseCli handsTools rustFront rustRouteHandler recoveryLedger
+                laptopTools policyArtifacts humanTerminalToolkit workerNativeNixStorePrepare workerChild
+                nativePerfGuestCapsule workerClientCapsule docker-memory-high-helper deployment;
+              inherit (packages.runtime) voiceService;
+            });
           # Legacy attach transport remains a component-only CI fixture.
           # It is not an installable public package, app or host module.
           nativeViewerFixtureImage = import ./nix/worker-viewer-image.nix {
@@ -222,6 +261,16 @@
             mutations = import ./tests/boxed_runtime_boundary_eval.nix;
           in assert checked.passed; pkgs.writeText "reverie-boxed-runtime-boundary.json"
             (builtins.toJSON { inherit (checked) checks; inherit mutations; });
+          # The client capsule's digest is recorded by deployments. Its source is the
+          # modules its entry imports; importing the office server would make every
+          # server edit a new capsule again.
+          workerClientSources = let
+            files = import ./nix/typescript-import-closure.nix {
+              lib = nixpkgs.lib; root = ./apps/web/src; entry = "worker-client-cli.ts";
+            };
+          in assert builtins.elem "worker-client-cli.ts" files && builtins.elem "types/index.ts" files;
+            assert !(builtins.elem "session.ts" files) && !(builtins.elem "web/server.ts" files);
+            pkgs.writeText "reverie-worker-client-sources.json" (builtins.toJSON files);
           boxedWebsiteImage = pkgs.writeText "reverie-boxed-website-image-checks.json"
             (builtins.toJSON (import ./tests/boxed_website_image_eval.nix));
 

@@ -14,6 +14,8 @@ use std::{
 };
 
 const MAX_ATTRIBUTE_BYTES: u64 = 1 << 20;
+/// Installed tools and the libraries they load live only below this store.
+pub(super) const TOOL_STORE: &str = "/nix/store";
 static UNCERTAIN: Mutex<Vec<Pending>> = Mutex::new(Vec::new());
 struct Pending {
     _child: Child,
@@ -32,7 +34,7 @@ impl Program {
         let path = fs::canonicalize(path)?;
         let metadata = fs::symlink_metadata(&path)?;
         require(
-            path.starts_with("/nix/store")
+            path.starts_with(TOOL_STORE)
                 && path.file_name() == Some(OsStr::new(name))
                 && metadata.is_file()
                 && metadata.uid() == 0

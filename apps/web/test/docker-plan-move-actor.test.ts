@@ -62,6 +62,7 @@ import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-vi
 import { StateStore } from '../src/state-store.js';
 import { Session } from '../src/session.js';
 import { PlanMoves, PlanMoveComposerNotReady } from '../src/plan-move.js';
+import { composerIsEmpty } from '../src/session-submit-verifier.js';
 import type { PlanMoveRecord, PlanMoveInput, PlanMoveExecutor, PlanMovePort } from '../src/plan-move.js';
 import { PlanMoveRequests } from '../src/plan-request.js';
 import {
@@ -2650,6 +2651,39 @@ it.each(['unattached', 'busy', 'dialog', 'revoked-input'] as const)(
   }
 );
 
+it('names the provider start-up screen its target is waiting at, as description only', async () => {
+  const f = await publishedTargetFixture('published'),
+    journal = await f.loadJournal();
+  // Controlled local UI observations, as above: a live viewer that shows a sign-in
+  // prompt rather than a composer. They are not a native readiness acceptance.
+  vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+  vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockReturnValue(' Select login method:');
+  vi.spyOn(f.native.target, 'startupScreen').mockReturnValue({
+    id: 'claude-sign-in',
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+    shown: 'widget',
+  });
+  const before = journal.read(),
+    write = vi.spyOn(f.native.target, 'writeViaMux');
+  const refused = await f
+    .actor()
+    .verify(f.record, journal)
+    .catch((error: unknown) => error);
+  // Still the retryable not-ready refusal, now saying where the session is.
+  expect(refused).toBeInstanceOf(PlanMoveComposerNotReady);
+  expect((refused as PlanMoveComposerNotReady).waitingAt).toMatchObject({
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+  });
+  expect((refused as Error).message).toMatch(/new session is waiting at Claude's sign-in screen/i);
+  expect(journal.read()).toEqual(before);
+  expect(write).not.toHaveBeenCalled();
+  expect(f.launch).not.toHaveBeenCalled();
+});
+
 it('retains the exact input admission across the handoff publication await', async () => {
   const f = await publishedTargetFixture('published'),
     journal = await f.loadJournal(),
@@ -2676,4 +2710,49 @@ it('retains the exact input admission across the handoff publication await', asy
   expect(journal.read().handoff?.phase).toBe('issued');
   expect(f.launch).not.toHaveBeenCalled();
   expect(f.native.command.create).not.toHaveBeenCalled();
+});
+
+it('hands off over a composer that shows only Claude’s own suggestion, and never over the same words typed', async () => {
+  const f = await publishedTargetFixture('published'),
+    journal = await f.loadJournal(),
+    actor = f.actor();
+  // The candidate pane of 2026-11-24: a finished turn, then a next prompt that Claude itself suggests.
+  const frame = (composer: string) =>
+    [
+      '✻ Sautéed for 18s · done 7:35 AM',
+      '──────────────────────────────────────────────────── Ada ─',
+      composer,
+      '────────────────────────────────────────────────────────',
+      '  Opus 5.5  in:50,206 out:648  ctx:5%  cache:until 08:35',
+      '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+    ].join('\n');
+  const typed = frame('❯ yes, check Vulkan and start the RTX run'),
+    suggested = frame('❯ \x1b[7my\x1b[0;2mes,\x1b[0m \x1b[2mcheck Vulkan and start the RTX run\x1b[0m');
+  let screen = typed;
+  vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+  vi.spyOn(f.native.target, 'muxName', 'get').mockReturnValue('controlled-existing-pane');
+  vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockImplementation(() => screen);
+  // The session's own idle proof, reduced to the composer read it ends in; the other holds are not under test here.
+  vi.spyOn(Session.prototype, 'composerProvablyIdle').mockImplementation(() => composerIsEmpty(screen, '❯'));
+  const write = vi.spyOn(f.native.target, 'writeViaMux').mockImplementation(async (_text, options) => {
+    options?.onOutcome?.('submitted');
+    return true;
+  });
+  await actor.verify(f.record, journal);
+  const before = journal.read();
+  const refused = await actor.finalize(f.record, journal).catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(PlanMoveComposerNotReady);
+  expect((refused as Error).message).toBe('The existing candidate is not at its verified composer');
+  expect(write).not.toHaveBeenCalled();
+  expect(journal.read()).toEqual(before);
+  screen = suggested;
+  await actor.finalize(f.record, journal);
+  expect(write).toHaveBeenCalledOnce();
+  expect(write.mock.calls[0]![1]).toMatchObject({ requireEmptyComposer: true });
+  expect(journal.read().handoff?.phase).toBe('submitted');
+  // A submitted handoff is the record's own evidence: the composer is not consulted again.
+  screen = typed;
+  await actor.verify(f.record, journal);
+  await actor.finalize(f.record, journal);
+  expect(write).toHaveBeenCalledOnce();
 });

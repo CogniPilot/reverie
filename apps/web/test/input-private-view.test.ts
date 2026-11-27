@@ -115,6 +115,22 @@ it.each([
   expect(app._sessionInputHeld(sid)).toBe(true);
   expect(app._inputRecoveryHolds?.has(sid)).toBe(true);
 });
+it.each(['screen', 'owner'] as const)(
+  'admits an intrinsic hold only on a named %s pane observation, and never latches it locally',
+  async (providerPresence) => {
+    const app = await page();
+    const intrinsic = { id: sid, providerDispatchHeld: true, providerDispatchHoldKind: 'intrinsic' };
+    update(app, { ...intrinsic, providerInputHeld: false, providerPresence } as Dto);
+    expect(app._sessionInputHeld(sid)).toBe(false);
+    expect(app._inputRecoveryHolds?.has(sid) ?? false).toBe(false);
+    expect((await app._inputJournal.snapshot()).holds).toEqual([]);
+    // An unrelated partial event keeps the gate; a lapsed observation holds again.
+    update(app, { id: sid, name: 'partial metadata' });
+    expect(app._sessionInputHeld(sid)).toBe(false);
+    update(app, { ...intrinsic, providerInputHeld: true, providerPresence: null } as Dto);
+    expect(app._sessionInputHeld(sid)).toBe(true);
+  }
+);
 it.each([
   { ...loaded(false), providerInputHeld: 'false' },
   { ...loaded(false), providerDispatchHoldKind: 'unknown' },

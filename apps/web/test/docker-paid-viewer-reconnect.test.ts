@@ -906,3 +906,26 @@ it('keeps the genuine styled composer draft check after READY view renewal', asy
   expect(f.session.composerProvablyIdle()).toBe(false);
   expect(transport.writes).toEqual([]);
 });
+
+it('proves a composer idle when it shows only Claude’s own suggestion, and not when the same words were typed', async () => {
+  const f = await loadedPlanViewTransition();
+  await renewExistingDockerProviderView(f.deps, f.row, f.session, () => true);
+  const frame = (composer: string) =>
+    [
+      '✻ Sautéed for 18s · done 7:35 AM',
+      '──────────────────────────────────────────────────── Ada ─',
+      composer,
+      '────────────────────────────────────────────────────────',
+      '  Opus 5.5  in:50,206 out:648  ctx:5%  cache:until 08:35',
+      '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+    ].join('\n');
+  vi.mocked(f.mux.capturePaneText).mockReturnValue(
+    frame('❯ \x1b[7my\x1b[0;2mes,\x1b[0m \x1b[2mcheck Vulkan and start the RTX run\x1b[0m')
+  );
+  expect(f.session.composerProvablyIdle()).toBe(true);
+  // The session reads its composer with styles, which is what tells the two apart.
+  expect(vi.mocked(f.mux.capturePaneText).mock.calls.at(-1)![2]).toEqual({ escapes: true });
+  vi.mocked(f.mux.capturePaneText).mockReturnValue(frame('❯ yes, check Vulkan and start the RTX run'));
+  expect(f.session.composerProvablyIdle()).toBe(false);
+  expect(transport.writes).toEqual([]);
+});

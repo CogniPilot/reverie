@@ -8,6 +8,8 @@ import { PlanMoves, PlanMoveAccountSnapshotChanged, PlanMoveComposerNotReady, ty
 import { PlanMoveStore, dockerPlanMoveNotIssuedOf } from '../src/plan-move-store.js';
 import type { PlanMoveDockerActor, PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
+import { DockerEmployeeContinuationError } from '../src/docker-employee-continuation.js';
+import { dockerPlanMoveFailureMessage } from '../src/plan-move-docker-runner.js';
 import { dockerPlanMaximumStates } from '../src/docker-plan-move-capacity.js';
 import { dockerPlanMoveHandoffDigest } from '../src/docker-plan-move-data.js';
 const roots: string[] = [];
@@ -459,5 +461,32 @@ describe('native plan coordinator with recording actor and actual protected jour
     expect(f.actor.start).toHaveBeenCalledTimes(1);
     expect(f.actor.finalize).not.toHaveBeenCalled();
     expect(f.port.stop).not.toHaveBeenCalled();
+  });
+  it('tells a held resource step in a sentence, with its code, and leaves the move held for recovery', async () => {
+    const f = await fixture();
+    vi.mocked(f.actor.start).mockRejectedValueOnce(
+      new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED')
+    );
+    await f.moves.begin(f.input, f.owner);
+    const held = await f.settled();
+    expect(held).toMatchObject({ phase: 'recovery-required' });
+    expect(held.error).toContain('failed three times in a row');
+    expect(held.error).toContain('continue the move to try again, or abandon it.');
+    expect(held.error).toContain('(DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED)');
+    expect(f.actor.finalize).not.toHaveBeenCalled();
+  });
+  it('words only the resource holds; every other failure keeps its own text', () => {
+    const refused = dockerPlanMoveFailureMessage(new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_REFUSED'));
+    expect(refused).toContain('does not repeat a refused change');
+    expect(refused).toContain('abandon the move first.');
+    expect(refused).not.toContain('try again');
+    expect(dockerPlanMoveFailureMessage(new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_FAILED'))).toBe(
+      'DOCKER_RESOURCE_HELPER_FAILED'
+    );
+    expect(dockerPlanMoveFailureMessage(new DockerEmployeeContinuationError('DOCKER_REBUILD_PLAN_MOVE_HELD'))).toBe(
+      'DOCKER_REBUILD_PLAN_MOVE_HELD'
+    );
+    expect(dockerPlanMoveFailureMessage(Error('lost final ACK'))).toBe('lost final ACK');
+    expect(dockerPlanMoveFailureMessage('text')).toBe('Docker plan move failed');
   });
 });

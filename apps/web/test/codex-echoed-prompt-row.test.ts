@@ -56,11 +56,18 @@ describe('Codex echoed prompt above the composer', () => {
     // (The fixture's own faint status row never resets, so a row must reset before its italic is switched on and off.)
     expect(composerIsEmpty(withRow(26, lower(`${ESC}[1m`), withRow(25, `${ESC}[0;3m x ${ESC}[23m`)), '›')).toBe(true);
     expect(composerBody(withRow(26, lower(`${ESC}[1m`)), '›')).toBeUndefined();
-    // Codes this reader does not model (21), colon forms and other escapes make the state unknown until a reset.
-    for (const code of [`${ESC}[21m`, `${ESC}[38:2::1:2:3m`, `${ESC}]0;title${String.fromCharCode(7)}`, `${ESC}[38;5m`]) {
+    // Codes this reader does not model (21), colon forms and other escapes make the state unknown until a reset. An
+    // operating-system command that is never ended is such an escape.
+    for (const code of [`${ESC}[21m`, `${ESC}[38:2::1:2:3m`, `${ESC}]0;title`, `${ESC}[38;5m`]) {
       const row25 = `${ESC}[0m${code}`;
       expect(composerBody(withRow(26, lower(`${ESC}[1m`), withRow(25, row25)), '›')).toBeUndefined();
       expect(composerIsEmpty(withRow(26, lower(`${ESC}[0;1m`), withRow(25, row25)), '›')).toBe(true);
+    }
+    // A complete one (a window title, a hyperlink) never changes how text is drawn, so it leaves the style as it was.
+    for (const end of [String.fromCharCode(7), `${ESC}\\`]) {
+      const row25 = `${ESC}[0m${ESC}]0;title${end}`;
+      expect(composerIsEmpty(withRow(26, lower(`${ESC}[1m`), withRow(25, row25)), '›')).toBe(true);
+      expect(composerBody(withRow(26, lower(`${ESC}[1m`), withRow(25, `${ESC}[0;4m${ESC}]0;title${end}`)), '›')).toBeUndefined();
     }
   });
 

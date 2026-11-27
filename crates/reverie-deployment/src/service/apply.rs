@@ -2,6 +2,8 @@ use super::*;
 use reverie_host::deployment_snapshot::{RehearsalRoot, SnapshotTools};
 use std::io::{Read, Write};
 mod live_accounts;
+mod preflight;
+mod restore;
 mod retained_copy;
 
 #[derive(Clone, Copy)]
@@ -47,6 +49,12 @@ impl OperationDeadline {
             Self::Initial(original) => end.min(original),
         }
     }
+    /// The owner's own update brings the original console back when it
+    /// fails. The bounded initial rollout settles its own failure under its
+    /// one deadline, which has no allowance for a second readiness wait.
+    fn restores_source(self) -> bool {
+        matches!(self, Self::Ordinary)
+    }
 }
 impl DeploymentService {
     /// Recover a stopped source after backup verification refused.
@@ -75,6 +83,7 @@ impl DeploymentService {
                 && !operation.exists("retained-copy-attempt"),
             "DEPLOYMENT_SWAP_ALREADY_ATTEMPTED",
         )?;
+        let stopped_before = operation.exists("stop-attempt");
         let pins = self.pins(&operation)?;
         let result = (|| {
             let candidate = operation.candidate()?;
@@ -112,6 +121,7 @@ impl DeploymentService {
             self.swap(&operation, &candidate, &pins)?;
             operation.status()
         })();
+        let result = self.restoring_source(&operation, &pins, stopped_before, result);
         DeploymentError::finalized(result, pins.close())
     }
 
@@ -233,18 +243,16 @@ impl DeploymentService {
                     operation.plan.live_account_writers.is_none(),
                     "DEPLOYMENT_VERIFIED_BACKUP_REQUIRED",
                 )?;
-                RehearsalRoot::open(
+                preflight::open_rehearsal(
                     path,
                     &self.data_source(&operation)?,
                     &operation.directory,
                     deadline.snapshot(),
                 )
                 .map(|root| (root, format))
-                .map_err(|error| {
-                    DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_ROOT_REFUSED", error)
-                })
             })
             .transpose()?;
+        let stopped_before = operation.exists("stop-attempt");
         let result = (|| {
             let pins = self.pins(&operation)?;
             let applied = self.apply_pinned(
@@ -254,6 +262,11 @@ impl DeploymentService {
                 skip_live_backup,
                 rehearsal.as_ref().map(|(root, format)| (root, *format)),
             );
+            let applied = if deadline.restores_source() {
+                self.restoring_source(&operation, &pins, stopped_before, applied)
+            } else {
+                applied
+            };
             DeploymentError::finalized(applied, pins.close())
         })();
         let closed = rehearsal.map_or(Ok(()), |(root, _)| {
@@ -312,7 +325,18 @@ impl DeploymentService {
         let tools = snapshot_tools()?;
         pins.running_mounts(&source)?;
         self.refuse_shared_writers(&source)?;
+        // Last refusals that leave the office running: destination and space.
+        preflight::backup_admitted(
+            &operation.directory,
+            &source_root,
+            rehearsal,
+            deadline.snapshot(),
+        )?;
         deadline.check()?;
+        if let Some((root, _)) = rehearsal {
+            // Retention later removes only what this journal names.
+            operation.record_rehearsal_root(root.path(), root.identity())?;
+        }
         operation.attempt("stop-attempt")?;
         deadline.check()?;
         self.engine.stop(model::string(&source, "Id")?)?;

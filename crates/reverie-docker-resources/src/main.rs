@@ -34,8 +34,12 @@ fn main() -> std::process::ExitCode {
         Command::ProbePool(input) => operations::probe_pool(&mut files, &input),
         Command::ConfigurePool(input) => operations::configure_pool(&mut files, &input),
         Command::RestorePool(input) => operations::restore_pool(&mut files, &input),
+        Command::ConfigurePoolCpuMax(input) => {
+            operations::configure_pool_cpu_max(&mut files, &input)
+        }
         Command::ProbeWorker(input) => operations::probe_worker(&mut files, &input),
         Command::ConfigureHigh(input) => operations::configure_high(&mut files, &input),
+        Command::RestoreHigh(input) => operations::restore_high(&mut files, &input),
         Command::ConfigureMemoryHigh(input) => {
             operations::configure_memory_high(&mut files, &input)
         }
@@ -47,6 +51,7 @@ fn main() -> std::process::ExitCode {
             nix,
             filesystem_id,
         } => storage::verify_reference(&mut files, &home, &nix, filesystem_id),
+        Command::ObserveStorageReference => storage::observe_reference(&mut files),
         Command::VerifyWorkerCredential => credential::verify(std::io::stdin().lock()),
     };
     let result = error::finalized(result, files.close_all());
@@ -56,7 +61,7 @@ fn main() -> std::process::ExitCode {
             std::process::ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("{error}; effectIssued={}", files.issued);
+            eprintln!("{}", files.failure(&error));
             std::process::ExitCode::FAILURE
         }
     }

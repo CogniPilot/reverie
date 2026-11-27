@@ -30,6 +30,10 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
+    '';
+    # Test inputs only. They are copied when the check phase starts, so a build
+    # without checks (nix/build-policy.nix) does not depend on any of them.
+    preCheck = ''
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
       # The Rust handler's TS byte goldens live with its crate.
@@ -82,24 +86,44 @@ let
       export NIX_TEST_VIEWER_WORKSPACES=${leaseCli}/bin/reverie-workspaces
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
-      # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
-      # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
-      export NIX_TEST_FILE_WORKERS=2
+      # Test files side by side (config/vitest.ci.config.ts): a quarter of the build's cores, at least two as on the
+      # four-core CI runner and at most eight. test/setup.ts gives each file its own HOME, temp and tmux socket
+      # directory, and every server binds port 0 (test/test-ports-guard.test.ts).
+      fileWorkers=$(( ''${NIX_BUILD_CORES:-4} / 4 ))
+      if [ "$fileWorkers" -lt 2 ]; then fileWorkers=2; fi
+      if [ "$fileWorkers" -gt 8 ]; then fileWorkers=8; fi
+      export NIX_TEST_FILE_WORKERS=$fileWorkers
       # Refuse missing or duplicate registrations before the longer test batches.
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
+      # From here every command runs even after one fails. The phase then fails once and lists each failed
+      # command, so one run shows every failing batch and its files instead of only the first.
+      checkFailures="$NIX_BUILD_TOP/reverie-console-check-failures"
+      : > "$checkFailures"
+      set +e -E
+      trap 'printf "exit %s: %.400s\n" "$?" "$BASH_COMMAND" >> "$checkFailures"' ERR
       # Boxed recovery and bound worker transport use the same default CI gate.
       npm test -- test/docker-memory-high-canary.test.ts \
         test/docker-resource-original-writer.test.ts \
         test/docker-contained-resource-controller.test.ts \
         test/docker-resource-probe-retry.test.ts \
+        test/docker-continuation-task.test.ts \
+        test/docker-resource-helper-failure.test.ts \
+        test/docker-resource-leaf-retry.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
+        test/docker-pool-restore.test.ts \
+        test/docker-pool-cpu-ceiling.test.ts \
+        test/docker-cpu-reservation.test.ts \
+        test/docker-leftover-cleanup.test.ts \
         test/docker-resource-revisions.test.ts \
         test/docker-resource-convergence.test.ts \
         test/docker-owner-stop-status.test.ts \
         test/docker-ephemeral-restoration.test.ts \
         test/docker-owner-stop-native.test.ts \
         test/docker-employee-continuation-http.test.ts \
+        test/docker-absent-reprovision.test.ts \
+        test/employee-disk-budget.test.ts test/employee-disk-budget-service.test.ts \
+        test/employee-model-policy.test.ts test/employee-model-service.test.ts test/routes/employee-model-routes.test.ts \
         test/docker-employee-continuation.test.ts \
         test/docker-employee-source-correlation.test.ts \
         test/docker-employee-credential-installer.test.ts \
@@ -108,9 +132,11 @@ let
         test/docker-plan-installer.test.ts \
         test/docker-plan-source.test.ts test/docker-plan-source-data.test.ts test/docker-plan-move-recipe.test.ts test/docker-plan-protocol.test.ts test/docker-plan-account-status.test.ts test/docker-plan-move-actor.test.ts test/docker-plan-move-work.test.ts test/docker-plan-worker-inventory.test.ts test/docker-plan-local-client.test.ts test/docker-plan-source-native.test.ts test/docker-plan-source-holder.test.ts \
         test/docker-plan-account.test.ts \
-        test/docker-engine-command.test.ts \
+        test/docker-engine-command.test.ts test/docker-seat-directory.test.ts test/docker-exec-failure.test.ts test/docker-rebuild-live-launch.test.ts \
+        test/plan-signin-sync.test.ts test/plan-signin-reconciler.test.ts test/docker-signin-holder.test.ts test/employee-supervisor-signin.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
+        test/docker-provider-exit.test.ts test/docker-laptop-other-work.test.ts test/docker-employee-local-model.test.ts \
         test/docker-employee-startup-restore.test.ts \
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
@@ -269,7 +295,7 @@ let
         test/routes/voice-turn-routes.test.ts test/routes/voice-service-status.test.ts test/voice-member-dispatch.test.ts test/chat-app-dm-voice.test.ts \
         test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
-        test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
+        test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts test/routes/board-known-state.test.ts \
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/company-settings-patches-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
@@ -278,7 +304,7 @@ let
         test/selected-claude-profile.test.ts \
         test/routes/chat-turn-summary.test.ts test/cli-chat-summary.test.ts \
         test/chatroom-digest.test.ts test/chatroom-notice-state.test.ts test/chatroom-notice-history.test.ts test/chatroom-notice-cli.test.ts test/chat-db.test.ts test/chat-message-search.test.ts \
-        test/managed-codex-trust.test.ts test/docker-employee-codex-workspace.test.ts test/codex-hook-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/worker-viewer-reconnect.test.ts test/worker-recovery-auth.test.ts test/native-worker-viewer-acceptance.test.ts test/worker-provider-health.test.ts \
+        test/managed-codex-trust.test.ts test/docker-employee-codex-workspace.test.ts test/codex-hook-trust.test.ts test/full-access-default.test.ts test/worker-execution.test.ts test/laptop-power.test.ts test/laptop-reconnect.test.ts test/employee-startup-order.test.ts test/worker-viewer-reconnect.test.ts test/worker-recovery-auth.test.ts test/native-worker-viewer-acceptance.test.ts test/worker-provider-health.test.ts \
         test/command-failure-routes.test.ts test/command-failure-ui.test.ts \
         test/expert-runtime-recipe.test.ts test/company-employee-restart.test.ts test/company-restart-ui.test.ts test/routes/session-mode-switch.test.ts \
         test/claude-plan-usage.test.ts test/claude-usage-display.test.ts test/subscription-usage.test.ts test/plan-usage-compliance.test.ts test/plan-pace.test.ts \
@@ -357,7 +383,7 @@ let
         test/late-hold-control.test.ts test/opencode-late-hold-control.test.ts test/opencode-paste-hold-control.test.ts \
         test/codex-paste-hold.test.ts test/plan-move-input-hold.test.ts test/opencode-shell-mode.test.ts \
         test/remote-buffer-move-hold-control.test.ts test/opencode-verifier-hold-control.test.ts test/remote-wake.test.ts \
-        test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/routes/session-input-delivery.test.ts \
+        test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/cli-agent-model.test.ts test/routes/session-input-delivery.test.ts \
         test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/browser-input-intake.test.ts test/browser-input-caller-contracts.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       npm test -- test/case-removal.test.ts test/routes/case-delete-guard.test.ts
@@ -369,7 +395,8 @@ let
         test/antigravity-mode.test.ts test/api-generate-plan.test.ts test/api-responses.test.ts test/app-settings-structure.test.ts \
         test/approval-inbox.test.ts test/attachment-magic.test.ts test/auth-security.test.ts test/avatar-pack-manifest.test.ts \
         test/avatar-pack-profile-select.test.ts test/away-digest-ui.test.ts test/away-digest.test.ts test/base-path-server.test.ts \
-        test/base-path.test.ts test/bash-tool-parser.test.ts test/board-blocker-severity.test.ts test/board-owner-identity.test.ts \
+        test/base-path.test.ts test/bash-tool-parser.test.ts test/board-blocker-severity.test.ts test/board-kanban-wontdo.test.ts \
+        test/board-owner-identity.test.ts \
         test/bot-avatar-history.test.ts test/bots-schedule-ui.test.ts test/bounded-path-probe.test.ts test/browser-hard-reload.test.ts \
         test/buffer-accumulator.test.ts test/buffer-management.test.ts test/car-playback-notice.test.ts test/car-speaker.test.ts \
         test/car-voice-turn-wait.test.ts test/car-wake-lock.test.ts test/case-path-unreachable.test.ts test/case-path.test.ts \
@@ -458,7 +485,7 @@ let
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
-        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-launch-publication.test.ts test/native-custom-model-preflight.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
+        test/plan-move-owner-abandon.test.ts test/plan-move-step-watch.test.ts test/plan-move-owed-handoff.test.ts test/employee-supervisor-policy.test.ts test/employee-supervisor.test.ts test/employee-supervisor-office.test.ts test/docker-employee-supervisor-laptops.test.ts test/docker-supervisor-abandoned-candidate.test.ts test/office-self-restart.test.ts test/employee-supervisor-ladder-fixes.test.ts test/docker-provider-view-absent.test.ts test/employee-supervisor-pool.test.ts test/docker-supervisor-pool.test.ts test/docker-storage-identity-journal.test.ts test/docker-laptop-limit-upkeep.test.ts test/chatroom-delivery-unsent-wake.test.ts test/company-supervisor-route.test.ts test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-hold-reconcile.test.ts test/provider-launch-publication.test.ts test/native-custom-model-preflight.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
         test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \
@@ -516,6 +543,7 @@ let
         test/services/unified-session-service.test.ts test/session-attachment-history.test.ts test/session-auto-name.test.ts \
         test/session-auto-resume.test.ts test/session-awaiting-workers.test.ts test/session-claude-conversation-chain.test.ts \
         test/session-close-fallback.test.ts test/session-config-model.test.ts test/session-display-model.test.ts \
+        test/session-first-run-screens.test.ts \
         test/session-history-index.test.ts test/session-interactive-recovery.test.ts test/session-lineage-lines.test.ts \
         test/session-list-layout.test.ts test/session-listener-wiring.test.ts test/session-manager.test.ts \
         test/session-options-structure.test.ts test/session-order-sse.test.ts test/session-order.test.ts test/session-overview-order.test.ts \
@@ -532,7 +560,7 @@ let
         test/split-pane-hidden-button-css.test.ts test/split-pane-per-device-setting.test.ts \
         test/split-pane-picker-listener-leak-unit.test.ts test/spreadsheet-preview.test.ts \
         test/spreadsheet-xlsx-core.test.ts test/sse-cors-headers.test.ts test/sse-dispatch-table.test.ts test/sse-events.test.ts \
-        test/sse-heartbeat.test.ts test/sse-policy-revocation.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts \
+        test/sse-heartbeat.test.ts test/sse-policy-revocation.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts test/sse-reconnect-backoff.test.ts \
         test/sse-subscription-filter.test.ts test/sse-subscription-ownership.test.ts test/sse-tile-grid-filter.test.ts test/stale-expiration-map.test.ts \
         test/stalled-seat-alert.test.ts test/stalled-seat-notice-resolution.test.ts test/stalled-seat-notice-routing.test.ts \
         test/state-publication-status.test.ts test/state-store-publication.test.ts test/state-store-tab-layout.test.ts test/state-store.test.ts test/static-cache-headers.test.ts \
@@ -582,6 +610,13 @@ let
         test/webview-proxy-timeout.test.ts test/webview-proxy.test.ts test/webview-sse.test.ts test/wiki-home-index.test.ts \
         test/workflow-run-watcher.test.ts test/working-directory-schema.test.ts test/workspace-hooks-unreachable-mount.test.ts \
         test/ws-connection-registry.test.ts test/ws-reconnect-plan.test.ts test/ws-state-lifecycle.test.ts test/xterm-private-api.test.ts
+      trap - ERR
+      set -e +E
+      if [ -s "$checkFailures" ]; then
+        echo "reverie-console checks failed. Each failed command, in order:" >&2
+        cat "$checkFailures" >&2
+        exit 1
+      fi
       runHook postCheck
     '';
     installPhase = ''
@@ -703,10 +738,14 @@ let
   codexReleaseJson = builtins.readFile (src + "/scripts/codex-release.json");
   codexRelease = builtins.fromJSON codexReleaseJson;
   codexReleaseFile = pkgs.writeText "codex-release.json" codexReleaseJson;
+  claudeReleaseJson = builtins.readFile (src + "/scripts/claude-release.json");
+  claudeRelease = builtins.fromJSON claudeReleaseJson;
+  claudeReleaseFile = pkgs.writeText "claude-release.json" claudeReleaseJson;
   cliInstallerSource = pkgs.runCommandLocal "reverie-install-clis" {} ''
     mkdir -p "$out"
     cp ${cliInstallerProgram} "$out/reverie-install-clis.mjs"
     cp ${codexReleaseFile} "$out/codex-release.json"
+    cp ${claudeReleaseFile} "$out/claude-release.json"
   '';
   installClis = pkgs.writeShellApplication {
     name = "reverie-install-clis";
@@ -722,7 +761,7 @@ let
     (builtins.readFile (src + "/scripts/reverie-provider-cli"));
   providerLaunchers = map (provider: pkgs.writeShellScriptBin provider ''
     export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
-    exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else "unversioned")} "$@"
+    exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else if provider == "claude" then claudeRelease.version else "unversioned")} "$@"
   '') [ "claude" "codex" "opencode" ];
   launcher = pkgs.writeShellScript "reverie-launcher" ''
     export PATH=${installClis}/bin:${runtime}/bin:$PATH

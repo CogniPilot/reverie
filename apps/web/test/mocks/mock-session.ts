@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events';
 import {getCli} from '../../src/config/cli-registry/registry.js';
 import { vi } from 'vitest';
 import type { SessionWriteOptions, PromptCacheStatus, SessionAttachmentHistoryItem, SessionStatus, SessionRemote } from '../../src/types.js';
+import type { ProviderHoldClaim, ProviderHoldReconciliation } from '../../src/provider-hold-reconcile.js';
 
 /**
  * Enhanced mock session for testing RespawnController.
@@ -300,7 +301,19 @@ export class MockSession extends EventEmitter {
 
   /** This synthetic existing transport never owns a private restored-provider view. */
   providerDispatchHeld = false;
-  get providerInputHeld(): boolean { return this.providerDispatchHeld; }
+  /** Mirrors Session.reconcileProviderHold(): what the next terminal check finds. The default leaves a hold standing. */
+  providerHoldReading: ProviderHoldReconciliation = { outcome: 'held', reason: 'provider-not-visible' };
+  providerHoldLastReconciliation?: ProviderHoldReconciliation;
+  providerPresence?: 'screen' | 'owner';
+  get providerInputHeld(): boolean { return this.providerDispatchHeld && this.providerPresence === undefined; }
+  reconcileProviderHold = vi.fn(async (claim: ProviderHoldClaim = 'auto'): Promise<ProviderHoldReconciliation> => {
+    if (!this.providerDispatchHeld) return { outcome: 'not-held' };
+    const result: ProviderHoldReconciliation =
+      claim === 'not-running' ? { outcome: 'not-running', evidence: 'owner-attested' } : this.providerHoldReading;
+    this.providerPresence = result.outcome === 'confirmed' && result.source !== 'engine-view' ? result.source : undefined;
+    this.providerHoldLastReconciliation = result;
+    return result;
+  });
   private terminalInputError?: TerminalInputUnconfirmedError;
   get terminalInputHeld(): boolean {return this.terminalInputError !== undefined;}
   holdUnconfirmedInput(cause?: unknown): TerminalInputUnconfirmedError {

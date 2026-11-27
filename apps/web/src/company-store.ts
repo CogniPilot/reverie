@@ -355,6 +355,13 @@ export class CompanyStore {
     this.refreshState();
     return structuredClone(this.state);
   }
+  /** Shared state for hot read paths: the store replaces it and never edits it,
+   * so no copy is taken. Callers must not edit it and must copy any part they
+   * hand on; use `snapshot()` for a private whole copy. */
+  view(): CompanyState {
+    this.refreshState();
+    return this.state;
+  }
   allowsPersonalSessionRestore(sessionId: string): boolean {
     if (this.writeUncertain) return false;
     this.refreshState();
@@ -569,7 +576,8 @@ export class CompanyStore {
                 records.push(structuredClone(pool.record));
               }
             }
-            if (current.dockerSharedPoolLineages?.length || current.dockerPoolObservations?.length)
+            if (current.dockerSharedPoolLineages?.length || current.dockerPoolObservations?.length ||
+                current.retiredDockerEmployeeContinuations?.length)
               current.version=2;
             CompanyStateSchema.parse(current);
             const goalBytes = Buffer.byteLength(

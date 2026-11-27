@@ -170,7 +170,7 @@ does draw.
 For claude: a new session reports `idle` before its CLI has spawned, and a brand-new case shows a
 **trust dialog** first, so neither "wait for idle" nor "wait for ❯" means ready (the
 trust dialog contains `❯` too, observed live). Reverie auto-accepts that dialog
-itself, reliably enough that stage 1 usually just works: `_maybeAcceptTrustDialog()`
+itself, reliably enough that stage 1 usually just works: `_answerFirstRunScreen()`
 reads the **rendered pane** via `capturePaneText()` rather than the arriving chunk
 (the per-chunk `includes()` version could never match, because tmux repaints the row
 with cursor-forward escapes in place of spaces, and it is documented in-source as the
@@ -192,7 +192,8 @@ and press Enter only once the marker is on the trust option. `_accept_trust` in 
 §0 preamble is exactly that, and `trustDialogNextKey()` is the server-side twin.
 
 The remaining miss modes are structural: the auto-accept only runs inside a 90 s window
-after interactive start and gives up after 6 keystrokes. So keep the dialog handling as
+after a launch (longer only while it is answering the first-run screens of a config
+directory the CLI has never seen) and gives up after 6 keystrokes at one screen. So keep the dialog handling as
 a bounded fallback, and never send a blind Enter up front — landing in an already-ready
 composer only wastes a turn, landing in this dialog ends the worker.
 

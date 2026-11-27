@@ -1,4 +1,5 @@
 import type {DockerExistingViewRestoration} from '../../docker-employee-runtime.js';
+import type { SupervisorReport } from '../../employee-supervisor.js';
 import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -12,7 +13,7 @@ import {
 } from '../../company-types.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { findSessionOrFail, ownerFor, parseBody, resolveParentSessionId } from '../route-helpers.js';
-import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarUrl, checkAvatar } from '../../agent-avatars.js';
+import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarKey, avatarUrl, checkAvatar } from '../../agent-avatars.js';
 import { createHash } from 'node:crypto';
 import { appendAdminAudit } from '../admin-audit.js';
 import { adminGrant, adminGrantContinuation } from '../../owner-auth/policy.js';
@@ -76,6 +77,8 @@ export function registerCompanyRoutes(
     /** Explicit configured backend capability, never readiness proof. */
     boxedRuntime?: boolean;
     boxedViewRestorations?: () => readonly DockerExistingViewRestoration[];
+    /** The office supervisor's latest reading of each employee of one owner. DATA only. */
+    employeeSupervisor?: (owner: string | undefined) => readonly SupervisorReport[];
     refreshHealth?: () => Promise<void>;
     startEmployee?: (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, current: () => boolean) => Promise<unknown>;
   } = {}
@@ -210,13 +213,22 @@ export function registerCompanyRoutes(
 
   app.get('/api/company', async (req) => {
     const view = service.view(ownerFor(req));
+    // What the supervisor found, did last and will do next, for the binding the employee has right now.
+    const supervised = new Map((authority.employeeSupervisor?.(ownerFor(req)) ?? []).map((row) => [row.employeeId, row]));
+    const withSupervisor = <T extends { id: string; sessionId: string; sessionGeneration: number }>(employee: T) => {
+      const report = supervised.get(employee.id);
+      if (!report || report.sessionId !== employee.sessionId || report.sessionGeneration !== employee.sessionGeneration)
+        return employee;
+      const { employeeId: _id, sessionId: _session, sessionGeneration: _generation, ...supervisor } = report;
+      return { ...employee, supervisor };
+    };
     return {
       success: true,
       data: { ...view, boxedRuntime:authority.boxedRuntime===true,
         boxedViewRestorations: (authority.boxedViewRestorations?.() ?? []).filter(result =>
           view.employees.some(employee => employee.id === result.employeeId && employee.sessionId === result.sessionId && employee.sessionGeneration === result.sessionGeneration)),
         employees: view.employees.map(employee =>
-        presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
+        withSupervisor(presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId))), canManage: verifiedOwner(req),
         canManageAttendance: verifiedOwner(req) || view.employees.some(e=>e.sessionId===caller(req) && e.permissions.manageOffice===true),
         // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.
         ...(verifiedOwner(req) && authority.resourceReplacement === true ? { resourceReplacement: true } : {}) },
@@ -236,8 +248,8 @@ export function registerCompanyRoutes(
       const patch = parseBody(z.record(z.string(), z.unknown()), req.body);
       if (Object.keys(patch).some(key => !Object.hasOwn(CompanySettingsSchema.shape, key)))
         throw new CompanyError('Unknown company setting', 400);
-      if (Object.entries(patch).some(([key, value]) => value === null && key !== 'crashWakeEmployeeId'))
-        throw new CompanyError('Only the crash recovery expert can be cleared with null', 400);
+      if (Object.entries(patch).some(([key, value]) => value === null && key !== 'crashWakeEmployeeId' && key !== 'modelLimitFallback'))
+        throw new CompanyError('Only the crash recovery expert and the model-limit fallback can be cleared with null', 400);
       return { settings: await service.configure(ownerFor(req), patch as CompanySettingsPatch) };
     })
   );
@@ -386,7 +398,22 @@ export function registerCompanyRoutes(
       if (enabled && self && service.view(owner).employees.some(e=>e.id===id && e.sessionId===self))
         throw new CompanyError('Ask another office manager or the owner to put you out of office',409);
       if (!enabled && !wakeEmployee) throw new CompanyError('Employee startup is not ready', 503);
-      const employee = await service.setVacation(id, owner, enabled, action.require);
+      let employee: CompanyEmployee;
+      try {
+        employee = await service.setVacation(id, owner, enabled, action.require);
+      } catch (error) {
+        if (error instanceof CompanyError || !enabled) throw error;
+        // The out-of-office intent is saved before the stop on purpose, so that nothing wakes a laptop whose stop
+        // is unknown. A stop that then fails must say that the setting was kept, and what to do about the laptop.
+        const saved = service.view(owner).employees.find((e) => e.id === id);
+        if (!saved?.onVacation || saved.desiredRunning !== false) throw error;
+        throw new CompanyError(
+          `${saved.name || 'This employee'} is now marked out of the office, but their laptop could not be stopped ` +
+            'from here. The out-of-office setting was kept so that nothing restarts them. Use Rebuild laptop to ' +
+            'discard the laptop, or return them to the office.',
+          409
+        );
+      }
       const current=()=>action.current() && service.view(owner).employees.some(e=>e.id===id &&
         e.onVacation===enabled && e.desiredRunning===!enabled);
       if (!current()) throw new CompanyError('Employee office intent changed',409);
@@ -545,21 +572,33 @@ export function registerCompanyRoutes(
   // may set any agent's. The image is checked by its bytes before anything is recorded or stored.
   // The file is written BEFORE its URL is recorded, so a failed write never leaves a link to nothing;
   // if recording then fails (unknown session, profile cap), the previous image is put back.
+  // An employee's image is stored under its employee id, so a new session (plan move, laptop
+  // rebuild) never orphans it. A temporary agent has only its session id.
+  const ownedEmployees = (req: FastifyRequest, match: (e: { id: string; sessionId: string; avatar?: string }) => boolean) => {
+    const state = service.store.snapshot();
+    return [...state.employees, ...state.retired].filter(match).map((e) => ({ ...e, mine: e.owner === ownerFor(req) }));
+  };
+  const imageKey = (req: FastifyRequest, sessionId: string): string =>
+    ownedEmployees(req, (e) => e.sessionId === sessionId).find((e) => e.mine)?.id ?? sessionId;
   const setAvatar = async (req: FastifyRequest, sessionId: string, data: unknown) => {
     checkAvatar(data);
-    const previous = await avatars.get(sessionId);
-    await avatars.put(sessionId, data as Buffer);
+    const key = imageKey(req, sessionId);
+    const previous = await avatars.get(key);
+    await avatars.put(key, data as Buffer);
     try {
-      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(sessionId, Date.now()), verifiedOwner(req)) };
+      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(key, Date.now()), verifiedOwner(req)) };
     } catch (error) {
-      if (previous) await avatars.put(sessionId, previous.data);
-      else await avatars.remove(sessionId);
+      if (previous) await avatars.put(key, previous.data);
+      else await avatars.remove(key);
       throw error;
     }
   };
   const clearAvatar = async (req: FastifyRequest, sessionId: string) => {
+    const key = imageKey(req, sessionId);
+    const legacy = avatarKey(ownedEmployees(req, (e) => e.sessionId === sessionId).find((e) => e.mine)?.avatar);
     const result = await service.setAvatar(sessionId, ownerFor(req), null, verifiedOwner(req));
-    await avatars.remove(sessionId);
+    await avatars.remove(key);
+    if (legacy && legacy !== key) await avatars.remove(legacy);
     return { profile: result };
   };
   const self = (req: FastifyRequest): string => {
@@ -610,8 +649,20 @@ export function registerCompanyRoutes(
   app.delete('/api/company/agents/:sessionId/avatar', async (req, reply) =>
     image(reply, () => clearAvatar(req, agentByOwner(req)))
   );
+  // Any name an employee's image has had (its employee id, a session id it ran in, the key its
+  // recorded URL names) serves the image it has now; a foreign employee's is unknown.
+  const imageSource = (req: FastifyRequest): string => {
+    const { sessionId: id } = req.params as { sessionId: string };
+    const named = ownedEmployees(req, (e) => e.id === id || e.sessionId === id || avatarKey(e.avatar) === id);
+    if (!named.length) return avatarTarget(req);
+    const session = ctx.sessions.get(id);
+    if (named.some((e) => !e.mine) || (session && session.owner !== ownerFor(req)))
+      throw Object.assign(new CompanyError('Unknown employee', 404), { statusCode: 404 });
+    const employee = named[0]!;
+    return avatarKey(employee.avatar) ?? employee.id;
+  };
   app.get('/api/avatars/:sessionId', async (req, reply) => {
-    const stored = await avatars.get(avatarTarget(req));
+    const stored = await avatars.get(imageSource(req));
     if (!stored) return reply.code(404).send({ success: false, error: 'No profile image' });
     return reply
       .header('Content-Type', stored.type)

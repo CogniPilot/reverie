@@ -1,4 +1,6 @@
 import type { DockerWakeOutcome } from './company-wake.js';
+import type { LaptopOperationsInFlight } from './office-self-restart.js';
+import { employeeStartupOrder, heldFirstNotice } from './employee-startup-order.js';
 import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
@@ -6,7 +8,28 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
+import { DockerLaptopLimitUpkeep } from './docker-laptop-limit-upkeep.js';
+import {
+  DockerAbsentReprovision,
+  type DockerAbsentReprovisionPlanMoves,
+  type DockerAbsentReprovisionSeatAccounts,
+} from './docker-absent-reprovision.js';
+import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
+import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from './docker-employee-supervisor-laptops.js';
+import { ownLaptop } from './docker-standing-defaults.js';
+import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
+import { laptopSignInHolderId } from './plan-signin-reconciler.js';
+import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
+import { DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
+import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
+import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
+import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
+import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
+import { DockerCpuReservation } from './docker-cpu-reservation.js';
+import { registerDockerCpuReservationRoutes } from './web/routes/docker-cpu-reservation-routes.js';
+import { DockerLeftoverCleanup } from './docker-leftover-cleanup.js';
+import { registerDockerLeftoverCleanupRoutes } from './web/routes/docker-leftover-cleanup-routes.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -41,6 +64,7 @@ import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } fr
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerWorkerGpu } from './docker-worker-gpu.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
+import { DockerResourceRepairJournal } from './docker-resource-repair-journal.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
 import { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
@@ -65,6 +89,8 @@ export const DockerRuntimeConfiguration = z
     helperImageId: sha,
     memoryHighHelperImageId: sha.optional(),
     poolRestoreHelperImageId: sha.optional(),
+    /** New `configure-high` leaf writers only. Never the anchor, storage or pool pin. */
+    leafWriterHelperImageId: sha.optional(),
     recoveryHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
     workerGpu: DockerWorkerGpu.optional(),
@@ -79,10 +105,23 @@ interface Attached {
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
+  limits: DockerLaptopLimitUpkeep;
+  repairs: DockerResourceRepairJournal;
   resourceRevisions: DockerResourceRevisionService;
+  cpuCeiling: DockerPoolCpuCeiling;
+  cpuReservation: DockerCpuReservation;
+  leftovers: DockerLeftoverCleanup;
   recoveryHelper?: DockerWorkerReattachHelper;
+  absent: DockerAbsentReprovision;
+  command: PackagedDockerEngineCommand;
 }
-function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
+function config(): {
+  value: z.infer<typeof DockerRuntimeConfiguration>;
+  current: () => boolean;
+  /** Changes whenever the configuration file changes on disk. A name for a state, never an authority. */
+  stamp: () => string;
+  close: () => void;
+} {
   const path = '/etc/reverie/boxed-runtime.json',
     fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   let closed = false;
@@ -132,6 +171,13 @@ function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current:
     return {
       value: { ...value, apiUrl },
       current,
+      stamp() {
+        try {
+          return stamp(fs.lstatSync(path));
+        } catch {
+          return 'unreadable';
+        }
+      },
       close() {
         if (closeState.kind === 'closed') return;
         if (closeState.kind === 'failed') throw closeState.cause;
@@ -209,6 +255,8 @@ export class DockerEmployeeRuntime {
   #attached?: Attached;
   readonly #planActors=new Set<DockerPlanMoveActor>();
   #planMoves?:PlanMoveStore;
+  #absentPlanMoves?: DockerAbsentReprovisionPlanMoves;
+  #seatPlans?: Pick<PlanService, 'account'>;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -216,12 +264,14 @@ export class DockerEmployeeRuntime {
   #resourceTimer?: ReturnType<typeof setInterval>;
   #resourceTick?: Promise<void>;
   #tick = 0;
+  /** Timer firings to skip after a pass that changed nothing. */
+  #quietSkips = 0;
   #viewerRetries = new WeakMap<DockerExistingViewRestoration, { delay: number; due: number }>();
 
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
     if (!attached || !this.current()) return [];
-    const employees = attached.company.store.snapshot().employees;
+    const employees = attached.company.store.view().employees;
     return this.#restorationReports.filter((report) =>
       employees.some(
         (employee) =>
@@ -248,10 +298,54 @@ export class DockerEmployeeRuntime {
   current(): boolean {
     return this.selected.current() && this.#key.current();
   }
+  /**
+   * For the office's own restart (office-self-restart.ts), which is what settles a runtime that is no longer
+   * current. `identityStamp` changes whenever the configuration or the key changes on disk.
+   * `restartWouldKeepIdentity` says whether a new office process would accept the configuration that is in place
+   * and read the same instance key; with another key every laptop's credential would be out of use, and that is
+   * never restarted into. Both read only, and neither makes this runtime current again.
+   */
+  identityStamp(): string {
+    return this.selected.stamp() + '|' + this.#key.stamp();
+  }
+  restartWouldKeepIdentity(): boolean {
+    try {
+      config().close();
+    } catch {
+      return false;
+    }
+    return this.#key.sameOnDisk();
+  }
+  /** A set-up step, a limits repair or a rebuild of this employee's laptop is running in this office. Denial DATA. */
+  laptopOperationInFlight(employeeId: string): boolean {
+    const a = this.#attached;
+    return (
+      !!a && (a.service.flightActive(employeeId) || a.limits.flightActive(employeeId) || a.absent.flightActive(employeeId))
+    );
+  }
+  /** The laptop operations of this employee that are in flight, as a restart of the office weighs them. */
+  laptopOperations(employeeId: string): LaptopOperationsInFlight {
+    const a = this.#attached;
+    if (!a) return {};
+    const setUpSince = a.service.flightSince(employeeId),
+      rebuildSince = a.absent.flightSince(employeeId),
+      limitsSince = a.limits.flightSince(employeeId);
+    return {
+      ...(setUpSince === undefined ? {} : { setUpSince }),
+      ...(rebuildSince === undefined ? {} : { rebuildSince }),
+      ...(limitsSince === undefined ? {} : { limitsSince }),
+    };
+  }
+  /** One read-only Engine command for the office's own use, where no laptop is involved. */
+  engineRead(args: readonly string[]): Promise<string> {
+    const attached = this.#attached;
+    if (!attached) return Promise.reject(Error('Boxed runtime is not attached'));
+    return attached.command.run(args, undefined, 10_000);
+  }
   #binding(employeeId: string): DockerWorkerIdentityBinding | undefined {
     const attached = this.#attached;
     if (!attached || !this.current()) return;
-    const employee = attached.company.store.snapshot().employees.find((e) => e.id === employeeId),
+    const employee = attached.company.store.view().employees.find((e) => e.id === employeeId),
       binding = employee?.dockerBinding;
     if (
       !employee ||
@@ -295,13 +389,33 @@ export class DockerEmployeeRuntime {
     if (this.#attached || !this.current()) throw Error('Boxed runtime composition is not current');
     const configuration = this.selected.value,
       revisions = new DockerResourceRevisionStore(join(dirname(company.store.file), 'docker-resource-revisions')),
+      boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment }),
+      cpuReservation = new DockerCpuReservation(
+        company,
+        join(dirname(company.store.file), 'docker-cpu-reservation.jsonl'),
+        boxId,
+        () => {
+          if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+        }
+      ),
+      // Owner-approved defaults for NEW laptop operations only: the soft memory
+      // revision, then the CPUs kept free for the owner's own system.
       store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id), (owner, policy) => {
         const desired = revisions.desired(owner);
-        return desired ? dockerRevisedPolicy(policy, desired) : policy;
+        return cpuReservation.policy(desired ? dockerRevisedPolicy(policy, desired) : policy);
       });
     const inventory = () => store.resourceInventory();
-    const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const coldPool = new DockerColdPoolJournal(join(dirname(company.store.file), 'docker-pool-cold-recovery.jsonl'));
+    const cpuCeilings = new DockerPoolCpuCeilingStore(
+      join(dirname(company.store.file), 'docker-pool-cpu-ceiling.jsonl'),
+      boxId
+    );
+    // The office's own in-place repairs of limits that a reload of the host's
+    // service manager reset. One private journal beside the company store.
+    const repairs = new DockerResourceRepairJournal(
+      join(dirname(company.store.file), 'docker-resource-repair.jsonl'),
+      boxId
+    );
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
         boxId,
@@ -309,7 +423,10 @@ export class DockerEmployeeRuntime {
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
+        leafWriterHelperImageId: configuration.leafWriterHelperImageId,
         requireColdPoolIdle: () => coldPool.requireIdle(),
+        repairs,
+        approvedPoolCpuMax: () => cpuCeilings.acceptedCpuMax(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
@@ -387,19 +504,260 @@ export class DockerEmployeeRuntime {
           );
         },
       },
-      (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure))
+      (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure)),
+      // Bound to the rebuild service made below; asked only once both exist.
+      (employeeId) => absent.flightActive(employeeId)
     );
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     }, coldPool);
     const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
+    const cpuCeiling = new DockerPoolCpuCeiling(company, cpuCeilings, resources, boxId, () => {
+      if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+    });
+    // What the office itself has seen of the filesystem each employee's directories are on, and the owner's
+    // standing answer for a device renumbering that this record cannot prove.
+    const storageIdentity = new DockerStorageIdentityJournal(
+      join(dirname(company.store.file), 'docker-storage-identity.jsonl')
+    );
+    // What the owner's grant accepted where the office held no record, apart from the office's own records, so
+    // that `docker-storage-identity.jsonl` holds only what running laptops showed, in the form it always had.
+    const storageGrants = new DockerStorageIdentityJournal(
+      join(dirname(company.store.file), 'docker-storage-identity-granted.jsonl')
+    );
     const recoveryHelper = configuration.recoveryHelperImageId
-      ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({
-          instanceId: this.#key.instanceId,
-          key: this.#key.key.toString('hex'),
-        }))
+      ? new DockerWorkerReattachHelper(
+          command,
+          configuration.recoveryHelperImageId,
+          () => ({
+            instanceId: this.#key.instanceId,
+            key: this.#key.key.toString('hex'),
+          }),
+          {
+            granted: (owner) => company.view(owner).settings.acceptStorageRenumbering === true,
+            identity: storageIdentity,
+            grants: storageGrants,
+          }
+        )
       : undefined;
-    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions, recoveryHelper };
+    // The in-place repair of a finished laptop's own limits that does not ask where its employee is. It stands
+    // aside for every set-up step and rebuild of that employee, and they stand aside for it.
+    const limits: DockerLaptopLimitUpkeep = new DockerLaptopLimitUpkeep({
+      store,
+      engine,
+      busy: (employeeId): boolean => service.flightActive(employeeId) || absent.flightActive(employeeId),
+      // Bound later, by the server's composition. Until then the office cannot say, and a plan move's record is
+      // left alone.
+      openMoves: async (employeeId, owner) => {
+        const moves = this.#absentPlanMoves;
+        if (!moves) throw Error('The plan moves are not bound yet');
+        return moves.openMoves(employeeId, owner);
+      },
+    });
+    const absent: DockerAbsentReprovision = new DockerAbsentReprovision(
+      company,
+      store,
+      command,
+      {
+        deployment: configuration.deployment,
+        boxId,
+        apiUrl: configuration.apiUrl,
+        workerImageId: configuration.workerImageId,
+        sourceImageIds: configuration.sourceImageIds,
+      },
+      {
+        saved: (id) => ctx.store.getSession(id) ?? undefined,
+        live: (id) => {
+          const session = ctx.sessions.get(id);
+          return session
+            ? {
+                inert: session.pid === null && session.runningTaskCount === 0 && !session.paneLifecycleInFlight,
+                ...(session.docker?.continuation ? { container: session.docker.containerName } : {}),
+              }
+            : undefined;
+        },
+        // Only a viewer that is not starting or attaching can be the one a rebuild discards.
+        blocked: (id, owner, discardingViewer) => {
+          const viewer = discardingViewer ? ctx.sessions.get(id) : undefined;
+          return ctx.store.dockerAbsentReprovisionBlocker(
+            id,
+            owner,
+            viewer?.docker?.continuation && !viewer.paneLifecycleInFlight ? viewer : undefined
+          );
+        },
+        viewerLaunchOwned: (id) => {
+          const viewer = ctx.sessions.get(id);
+          return !!viewer?.docker?.continuation && ctx.store.absentLaptopViewOwnsLaunch(viewer);
+        },
+        overrides: async (id) => {
+          const saved = ctx.store.getSession(id);
+          return saved
+            ? clampEnvOverridesForOwner(
+                saved.owner,
+                (saved as { __envOverrides?: Record<string, string> }).__envOverrides
+              )
+            : undefined;
+        },
+        discard: (id) => ctx.discardPartiallyBuiltSession(id),
+        ...(ctx.discardAbsentLaptopView
+          ? { discardView: (id, absent) => ctx.discardAbsentLaptopView!(id, absent) }
+          : {}),
+        clear: (proof) => ctx.store.commitDockerAbsentReprovision(proof),
+      },
+      () => this.#absentPlanMoves,
+      (employeeId) => service.flightActive(employeeId) || limits.flightActive(employeeId),
+      () => {
+        if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      },
+      Date.now,
+      () => this.#seatAccounts()
+    );
+    // The owner's cleanup of superseded helpers and laptop images. It reads the same records and
+    // removes only through the same Engine port as every laptop workflow above.
+    const leftovers = new DockerLeftoverCleanup(
+      command,
+      {
+        deployment: configuration.deployment,
+        boxId,
+        workerImageId: configuration.workerImageId,
+        sourceImageIds: configuration.sourceImageIds,
+        helperImageIds: [
+          configuration.helperImageId,
+          configuration.memoryHighHelperImageId,
+          configuration.poolRestoreHelperImageId,
+          configuration.leafWriterHelperImageId,
+          configuration.recoveryHelperImageId,
+        ].filter((id): id is string => id !== undefined),
+      },
+      {
+        records: () => company.store.view(),
+        inFlight: (employeeId) =>
+          service.flightActive(employeeId) || absent.flightActive(employeeId) || limits.flightActive(employeeId),
+        planMoves: () => this.#absentPlanMoves,
+        runtimeCurrent: () => {
+          if (!this.current() || company.store.publicationUnconfirmed)
+            throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+        },
+      }
+    );
+    this.#attached = {
+      company,
+      ctx,
+      store,
+      engine,
+      provider,
+      service,
+      pool,
+      limits,
+      repairs,
+      resourceRevisions,
+      cpuCeiling,
+      cpuReservation,
+      leftovers,
+      recoveryHelper,
+      absent,
+      command,
+    };
+  }
+  /** Server composition only: the in-memory owner of the private move journal.
+   * Until it is bound, an absent-laptop reprovision is refused. */
+  bindPlanMoves(moves: DockerAbsentReprovisionPlanMoves): void {
+    if (this.#absentPlanMoves && this.#absentPlanMoves !== moves) throw Error('Original plan move owner required');
+    this.#absentPlanMoves = moves;
+  }
+  /** Server composition only: the plan account catalogue a plan move reads.
+   * Until it is bound, a rebuilt laptop gets its seat folder and no sign-in. */
+  bindSeatAccounts(plans: Pick<PlanService, 'account'>): void {
+    if (this.#seatPlans && this.#seatPlans !== plans) throw Error('Original plan account service required');
+    this.#seatPlans = plans;
+  }
+  /** The office's signed-in copy of one plan account, captured exactly as a
+   * plan move captures its target: held private files, re-verified on use.
+   * An account that cannot be read that way is reported as not signed in. */
+  #seatAccounts(): DockerAbsentReprovisionSeatAccounts | undefined {
+    const plans = this.#seatPlans;
+    if (!plans) return undefined;
+    return {
+      capture: async (profileId, provider, current) => {
+        let snapshot: DockerPlanAccountSnapshot;
+        try {
+          snapshot = await DockerPlanAccountSnapshot.capture(plans, profileId, current);
+        } catch (error) {
+          current();
+          if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_PLAN_ACCOUNT_UNCONFIRMED')
+            return undefined;
+          throw error;
+        }
+        if (snapshot.descriptor.provider !== provider) {
+          snapshot.close();
+          return undefined;
+        }
+        return snapshot;
+      },
+    };
+  }
+  /** Server composition only: one employee's running laptop as a holder of its plan's sign-in. The laptop is the
+   * recorded destination of a finished set-up; the holder stops answering once that record names another
+   * container or the runtime is no longer current. Nothing is read or written until the reconciler asks. */
+  signInHolder(employeeId: string, label: string, profileId: string): DockerLaptopSignInHolder | undefined {
+    const a = this.#attached;
+    if (!a || !this.current()) return undefined;
+    const row = a.store.record(employeeId),
+      containerId = row?.destination?.containerId;
+    if (!row || !containerId || !['provider-issued', 'ready'].includes(row.phase)) return undefined;
+    return new DockerLaptopSignInHolder(
+      a.command,
+      { id: laptopSignInHolderId(employeeId), label, containerId, profileId },
+      () =>
+        this.current() &&
+        this.#attached === a &&
+        a.store.record(employeeId)?.destination?.containerId === containerId
+    );
+  }
+  /** Server composition only: the office supervisor's laptop reads and steps. Each one is a call to the same
+   * service the owner's route for that step calls, under the authority `DockerSupervisorLaptops` documents. */
+  supervisorLaptops(
+    office: Pick<DockerSupervisorLaptopDeps, 'holdInput'> = {}
+  ): DockerSupervisorLaptops | undefined {
+    const a = this.#attached;
+    if (!a) return undefined;
+    // Once, at office start: what the office can check of a stopped laptop's stored home with the recovery helper
+    // image it is configured with. The same is shown on every employee (`supervisor.storedHomeCheck`).
+    const said = (capability: 'none' | DockerVerifierCapability) =>
+      console.log('[supervisor] stored home check: ' + DOCKER_STORED_HOME_CHECKS[capability]);
+    if (a.recoveryHelper)
+      void a.recoveryHelper
+        .probe()
+        .then(said)
+        .catch(() => said('unknown'));
+    else said('none');
+    return new DockerSupervisorLaptops({
+      ...office,
+      log: (line) => console.log(line),
+      inspectLaptop: async (containerId) =>
+        ownLaptop((JSON.parse(await a.command.run(['container', 'inspect', containerId])) as unknown[])[0]),
+      company: a.company,
+      store: a.store,
+      engine: a.engine,
+      service: a.service,
+      pool: a.pool,
+      limits: a.limits,
+      absent: a.absent,
+      storage: {
+        stopped: (row, current, layout) => a.engine.stoppedStorage(row, a.recoveryHelper, current, layout),
+        capability: () => a.recoveryHelper?.capability() ?? 'none',
+        ...(a.recoveryHelper
+          ? {
+              remember: (row: DockerEmployeeContinuationRecord, current: () => void) =>
+                a.engine.rememberStorage(row, a.recoveryHelper!, current),
+            }
+          : {}),
+      },
+      moves: () => this.#absentPlanMoves,
+      sessions: a.ctx.sessions,
+      inputHeldOnRecord: (id) => a.ctx.store.getSession(id)?.terminalInputHeld === true,
+      current: () => this.current() && this.#attached === a,
+    });
   }
   registerRoutes(
     app: FastifyInstance,
@@ -412,6 +770,21 @@ export class DockerEmployeeRuntime {
     };
     registerDockerResourceRevisionRoutes(app, a.resourceRevisions,
       guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent));
+    registerDockerPoolCpuCeilingRoutes(
+      app,
+      a.cpuCeiling,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
+    registerDockerCpuReservationRoutes(
+      app,
+      a.cpuReservation,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
+    registerDockerLeftoverCleanupRoutes(
+      app,
+      a.leftovers,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
     registerDockerOwnerStopRoutes(
       app,
       new DockerOwnerStopDiagnostic(a.company, requireCurrent),
@@ -427,7 +800,9 @@ export class DockerEmployeeRuntime {
       }),
       readLegacyDockerPolicyProposal,
       a.pool,
-      a.recoveryHelper
+      a.recoveryHelper,
+      a.absent,
+      a.limits
     );
   }
   /** Server composition only. Inert until the API supplies its genuine captured
@@ -436,7 +811,7 @@ export class DockerEmployeeRuntime {
     const a=this.#attached;if(!a||!this.current())return;
     if(!(moves instanceof PlanMoveStore)||(this.#planMoves&&this.#planMoves!==moves))throw Error('Original private plan journal required');this.#planMoves=moves;
     const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
-    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
+    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,repairs:a.repairs,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
       requireReconciledSourcePool: (row, admitted) => a.pool.requirePlanSourcePool(row, admitted),
       recoveryHelper: a.recoveryHelper,
       recoverPublishedPlanView: async (row, authDigest, admitted) => {
@@ -664,10 +1039,13 @@ export class DockerEmployeeRuntime {
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
     return (await this.attachExistingEmployee(employee, allowed)) === 'attached';
   }
-  #currentViewer(actual: unknown, containerId: string): boolean {
-    return actual instanceof Session && actual.dockerContinuationViewCurrent &&
+  /** A current terminal on the running provider of this binding: an Engine-observed view, or the pane through which
+   * this office process launched exactly this binding's provider (a continuation leaves no separate view to renew). */
+  #currentViewer(actual: unknown, binding: DockerEmployeeBinding): boolean {
+    return actual instanceof Session &&
+      (actual.dockerContinuationViewCurrent || actual.dockerContinuationLaunchedFor(binding)) &&
       actual.pid != null && !actual.paneExit && !actual.providerInputHeld &&
-      !actual.terminalInputHeld && actual.docker?.containerName === containerId;
+      !actual.terminalInputHeld && actual.docker?.containerName === binding.containerId;
   }
   async attachExistingEmployee(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome> {
     const a = this.#attached;
@@ -678,7 +1056,7 @@ export class DockerEmployeeRuntime {
     let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
-      const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
+      const live = a.company.store.view().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
         publication === 'failed' || (publication === 'preparing' && !allowed()) ||
@@ -700,7 +1078,7 @@ export class DockerEmployeeRuntime {
     catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const actual = a.ctx.sessions.get(employee.sessionId);
-    if (this.#currentViewer(actual, binding.containerId)) { publication = 'published'; return 'attached'; }
+    if (this.#currentViewer(actual, binding)) { publication = 'published'; return 'attached'; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       await renewExistingDockerProviderView({
         company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
@@ -744,6 +1122,7 @@ export class DockerEmployeeRuntime {
     if (this.#resourceTimer || !this.current()) return;
     this.#resourceTimer = setInterval(() => {
       if (this.#resourceTick || this.#restoring || !this.current()) return;
+      if (this.#quietSkips > 0) { this.#quietSkips--; return; }
       this.#resourceTick = this.#reconcileTick().catch(() => {
         // A failed observation grants no authority. The next tick reads fresh state.
       }).finally(() => { this.#resourceTick = undefined; });
@@ -755,25 +1134,31 @@ export class DockerEmployeeRuntime {
     if (!a) return;
     const reports = new Map(this.restorationReports.map(report => [report.employeeId, report]));
     this.#tick++;
+    let converged = true;
     const results = await this.#convergeResources().catch((error: unknown) => {
       if (!this.current()) throw error;
+      converged = false;
       return [];
     });
     const changed = new Set(results.flatMap(result => result.status === 'fulfilled' &&
       (result.value.state === 'observed' || result.value.state === 'applied') ? [result.value.employeeId] : []));
     const keep = new Map<string, DockerExistingViewRestoration>();
-    for (const employee of a.company.store.snapshot().employees) {
+    for (const employee of a.company.store.view().employees) {
       const report = reports.get(employee.id);
       if (!employee.dockerBinding || !report || changed.has(employee.id)) continue;
       if (report.state === 'attached') {
-        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId))
+        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding))
           keep.set(employee.id, report);
       } else if (report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') {
         const phase = a.store.record(employee.id)?.phase;
         if (phase !== 'ready' && phase !== 'provider-issued') keep.set(employee.id, report);
       } else if ((this.#viewerRetries.get(report)?.due ?? 0) > this.#tick) keep.set(employee.id, report);
     }
-    await this.#restore(keep);
+    const after = await this.#restore(keep);
+    // Each pass inspects every laptop against every other one. When a pass changed nothing and every wanted
+    // viewer is attached, wait three intervals before the next instead of repeating it every ten seconds.
+    this.#quietSkips = converged && changed.size === 0 && results.every(result => result.status === 'fulfilled') &&
+      after.every(report => report.state === 'attached') ? 2 : 0;
   }
   restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
     return this.#restore();
@@ -792,7 +1177,8 @@ export class DockerEmployeeRuntime {
     catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
     const previous = new Map(this.restorationReports.map(report => [report.employeeId, report]));
-    for (const employee of a.company.store.snapshot().employees) {
+    // Order only (employee-startup-order.ts): each employee below is still attached or held on its own.
+    for (const employee of employeeStartupOrder(a.company.store.view().employees)) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
       const retained = keep?.get(employee.id);
       if (retained && retained === previous.get(employee.id)) {
@@ -807,7 +1193,7 @@ export class DockerEmployeeRuntime {
         bindingDigest: dockerContinuationDigest(employee.dockerBinding),
       };
       const allowed = () => {
-        const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
+        const live = a.company.store.view().employees.find((value) => value.id === employee.id);
         return (
           this.current() &&
           !!live &&
@@ -850,6 +1236,9 @@ export class DockerEmployeeRuntime {
           }
         }
         reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }));
+      } finally {
+        const notice = heldFirstNotice(employee, reports.at(-1), previous.get(employee.id));
+        if (notice) console.warn('[docker-employee-continuation] ' + notice);
       }
     }
     for (const report of reports) {
@@ -890,6 +1279,25 @@ export class DockerEmployeeRuntime {
     if (errors.length) throw new AggregateError(errors, 'Boxed runtime close is unconfirmed');
   }
 }
+/** What the office checks of a stopped laptop's stored home, by what its recovery helper image can do. */
+export const DOCKER_STORED_HOME_CHECKS: Readonly<Record<'none' | DockerVerifierCapability, string>> = {
+  none:
+    'no recovery helper image is configured (recoveryHelperImageId), so nothing is checked: a stopped laptop is ' +
+    'rebuilt by its recorded home path, as before this check existed.',
+  full:
+    'the recovery helper image reads what is mounted. A stopped laptop is rebuilt only on a confirmed home; a new ' +
+    'device number is told from another directory, and the filesystem of each running laptop is recorded.',
+  'compare-only':
+    'the recovery helper image was built before the read of what is mounted existed. An unchanged home is ' +
+    'confirmed. A changed one cannot be told apart (new device number or another directory) and is never rebuilt ' +
+    'on, and no record of a filesystem is made. Configure an image built from this office’s source.',
+  'image-missing':
+    'the configured recovery helper image is not in the container engine. Nothing can be confirmed, so no stopped ' +
+    'laptop is rebuilt until the image is loaded.',
+  unknown:
+    'the recovery helper image did not answer the probe. What it can do is found out at the first read; until a ' +
+    'home is confirmed no stopped laptop is rebuilt.',
+};
 export function openDockerEmployeeRuntime(directory: string): DockerEmployeeRuntime | undefined {
   const mode = process.env.REVERIE_RUNTIME_BACKEND;
   if (mode === undefined) return;

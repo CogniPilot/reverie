@@ -6,14 +6,16 @@ import { createServer, member, room, message } from './helpers/chat-app-harness.
 async function setup(page: Page) {
   const pub=resolve(import.meta.dirname,'../src/web/public'),read=(name:string)=>readFileSync(resolve(pub,name),'utf8');
   const stub=readFileSync(resolve(import.meta.dirname,'helpers/chat-app-harness.mjs'),'utf8').match(/window\.eval\(`([\s\S]*?)`\);/)![1];
-  const state={documents:0,reads:0,writes:0,rev:1,owner:true};const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
+  const state={documents:0,reads:0,unchanged:0,writes:0,rev:1,owner:true};const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.addInitScript(()=>{const w=window as any;w.__intervals=new Map();const add=window.setInterval.bind(window),clear=window.clearInterval.bind(window);w.setInterval=(fn:any,ms:number,...args:any[])=>{const id=add(fn,ms,...args);w.__intervals.set(id,ms);return id;};w.clearInterval=(id:number)=>{w.__intervals.delete(id);clear(id);};});
   await page.route('**/*',async route=>{
     const path=new URL(route.request().url()).pathname;
     if(route.request().method()!=='GET'){state.writes++;return route.fulfill({status:405,json:{success:false}});}
     if(path==='/board'){state.documents++;await new Promise(r=>setTimeout(r,180));return route.fulfill({contentType:'text/html',body:read('board.html')});}
     if(path==='/company-board.css')return route.fulfill({contentType:'text/css',body:read('company-board.css')});
-    if(path==='/api/board'){state.reads++;const rev=state.rev;await new Promise(r=>setTimeout(r,100));if(!state.owner)return route.fulfill({status:403,json:{success:false}});const now=Date.now();return route.fulfill({json:{success:true,data:{rev,built:now,timeZone:'UTC',company:{name:'Revision '+rev},issues:[{id:'fixture',title:'Task revision '+rev,ownerLabel:'Fixture',status:'doing',priority:'normal',tags:[],links:[],details:'',scale:'hour',start:now-36e5,end:now+36e5}],roster:[],milestones:[],polls:[],pins:[],wins:[],blockers:[],decisions:[],structuredDecisionWrites:true}}});}
+    if(path==='/api/board'){state.reads++;const rev=state.rev;await new Promise(r=>setTimeout(r,100));if(!state.owner)return route.fulfill({status:403,json:{success:false}});const now=Date.now(),known=new URL(route.request().url()).searchParams.get('known'),stateKey=rev+'.fixture';
+      if(known===stateKey){state.unchanged++;return route.fulfill({json:{success:true,data:{rev,stateKey,unchanged:true,built:now,timeZone:'UTC',roster:[],polls:[],pins:[],structuredDecisionWrites:true}}});}
+      return route.fulfill({json:{success:true,data:{rev,...(known===null?{}:{stateKey}),built:now,timeZone:'UTC',company:{name:'Revision '+rev},issues:[{id:'fixture',title:'Task revision '+rev,ownerLabel:'Fixture',status:'doing',priority:'normal',tags:[],links:[],details:'',scale:'hour',start:now-36e5,end:now+36e5}],roster:[],milestones:[],polls:[],pins:[],wins:[],blockers:[],decisions:[],structuredDecisionWrites:true}}});}
     return route.fulfill({contentType:route.request().resourceType()==='script'?'application/javascript':'text/html',body:route.request().resourceType()==='script'?'':'<!doctype html><html><body></body></html>'});
   });
   await page.goto('https://owned-board-preload.test/');for(const name of ['styles.css','chat-app.css'])await page.addStyleTag({content:read(name)});
@@ -45,5 +47,15 @@ it('discards retained content on current authority loss and rejects unrelated au
     await page.evaluate(()=>{const s=(window as any).reverieChat;window.dispatchEvent(new MessageEvent('message',{origin:'https://foreign.test',source:s._boardCache.frame.contentWindow,data:{type:'board-auth-lost'}}));window.dispatchEvent(new MessageEvent('message',{origin:location.origin,source:window,data:{type:'board-auth-lost'}}));});expect(await page.locator('.ca-board-frame').count()).toBe(1);
     await page.evaluate(()=>(window as any).reverieChat.openPage('board'));await frame().waitForFunction('readyForActions');
     state.owner=false;await page.evaluate(()=>{(window as any).__owner=false;});await frame().evaluate('load()');await page.waitForFunction(()=>!(window as any).reverieChat._boardCache);expect(await page.locator('.ca-board-frame').count()).toBe(0);expect(state.writes).toBe(0);expect(errors).toEqual([]);
+  }finally{await browser.close();}
+},30000);
+
+it('refreshes an unchanged Board from its state key without a second copy of the cards',async()=>{
+  const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH});
+  try{const page=await browser.newPage({viewport:{width:1280,height:900}});const {state,errors,frame}=await setup(page);
+    for(let n=0;n<2;n++){await page.evaluate(()=>(window as any).reverieChat.openPage('board'));await frame().waitForFunction('readyForActions');await page.evaluate(()=>(window as any).reverieChat.closePage());}
+    await expect.poll(()=>state.unchanged).toBe(2);expect(state.reads).toBe(3);
+    expect(await frame().evaluate('[B.issues.length,B.company.name,B.unchanged===undefined,B.stateKey]')).toEqual([1,'Revision 1',true,'1.fixture']);
+    expect(await frame().locator('#tl .bar').count()).toBe(1);expect(state.writes).toBe(0);expect(errors).toEqual([]);
   }finally{await browser.close();}
 },30000);

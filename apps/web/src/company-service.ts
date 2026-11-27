@@ -71,6 +71,12 @@ export interface ExpectedCompanyBinding {
   ) & { source: Session; sourceFacts: ReturnType<typeof resourceSessionSourceFacts> };
 }
 
+/** What an employee action says when its grant is missing, or when the grant or binding changed under it. */
+const ACTION_REFUSALS = {
+  manageOffice: { required: 'Office management permission is required', changed: 'Office permission or employee binding changed' },
+  recoverEmployees: { required: 'Employee recovery permission is required', changed: 'Recovery permission or employee binding changed' },
+  manageModels: { required: 'Employee model permission is required', changed: 'Model permission or employee binding changed' },
+} as const;
 function persistedEmployee(employee: Readonly<CompanyEmployee>): CompanyEmployee {
   return EmployeeSchema.parse(JSON.parse(JSON.stringify(employee)));
 }
@@ -429,7 +435,7 @@ export class CompanyService {
   }
 
   registeredEmployees() {
-    return this.store.snapshot().employees;
+    return structuredClone(this.store.view().employees);
   }
   allowsPersonalSessionRestore(sessionId: string): boolean {
     return this.store.allowsPersonalSessionRestore(sessionId);
@@ -448,11 +454,15 @@ export class CompanyService {
   recoveryAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
     return this.employeeAction(employeeId, owner, callerSessionId, 'recoverEmployees');
   }
+  /** Choosing another employee's model (or one's own) shares the same exact revocable actor and target binding. */
+  modelAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
+    return this.employeeAction(employeeId, owner, callerSessionId, 'manageModels');
+  }
   private employeeAction(
     employeeId: string,
     owner: string | undefined,
     callerSessionId: string | undefined,
-    permission: 'manageOffice' | 'recoverEmployees'
+    permission: 'manageOffice' | 'recoverEmployees' | 'manageModels'
   ) {
     const initial = this.store.snapshot();
     const target = initial.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
@@ -481,9 +491,7 @@ export class CompanyService {
         ));
     if (!actorMatches(initial))
       throw new CompanyError(
-        permission === 'manageOffice'
-          ? 'Office management permission is required'
-          : 'Employee recovery permission is required',
+        ACTION_REFUSALS[permission].required,
         403
       );
     const recipe = JSON.stringify(target.runtimeRecipe);
@@ -503,9 +511,7 @@ export class CompanyService {
       require: (state?: CompanyState) => {
         if (!current(state))
           throw new CompanyError(
-            permission === 'manageOffice'
-              ? 'Office permission or employee binding changed'
-              : 'Recovery permission or employee binding changed',
+            ACTION_REFUSALS[permission].changed,
             409
           );
       },
@@ -634,8 +640,31 @@ export class CompanyService {
       },
     };
   }
+  /** One owner's company settings, the same value `view(owner).settings` returns, without copying and
+   * projecting every employee: name, avatar and time-zone readers run on every request. */
+  settings(owner?: string): CompanySettings {
+    const settings = this.store.view().settings.find((s) => sameOwner(s.owner, owner));
+    return settings ? structuredClone(settings) : CompanySettingsSchema.parse({ owner });
+  }
+  /** The identity fields of one owner's employees, for lookups by id, name or session that need no
+   * health projection. Fresh objects: a caller cannot change the store through them. */
+  employeeRefs(owner?: string): { id: string; name: string; sessionId: string; owner?: string; icon?: string; avatar?: string }[] {
+    return this.store
+      .view()
+      .employees.filter((e) => sameOwner(e.owner, owner))
+      .map(({ id, name, sessionId, owner: who, icon, avatar }) => ({ id, name, sessionId, owner: who, icon, avatar }));
+  }
   view(owner?: string) {
-    const state = this.store.snapshot();
+    // Copy only what this view returns: the laptop records are most of the store and none of it is used here.
+    const shared = this.store.view();
+    const state = structuredClone({
+      employees: shared.employees,
+      settings: shared.settings,
+      cycles: shared.cycles,
+      memories: shared.memories,
+      temporaryAgents: shared.temporaryAgents,
+      retired: shared.retired,
+    });
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
     const sessionCounts = new Map<string, number>();
     for (const employee of state.employees)

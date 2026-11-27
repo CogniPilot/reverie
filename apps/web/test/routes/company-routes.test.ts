@@ -17,6 +17,7 @@ import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import type { CompanyWakeReport } from '../../src/company-wake.js';
 import { isBoardCoordinator } from '../../src/board-permissions.js';
+import { DEFAULT_MODEL_LIMIT_FALLBACK, modelLimitFallback } from '../../src/company-types.js';
 
 describe('company HTTP ownership and expert invites', () => {
   const wake = vi.fn<(id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>>(async () => ({ awakened: [], skipped: [] }));
@@ -78,7 +79,7 @@ describe('company HTTP ownership and expert invites', () => {
   it('saves successive permission checkboxes without resetting other owner grants', async () => {
     const employee = await service.hire(hireBody);
     const url = `/api/company/employees/${employee.id}`;
-    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false, manageGoals: false,
+    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false, manageGoals: false, manageModels: false,
       editBoardIssues: false, manageBoard: true, manageDecisions: false };
     await service.store.update(state => { state.employees[0].permissions = { ...permissions }; });
     const before = service.store.snapshot();
@@ -94,6 +95,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
     };
     await save({ manageGoals: true });
+    await save({ manageModels: true });
     await save({ manageOffice: true });
     await save({ managePlans: true });
     await save({ recoverEmployees: true });
@@ -299,6 +301,26 @@ describe('company HTTP ownership and expert invites', () => {
     expect(wake).not.toHaveBeenCalled();
   });
 
+  it('keeps the model-limit fallback at its default until the owner sets or clears it', async () => {
+    expect(modelLimitFallback(service.view(undefined).settings)).toBe(DEFAULT_MODEL_LIMIT_FALLBACK);
+    const set = await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback: 'claude-sonnet-5' } });
+    expect(set.statusCode).toBe(200);
+    expect(modelLimitFallback(service.view(undefined).settings)).toBe('claude-sonnet-5');
+    const off = await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback: null } });
+    expect(off.statusCode).toBe(200);
+    expect(modelLimitFallback(service.view(undefined).settings)).toBeNull();
+    const before = service.store.snapshot();
+    for (const modelLimitFallback of ['-opus', 'opus 5', 'x'.repeat(101), 3])
+      expect((await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback } })).statusCode).toBe(400);
+    const employee = await service.hire(hireBody);
+    const after = service.store.snapshot();
+    const denied = await app.inject({ method: 'PUT', url: '/api/company/settings', headers: { 'x-reverie-parent-session': employee.sessionId },
+      payload: { modelLimitFallback: 'claude-opus-5-5' } });
+    expect(denied.statusCode).toBe(403);
+    expect(service.store.snapshot()).toEqual(after);
+    expect(before.settings).toEqual(after.settings);
+  });
+
   it('preserves an omitted crash expert and rejects malformed or unauthorized recovery patches atomically', async () => {
     const employee = await service.hire(hireBody);
     await service.store.update(state => {
@@ -413,6 +435,34 @@ describe('company HTTP ownership and expert invites', () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().data).toMatchObject({ employee: { onVacation: false, desiredRunning: true }, startup: { state: 'blocked', reason: 'wake-failed' } });
     expect(response.body).not.toContain('Synthetic private failure');
+  });
+
+  it('says that the out-of-office setting was kept when the laptop could not be stopped', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}/vacation`;
+    const setVacation = service.setVacation.bind(service);
+    // The intent is durable before the stop; here the stop then refuses.
+    vi.spyOn(service, 'setVacation').mockImplementationOnce(async (id, owner, enabled, guard) => {
+      sessions.delete(employee.sessionId);
+      await setVacation(id, owner, enabled, guard);
+      throw new Error('Synthetic private stop refusal');
+    });
+    const response = await app.inject({ method: 'POST', url, payload: { enabled: true } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ success: false, error: expect.stringContaining('marked out of the office') });
+    expect(response.json().error).toContain('Rebuild laptop');
+    expect(response.body).not.toContain('Synthetic private stop refusal');
+    expect(service.view().employees[0]).toMatchObject({ onVacation: true, desiredRunning: false });
+    // A failure that saved nothing is not described as a saved setting.
+    await service.store.update((state) => {
+      state.employees[0].onVacation = false;
+      state.employees[0].desiredRunning = true;
+    });
+    vi.spyOn(service, 'setVacation').mockRejectedValueOnce(new Error('Synthetic early failure'));
+    const early = await app.inject({ method: 'POST', url, payload: { enabled: true } });
+    expect(early.statusCode).toBe(500);
+    expect(early.body).not.toContain('marked out of the office');
+    expect(service.view().employees[0]).toMatchObject({ onVacation: false, desiredRunning: true });
   });
 
   it('leaving the office and unauthorized entry never invoke a start', async () => {
@@ -760,7 +810,7 @@ describe('company HTTP ownership and expert invites', () => {
 
   it('only the owner grants or revokes employee recovery; an agent cannot grant itself permissions', async () => {
     const employee = await service.hire({ ...hireBody, position: 'CTO' });
-    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });
+    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false });
     const url = `/api/company/employees/${employee.id}`;
     const payload = { permissions: { recoverEmployees: true } };
     for (const sessionId of ['expert-session', 'parent-session', 'stale-agent', '']) {
@@ -787,7 +837,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect.objectContaining({
         action: 'employee_update',
         detail: expect.objectContaining({
-          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false } },
+          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false } },
         }),
       })
     );

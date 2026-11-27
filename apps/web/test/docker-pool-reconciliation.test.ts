@@ -14,7 +14,9 @@ import {
   deployment,
   workerId,
   writer,
+  restorer,
 } from './helpers/docker-resource-physical.js';
+import { DockerResourceRepairJournal } from '../src/docker-resource-repair-journal.js';
 import { DockerResourceRevisionStore } from '../src/docker-resource-revisions.js';
 import type { DockerContinuationTask } from '../src/docker-continuation-task.js';
 import { CompanyStore } from '../src/company-store.js';
@@ -23,6 +25,7 @@ import { EmployeeSchema } from '../src/company-types.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { DockerPoolReconciliation } from '../src/docker-pool-reconciliation.js';
 import { DockerColdPoolJournal } from '../src/docker-cold-pool-journal.js';
+import { PackagedDockerEngineCommand, dockerDeadPoolAnchorProven } from '../src/docker-engine-command.js';
 import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import {
   DockerPoolReconciliationReceipt,
@@ -462,17 +465,26 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const fn of cleanups.splice(0).reverse()) await fn();
 });
-async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
-  const physical = physicalFixture();
+async function fixture(options: { recover?: boolean; cold?: boolean; repair?: boolean } = {}) {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'pool-reconcile-'));
+  cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+  const repairFile = join(directory, 'docker-resource-repair.jsonl');
+  // A published laptop record with its running anchor, as the cold recovery and the in-place repair both need.
+  const recorded = options.cold || options.repair;
+  const physical = options.repair
+    ? physicalFixture('b'.repeat(64), undefined, undefined, undefined, {
+        journal: new DockerResourceRepairJournal(repairFile, 'b'.repeat(64)),
+        path: repairFile,
+        restoreImage: restorer,
+      })
+    : physicalFixture();
   await physical.controller.preparePool(physical.row(), physical.current);
   const completed = physical.tasks.get('pool-helper')!;
   if (!('containerId' in completed)) throw Error('Actual fixture helper CID required');
-  if (options.cold) await physical.setPool();
+  if (recorded) await physical.setPool();
   physical.tasks.delete('pool-helper');
   physical.retain([]);
   const beforeEffects = { creates: [...physical.creates], starts: [...physical.starts] };
-  const directory = await fs.mkdtemp(join(tmpdir(), 'pool-reconcile-'));
-  cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const companyFile = join(directory, 'company.json'),
     coldFile = join(directory, 'cold-pool.jsonl'),
     companyStore = new CompanyStore(companyFile);
@@ -511,8 +523,8 @@ async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
         position: 'Employee',
         expertise: ['synthetic'],
         createdAt: 1,
-        onVacation: !options.cold,
-        desiredRunning: !!options.cold,
+        onVacation: !recorded,
+        desiredRunning: !!recorded,
         dockerResourcePolicy: policy,
       }),
     ];
@@ -531,7 +543,7 @@ async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
   const service = new DockerPoolReconciliation(
     company, store, resources, runtimeCurrent, options.cold ? new DockerColdPoolJournal(coldFile) : undefined
   );
-  if (options.cold) {
+  if (recorded) {
     const original = {
       containerId: 'c'.repeat(64), imageId: 'sha256:' + 'd'.repeat(64), deployment, employeeId: eid, sessionId: sid,
       home: { type: 'bind', source: '/synthetic/home', destination: '/home/agent', readWrite: true },
@@ -553,7 +565,7 @@ async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
     expect((await companyStore.publishDockerPoolObservation(
       before, dockerPoolMetadataDigest(companyStore.snapshot()), runtimeCurrent
     )).state).toBe('committed');
-    physical.containers.get(anchor.containerId)!.State = {
+    if (options.cold) physical.containers.get(anchor.containerId)!.State = {
       Status: 'exited', Running: false, Restarting: false, Paused: false, Dead: false, Pid: 0,
       OOMKilled: false, Error: '', ExitCode: 255, StartedAt: '2026-11-18T08:00:00Z', FinishedAt: '2026-11-19T09:00:00Z',
     };
@@ -686,6 +698,112 @@ async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
     },
   };
 }
+describe('in-place repair of a running shared pool', () => {
+  const other = '8'.repeat(64);
+  /** Another laptop runs in the pool, and a reload of the service manager reset the pool's limits. */
+  async function reloaded(options: { recover?: boolean; lostOriginal?: boolean } = {}) {
+    const f = await fixture({ repair: true, recover: options.recover });
+    f.physical.addMember(other, 300);
+    if (options.lostOriginal) {
+      f.physical.containers.delete(f.completed.containerId);
+      f.physical.logs.delete(f.completed.containerId);
+    }
+    f.physical.reloadServiceManager();
+    return f;
+  }
+  const status = async (f: Awaited<ReturnType<typeof fixture>>, headers: Record<string, string> = f.ownerHeaders) =>
+    (await f.app.inject({ method: 'GET', url: f.url + '/status', headers })).json().data as {
+      state: string;
+      code?: string;
+      scopeDigest?: string;
+      allowedActions: string[];
+    };
+  const repair = (f: Awaited<ReturnType<typeof fixture>>, scopeDigest: string, headers: Record<string, string> = f.ownerHeaders) =>
+    f.app.inject({ method: 'POST', url: f.url + '/repair', headers, payload: f.body(scopeDigest) });
+  const restores = (f: Awaited<ReturnType<typeof fixture>>) =>
+    f.physical.configurations.filter(({ config }) => (config.Cmd as string[])[0] === 'restore-pool');
+
+  it('offers the repair for a populated pool whose limits changed, and restores them without touching any record', async () => {
+    const f = await reloaded();
+    const held = await status(f);
+    expect(held).toMatchObject({ state: 'held', code: 'DOCKER_POOL_POLICY_CHANGED', allowedActions: ['repair-pool'] });
+    f.effects();
+    const before = structuredClone(f.companyStore.snapshot());
+    // The request confirms the hold the status named; anything else writes nothing.
+    const stale = await repair(f, '0'.repeat(64));
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('DOCKER_POOL_SCOPE_CHANGED');
+    f.effects();
+    const result = await repair(f, held.scopeDigest!);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data).toMatchObject({ state: 'retained', allowedActions: [] });
+    expect(restores(f)).toHaveLength(1);
+    const args = restores(f)[0]!.config.Cmd as string[];
+    expect(args.filter((_value, index) => args[index - 1] === '--member')).toEqual([`${other}:300:20`]);
+    // The approved policy, the employee and the laptop record are exactly as they were.
+    expect(f.companyStore.snapshot()).toEqual(before);
+    expect(await status(f)).toMatchObject({ state: 'retained', allowedActions: [] });
+    // Sent again, it finds nothing to do.
+    const again = await repair(f, held.scopeDigest!);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json().data).toMatchObject({ state: 'retained' });
+    expect(restores(f)).toHaveLength(1);
+  });
+
+  it('records the restore as the pool’s observation when the earlier acknowledgement is gone', async () => {
+    const f = await reloaded({ lostOriginal: true });
+    const held = await status(f);
+    expect(held).toMatchObject({ state: 'held', allowedActions: ['repair-pool'] });
+    const before = f.companyStore.snapshot();
+    const result = await repair(f, held.scopeDigest!);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data).toMatchObject({ state: 'retained', allowedActions: [] });
+    const after = f.companyStore.snapshot();
+    expect(after.dockerPoolObservations).toHaveLength((before.dockerPoolObservations ?? []).length + 1);
+    expect(after.dockerPoolObservations!.at(-1)).toMatchObject({ version: 2, poolRestoreHelperImageId: restorer });
+    expect(after.employees).toEqual(before.employees);
+    expect(after.dockerEmployeeContinuations).toEqual(before.dockerEmployeeContinuations);
+  });
+
+  it('re-earns an acknowledgement for intact limits that nothing on record confirms', async () => {
+    const f = await fixture({ repair: true });
+    f.physical.addMember(other, 300);
+    f.physical.containers.delete(f.completed.containerId);
+    f.physical.logs.delete(f.completed.containerId);
+    const held = await status(f);
+    expect(held).toMatchObject({ state: 'held', code: 'DOCKER_POOL_ORIGINAL_ACK_MISSING', allowedActions: ['repair-pool'] });
+    const result = await repair(f, held.scopeDigest!);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data).toMatchObject({ state: 'retained' });
+    expect(restores(f)).toHaveLength(1);
+  });
+
+  it('takes the same recovery permission as reconcile, and nothing without it', async () => {
+    const granted = await reloaded();
+    const held = await status(granted, granted.workerHeaders);
+    expect(held.allowedActions).toEqual(['repair-pool']);
+    const result = await repair(granted, held.scopeDigest!, granted.workerHeaders);
+    expect(result.statusCode, result.body).toBe(200);
+    const denied = await reloaded({ recover: false });
+    const refused = await repair(denied, '0'.repeat(64), denied.workerHeaders);
+    expect(refused.statusCode).toBe(403);
+    denied.effects();
+  });
+
+  it('offers no repair for a hold that re-applying the limits does not settle', async () => {
+    const f = await fixture({ repair: true });
+    // A writer on record that may still be writing: nothing is issued beside it.
+    (f.physical.containers.get(f.completed.containerId)!.State as Record<string, unknown>).Running = true;
+    const held = await status(f);
+    expect(held.state).toBe('held');
+    expect(held.allowedActions).toEqual([]);
+    const refused = await repair(f, '0'.repeat(64));
+    expect(refused.statusCode, refused.body).toBe(200);
+    expect(refused.json().data.allowedActions).toEqual([]);
+    f.effects();
+  });
+});
+
 describe('owner recovery of a stopped shared pool', () => {
   async function preview(f: Awaited<ReturnType<typeof fixture>>) {
     const result = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
@@ -774,6 +892,451 @@ describe('owner recovery of a stopped shared pool', () => {
     expect(replay.statusCode).toBe(409);
     expect(replay.json().error.code).toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
     expect(effects).toEqual(['start original anchor']);
+  });
+
+  it('recovers the pool from the record that a rebuild retired, while the employee has no laptop record', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    const row = f.companyStore.snapshot().dockerEmployeeContinuations![0]!;
+    const entry = (operationId: string, patch: Record<string, unknown>) => ({
+      version: 1, purpose: 'docker-absent-continuation-retirement-v1', retiredAt: 1, operationId,
+      employeeId: f.eid, sessionId: row.request.sessionId, sessionGeneration: row.request.sessionGeneration,
+      scopeDigest: '7'.repeat(64), templateDigest: '8'.repeat(64),
+      template: { user: '1000:1000', scratchRoot: '/host/scratch/laptops', mounts: [] },
+      binding: null, session: { phase: 'cleared', containerName: null }, source: { phase: 'pending' },
+      ...patch,
+    });
+    const retiredBy = randomUUID();
+    await f.companyStore.update((state) => {
+      // What a rebuild leaves: no laptop record, and the retired one in the history.
+      state.dockerEmployeeContinuations = [];
+      state.retiredDockerEmployeeContinuations = [
+        entry(retiredBy, {
+          reason: 'recorded-containers-absent', record: row,
+          absent: { containerIds: ['c'.repeat(64)], planMoveIds: [] },
+        }),
+        // The unused source of that rebuild was replaced since: the newest entry retired no record.
+        entry(randomUUID(), {
+          reason: 'source-replaced', previous: retiredBy,
+          removal: { phase: 'removed', name: 'reverie-boxed-source-' + 'a'.repeat(64), containerId: 'd'.repeat(64) },
+          absent: { containerIds: [], planMoveIds: [] },
+        }),
+      ] as never;
+    });
+    expect(f.store.record(f.eid)).toBeUndefined();
+    expect(f.companyStore.snapshot().retiredDockerEmployeeContinuations).toHaveLength(2);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  // What a host restart can leave behind. Each state has a way forward, or its own code.
+  const anchorState = (f: Awaited<ReturnType<typeof fixture>>, patch: Record<string, unknown>) => {
+    const raw = f.physical.containers.get(f.anchor.containerId)!;
+    raw.State = { ...(raw.State as object), ...patch };
+  };
+  it.each([
+    ['stopped with the host', { ExitCode: 137 }],
+    ['killed for memory', { ExitCode: 137, OOMKilled: true }],
+    ['left by a start that failed', { ExitCode: 128, Error: 'failed to create task for container: timeout' }],
+  ])('starts an anchor that was %s', async (_name, patch) => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    anchorState(f, patch);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it.each([
+    ['dead', { Status: 'dead', Dead: true }, 'DOCKER_POOL_COLD_ANCHOR_DEAD'],
+    ['paused', { Status: 'paused', Paused: true, Running: true, Pid: 7 }, 'DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED'],
+    ['restarting', { Status: 'restarting', Restarting: true }, 'DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED'],
+  ])('names an anchor that is %s with a code of its own, and starts nothing', async (_name, patch, code) => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    anchorState(f, patch);
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe(code);
+    expect(effects).toEqual([]);
+  });
+  const leftover = (f: Awaited<ReturnType<typeof fixture>>, id: string, state: Record<string, unknown>) => {
+    const raw = structuredClone(f.physical.containers.get(f.completed.containerId)!);
+    raw.Id = id;
+    (raw.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] =
+      'reverie-boxed-pool-helper-' + id;
+    raw.State = { Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0, ...state };
+    f.physical.containers.set(id, raw);
+  };
+  // An anchor the Engine failed to remove or stop. It can be neither started nor used again.
+  const dead = async () => {
+    const f = await fixture({ cold: true });
+    anchorState(f, { Status: 'dead', Dead: true });
+    const command = f.physical.command,
+      removed: string[] = [];
+    let engine: Error | undefined;
+    // The real port method, over this fixture's Engine.
+    command.removeDeadPoolAnchor = (id, proof, current) =>
+      PackagedDockerEngineCommand.prototype.removeDeadPoolAnchor.call(command, id, proof, current);
+    const run = command.run.bind(command);
+    vi.spyOn(command, 'run').mockImplementation(async (args, input) => {
+      if (args[0] !== 'container' || args[1] !== 'rm') return run(args, input);
+      expect(args).toEqual(['container', 'rm', f.anchor.containerId]);
+      if (engine) throw engine;
+      removed.push(args[2]!);
+      f.physical.containers.delete(args[2]!);
+      return args[2]!;
+    });
+    const remove = () =>
+      f.app.inject({ method: 'POST', url: f.url + '/remove-dead-anchor', headers: f.ownerHeaders, payload: {} });
+    return { f, removed, remove, refuseWith: (error: Error | undefined) => (engine = error) };
+  };
+  it('removes a dead anchor through the re-proving removal, and the next laptop set-up creates the pool again', async () => {
+    const { f, removed, remove } = await dead();
+    const prior = f.companyStore.snapshot();
+    const status = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(status.json().data).toMatchObject({ state: 'held', code: 'DOCKER_RESOURCE_CONTAINER_UNKNOWN' });
+    const unauthorized = await f.app.inject({
+      method: 'POST', url: f.url + '/remove-dead-anchor', headers: f.workerHeaders, payload: {},
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    expect(removed).toEqual([]);
+    const result = await remove();
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data).toEqual({ state: 'removed' });
+    expect(removed).toEqual([f.anchor.containerId]);
+    // No employee, laptop record or pool observation was touched.
+    expect(f.companyStore.snapshot()).toEqual(prior);
+    // No anchor is left, so no record can stand for a pool any more: nothing is waited for.
+    const after = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(after.json().data).toMatchObject({ state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED' });
+    const preview = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(preview.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    // A laptop set-up that has no anchor of its own yet creates one under the same fixed name and starts it.
+    // (This fixture has one laptop operation. A new one has a pool helper of its own name, so the earlier
+    // operation's helper container is taken out of the way here.)
+    f.physical.tasks.delete('anchor');
+    f.physical.tasks.delete('pool-helper');
+    f.physical.containers.delete(f.completed.containerId);
+    f.physical.driftEpoch();
+    f.physical.requireConfigure();
+    await f.physical.controller.preparePool(f.physical.row(), f.physical.current);
+    const created = f.physical.tasks.get('anchor');
+    expect(created?.phase).toBe('running');
+    expect((created as { containerId: string }).containerId).not.toBe(f.anchor.containerId);
+    expect((f.physical.containers.get((created as { containerId: string }).containerId)!.State as { Running: boolean }).Running).toBe(true);
+  });
+  it('shows the engine’s own words when it refuses to remove the dead anchor, and changes nothing', async () => {
+    const { f, removed, remove, refuseWith } = await dead();
+    refuseWith(
+      new Error(
+        'Command failed: docker container rm ' + f.anchor.containerId +
+          '\nError response from daemon: container ' + f.anchor.containerId.slice(0, 12) +
+          ': driver "overlay2" failed to remove root filesystem: device or resource busy\n'
+      )
+    );
+    const refused = await remove();
+    expect(refused.statusCode, refused.body).toBe(200);
+    expect(refused.json().data).toEqual({
+      state: 'refused',
+      engine:
+        'Error response from daemon: container ' + f.anchor.containerId.slice(0, 12) +
+        ': driver "overlay2" failed to remove root filesystem: device or resource busy',
+    });
+    expect(removed).toEqual([]);
+    expect(f.physical.containers.has(f.anchor.containerId)).toBe(true);
+    // The engine lets go: the same call removes it.
+    refuseWith(undefined);
+    expect((await remove()).json().data).toEqual({ state: 'removed' });
+  });
+  it.each([
+    ['is only stopped', (f: Awaited<ReturnType<typeof fixture>>) => anchorState(f, { Status: 'exited', Dead: false }), 'DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD'],
+    ['runs', (f: Awaited<ReturnType<typeof fixture>>) => anchorState(f, { Status: 'running', Dead: false, Running: true, Pid: 9 }), 'DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD'],
+    [
+      'stands beside a laptop container of the box that runs',
+      (f: Awaited<ReturnType<typeof fixture>>) =>
+        f.physical.containers.set('e'.repeat(64), {
+          Id: 'e'.repeat(64),
+          Image: 'sha256:' + '7'.repeat(64),
+          Config: { Labels: { 'reverie.boxed.box': 'b'.repeat(64) } },
+          HostConfig: { PidMode: '' },
+          State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 5 },
+        }),
+      'DOCKER_POOL_COLD_WORKERS_RUNNING',
+    ],
+    [
+      'stands beside a pool helper that still runs',
+      (f: Awaited<ReturnType<typeof fixture>>) => leftover(f, 'f'.repeat(64), { Status: 'running', Running: true, Pid: 9 }),
+      'DOCKER_POOL_COLD_WRITER_UNCONFIRMED',
+    ],
+  ] as const)('removes no anchor that %s', async (_name, arrange, code) => {
+    const { f, removed, remove } = await dead();
+    arrange(f);
+    const refused = await remove();
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe(code);
+    expect(removed).toEqual([]);
+  });
+  it('removes no anchor while a cold recovery is unfinished, nor one that another record does not name', async () => {
+    const held = await dead();
+    await new DockerColdPoolJournal(held.f.coldFile)
+      .issue(
+        { operationId: randomUUID(), employeeId: held.f.eid, sessionId: held.f.physical.row().request.sessionId,
+          sessionGeneration: held.f.physical.row().request.sessionGeneration, scopeDigest: 'a'.repeat(64) },
+        () => {},
+        async () => { throw Error('lost'); }
+      )
+      .catch(() => undefined);
+    const refused = await held.remove();
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect(held.removed).toEqual([]);
+    const other = await dead();
+    await other.f.companyStore.update((state) => { state.dockerEmployeeContinuations = []; });
+    const unnamed = await other.remove();
+    expect(unnamed.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    expect(other.removed).toEqual([]);
+  });
+  it('proves the container again in the Engine port: exactly this box’s anchor, and dead', () => {
+    const box = 'b'.repeat(64), id = 'c'.repeat(64);
+    const proof = { name: '/reverie-boxed-anchor-' + 'b'.repeat(32), imageId: 'sha256:' + 'd'.repeat(64), boxId: box };
+    const row = (patch: Record<string, unknown> = {}, labels: Record<string, string> = {}) => ({
+      Id: id, Name: proof.name, Image: proof.imageId,
+      State: { Status: 'dead', Dead: true, Running: false, Paused: false, Restarting: false, Pid: 0 },
+      Config: { Labels: {
+        'org.reverie.purpose': 'boxed-resource-helper-v1', 'reverie.box.resource.box': box,
+        'reverie.box.resource.role': 'anchor', 'reverie.box.resource.name': proof.name.slice(1), ...labels,
+      } },
+      ...patch,
+    });
+    expect(dockerDeadPoolAnchorProven(row(), id, proof)).toBe(true);
+    const state = (patch: Record<string, unknown>) => ({ State: { ...row().State, ...patch } });
+    for (const [index, value] of [
+      row({ Id: 'e'.repeat(64) }),
+      row({ Name: '/reverie-boxed-anchor-' + 'a'.repeat(32) }),
+      row({ Image: 'sha256:' + 'e'.repeat(64) }),
+      row({}, { 'reverie.box.resource.box': 'a'.repeat(64) }),
+      row({}, { 'reverie.box.resource.role': 'pool-helper' }),
+      row({}, { 'org.reverie.purpose': 'other' }),
+      row(state({ Status: 'exited', Dead: false })),
+      row(state({ Status: 'created', Dead: false })),
+      row(state({ Running: true })),
+      row(state({ Pid: 12 })),
+      row(state({ Restarting: true })),
+      null,
+    ].entries())
+      expect(dockerDeadPoolAnchorProven(value, id, proof), String(index)).toBe(false);
+    expect(dockerDeadPoolAnchorProven(row(), id, { ...proof, name: '/reverie-boxed-anchor-' + 'a'.repeat(32) })).toBe(false);
+  });
+  it('recovers past a pool helper that the interrupted run created and never started', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    leftover(f, 'f'.repeat(64), { Status: 'created' });
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    // The helper that never ran was read from nowhere and started by nobody.
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    expect((f.physical.containers.get('f'.repeat(64))!.State as { Status: string }).Status).toBe('created');
+  });
+  it.each([0, 137, 255])(
+    'previews past a pool helper on no record that ended with status %d before the host stopped',
+    async (ExitCode) => {
+      const f = await fixture({ cold: true });
+      leftover(f, 'f'.repeat(64), { Status: 'exited', ExitCode, OOMKilled: false, Error: '' });
+      await preview(f);
+    }
+  );
+  it.each([
+    ['still runs', { Status: 'running', Running: true, Pid: 9 }],
+    ['is being restarted', { Status: 'restarting', Restarting: true }],
+    ['is dead', { Status: 'dead', Dead: true }],
+  ])('recovers nothing while a pool helper on no record %s', async (_name, state) => {
+    const f = await fixture({ cold: true });
+    leftover(f, 'f'.repeat(64), state);
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_WRITER_UNCONFIRMED');
+  });
+  it('recovers past a recorded laptop that the Engine positively reports absent', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    // The laptop on record was removed while everything was stopped.
+    f.physical.selectWorker();
+    f.physical.containers.delete(workerId);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it('still refuses when a recorded laptop is there and cannot be read', async () => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    f.physical.selectWorker();
+    const raw = f.physical.containers.get(workerId) ?? {
+      Id: workerId,
+      Config: { Labels: { 'reverie.boxed.instance': deployment } },
+      HostConfig: { PidMode: '' },
+      State: { Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0 },
+    };
+    f.physical.containers.set(workerId, raw);
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === workerId) throw Error('Engine timed out');
+      return observed(args, input);
+    });
+    // The Engine lists it, so it is not absent: unreadable is unknown, and nothing is recovered beside unknown.
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).not.toBe(200);
+    expect(effects).toEqual([]);
+  });
+  it.each([
+    ['runs', { Status: 'running', Running: true, Pid: 4242 }],
+    ['is paused', { Status: 'paused', Running: true, Paused: true, Pid: 4242 }],
+    ['is being restarted', { Status: 'restarting', Running: false, Restarting: true, Pid: 0 }],
+  ])('recovers nothing while any container with the laptop label of this box %s, on record or not', async (_name, state) => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    const stray = 'e'.repeat(64);
+    f.physical.containers.set(stray, {
+      Id: stray,
+      Image: 'sha256:' + '7'.repeat(64),
+      Config: { Labels: { 'reverie.boxed.box': 'b'.repeat(64), 'reverie.boxed.instance': deployment } },
+      HostConfig: { PidMode: '' },
+      State: { Paused: false, Restarting: false, Dead: false, ...state },
+    });
+    // No record names it: the office's own list of laptops is empty.
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_WORKERS_RUNNING');
+    expect(effects).toEqual([]);
+    // Stopped, it stands in nobody's way. One of another box never did.
+    (f.physical.containers.get(stray)!.State as Record<string, unknown>) = {
+      Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0,
+    };
+    f.physical.containers.set('9'.repeat(64), {
+      Id: '9'.repeat(64),
+      Image: 'sha256:' + '7'.repeat(64),
+      Config: { Labels: { 'reverie.boxed.box': 'a'.repeat(64) } },
+      HostConfig: { PidMode: '' },
+      State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 5 },
+    });
+    await preview(f);
+  });
+  it('recovers nothing for an employee who has no laptop record of their own, current or retired', async () => {
+    const f = await fixture({ cold: true });
+    await f.companyStore.update((state) => { state.dockerEmployeeContinuations = []; });
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+  });
+  // A recovery that was issued and did not finish is finished as itself. Nothing it issued is issued again.
+  function resume(f: Awaited<ReturnType<typeof fixture>>, headers: Record<string, string> = f.ownerHeaders) {
+    return f.app.inject({ method: 'POST', url: f.url + '/cold-resume', headers, payload: {} });
+  }
+  const idle = (f: Awaited<ReturnType<typeof fixture>>) => new DockerColdPoolJournal(f.coldFile).requireIdle();
+  it('finishes a recovery whose anchor START reply was lost: the anchor is not started again and its helper is issued once', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id, true);
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect((await resume(f, f.workerHeaders)).statusCode).toBe(403);
+    expect(effects).toEqual(['start original anchor']);
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    const last = await latest(f);
+    expect(last.scope.operationId).toBe(id);
+    expect(last.task.phase).toBe('completed');
+    const fresh = f.companyStore.snapshot().dockerPoolObservations?.find(record => record.epoch.anchor.startTicks === '999');
+    expect(last.observationDigest).toBe(dockerContinuationDigest(fresh));
+    expect(() => idle(f)).not.toThrow();
+    // Asked again, there is nothing left to finish: it answers with the pool's status and issues nothing.
+    const again = await resume(f);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json().data.state).toBe('retained');
+    expect(effects).toHaveLength(3);
+  });
+  it('runs a recovery as itself when its anchor START never took effect and nothing else changed', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    let refused = 0;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'start' && args[2] === f.anchor.containerId && !refused++)
+        throw Error('The Engine did not start the anchor');
+      return observed(args, input);
+    });
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    expect(effects).toEqual([]);
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    expect((await latest(f)).scope.operationId).toBe(id);
+    expect(() => idle(f)).not.toThrow();
+  });
+  it('ends a recovery whose anchor has stopped again without a helper, and lets a new one be previewed', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id, true);
+    const scope = await preview(f);
+    expect((await recover(f, scope, id)).statusCode).toBe(409);
+    // A second host restart: the anchor that this attempt started is stopped again.
+    const raw = f.physical.containers.get(f.anchor.containerId)!;
+    raw.State = {
+      Status: 'exited', Running: false, Restarting: false, Paused: false, Dead: false, Pid: 0,
+      OOMKilled: false, Error: '', ExitCode: 255, StartedAt: '2026-11-19T09:00:30Z', FinishedAt: '2026-11-19T09:00:45Z',
+    };
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    // It confirmed nothing and can write nothing: it is recorded as ended, and the pool reads as stopped.
+    expect(result.json().data).toMatchObject({ state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED' });
+    expect(await latest(f)).toMatchObject({ scope: { operationId: id }, ended: true });
+    expect((await latest(f)).task).toBeUndefined();
+    expect(effects).toEqual(['start original anchor']);
+    expect(() => idle(f)).not.toThrow();
+    // The next recovery is a new operation from a fresh preview.
+    vi.restoreAllMocks();
+    const next = randomUUID(), later = observeEffects(f, next);
+    const again = await recover(f, await preview(f), next);
+    expect(again.statusCode, again.body).toBe(200);
+    expect(again.json().data.state).toBe('retained');
+    expect(later).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it('records a helper that exited with an error as failed and ends the recovery instead of holding the pool for good', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    f.physical.failHelper('pool-helper');
+    const scope = await preview(f);
+    const failed = await recover(f, scope, id);
+    expect(failed.statusCode).toBe(409);
+    expect(failed.json().error.code).toBe('DOCKER_RESOURCE_HELPER_FAILED');
+    expect((await latest(f)).task.phase).toBe('start-issued');
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    const result = await resume(f);
+    expect(result.statusCode, result.body).toBe(200);
+    // The helper is observed as itself: neither created nor started a second time.
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    const last = await latest(f);
+    expect(last).toMatchObject({ scope: { operationId: id }, ended: true, task: { phase: 'failed', exitCode: 1 } });
+    expect(last.observationDigest).toBeUndefined();
+    // The anchor runs with no limits written. That is a pool like any other now: no recovery holds it.
+    expect(result.json().data.state).toBe('held');
+    expect(result.json().data.code).not.toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect(() => idle(f)).not.toThrow();
+  });
+  it('keeps a recovery held while its helper cannot be proved to have ended', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID();
+    observeEffects(f, id);
+    f.physical.failHelper('pool-helper');
+    expect((await recover(f, await preview(f), id)).statusCode).toBe(409);
+    // The helper container is still running: it may yet write.
+    const helper = (await latest(f)).task.containerId as string;
+    const state = f.physical.containers.get(helper)!.State as Record<string, unknown>;
+    f.physical.containers.get(helper)!.State = { ...state, Status: 'running', Running: true, Pid: 321 };
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'wait' && args[2] === helper) throw Error('still running');
+      return observed(args, input);
+    });
+    const result = await resume(f);
+    expect(result.statusCode).toBe(409);
+    expect((await latest(f)).task.phase).toBe('start-issued');
+    expect((await latest(f)).ended).toBeUndefined();
+    expect(() => idle(f)).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
   });
 });
 
@@ -1100,5 +1663,48 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     expect(restarted.snapshot().dockerPoolObservations).toBeUndefined();
     expect((await f.service.status(f.eid, f.authority())).state).toBe('reconciliation-required');
     f.effects();
+  });
+});
+
+describe('the cold recovery journal', () => {
+  const scope = (operationId: string, scopeDigest = 'a'.repeat(64)) => ({
+    operationId, employeeId: '11111111-1111-4111-8111-111111111111', sessionId: '22222222-2222-4222-8222-222222222222',
+    sessionGeneration: 1, scopeDigest,
+  });
+  async function journal() {
+    const directory = await fs.mkdtemp(join(tmpdir(), 'cold-journal-'));
+    cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+    return new DockerColdPoolJournal(join(directory, 'cold-pool.jsonl'));
+  }
+  const current = () => {};
+  it('holds an attempt until it is confirmed or ended, and resumes exactly that attempt', async () => {
+    const cold = await journal(), first = randomUUID();
+    expect(cold.held()).toBeUndefined();
+    await expect(cold.resume(current, async () => 'never')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_ABSENT');
+    await expect(cold.issue(scope(first), current, async () => { throw Error('lost'); })).rejects.toThrow('lost');
+    expect(cold.held()).toEqual(scope(first));
+    expect(() => cold.requireIdle()).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    await expect(cold.issue(scope(randomUUID(), 'b'.repeat(64)), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    await expect(cold.resume(current, async (attempt) => {
+      expect(attempt.scope).toEqual(scope(first));
+      attempt.end();
+      // An ended attempt takes nothing more.
+      expect(() => attempt.end()).toThrow('DOCKER_POOL_COLD_JOURNAL_CHANGED');
+      expect(() => attempt.confirm('c'.repeat(64))).toThrow();
+      return 'ended';
+    })).resolves.toBe('ended');
+    expect(cold.held()).toBeUndefined();
+    expect(() => cold.requireIdle()).not.toThrow();
+  });
+  it('lets the scope of an ended attempt be issued again under a new operation, and never the scope of any other', async () => {
+    const cold = await journal(), first = randomUUID(), second = randomUUID();
+    await expect(cold.issue(scope(first), current, async () => { throw Error('lost'); })).rejects.toThrow('lost');
+    await cold.resume(current, async (attempt) => attempt.end());
+    // The same operation is never issued twice, ended or not.
+    await expect(cold.issue(scope(first), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ALREADY_ISSUED');
+    await expect(cold.issue(scope(second), current, async () => { throw Error('lost again'); })).rejects.toThrow('lost again');
+    expect(cold.held()).toEqual(scope(second));
+    // An attempt that is only held has not ended: its scope stays issued.
+    await expect(cold.issue(scope(randomUUID()), current, async () => 'x')).rejects.toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
   });
 });

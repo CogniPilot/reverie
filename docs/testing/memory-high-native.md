@@ -43,3 +43,60 @@ limits or old task phases. Strict observation version 2 retains the original
 anchor image separately; version 1 remains supported. This source/component
 coverage is not evidence of an actual populated-kernel restoration; that must be
 qualified on the selected image and original native attempt.
+
+### Issued by the office
+
+The office issues `restore-pool` itself, with the pinned
+`poolRestoreHelperImageId`, whenever it has to write the limits of a pool that
+has members: from the pool repair route, from the supervisor, and from the
+pool step of a laptop set-up that joins a populated pool. It never issues
+`configure-pool` against a pool that has members; without a restore image it
+refuses with `DOCKER_POOL_RESTORE_HELPER_REQUIRED`. Each attempt has one
+durable cursor in the office's repair journal, recorded before CREATE and
+before START. The acknowledgement is verified by the same reader as before:
+exact image, fixed configuration, the declared members, the approved policy and
+the native epoch, after a fresh readback of the limits. A writer that exited
+with an error is admitted to every pool census as a closed writer only: it is
+never read as an acknowledgement and never held as an unknown write. See
+[owner operations](../owner-operations.md#put-approved-limits-back-after-a-reload-of-the-host-service-manager).
+
+## Leaf restoration on a running worker
+
+The fixed `restore-high` command takes exactly the arguments of
+`configure-high`: the box, the anchor and worker with their process births,
+every other live member, the leaf identity and the approved leaf limits. It
+exists because a reload of the host's service manager resets what only a
+helper wrote to a worker's leaf, including `memory.swap.max`, which
+`configure-high` asserts and never writes.
+
+It requires `memory.max` and `pids.max` to already equal the declared policy
+and never writes them: Docker registers both with systemd, so a reload keeps
+them, and a difference there is not something this command may paper over. It
+writes `memory.swap.max`, `memory.high` and `cpu.weight`, each read back, with
+the same root, descriptor, cgroup, process and thread membership checks before,
+between and after the writes as every other writer, and prints the ordinary
+worker observation. It stops or recreates nothing.
+
+The office issues it for a published, running laptop only, with the leaf
+writer image, under a cursor of the repair journal. Its acknowledgement is read
+by the existing leaf reader, which accepts either command for the same leaf and
+approved policy. The component tests exercise owned regular files, not a
+kernel; an actual restoration must be qualified on the selected image.
+
+## Group CPU ceiling on a populated pool
+
+The fixed `configure-pool-cpu-max` command takes the same parent identity,
+approved pool limits, explicit CPU set and birth-bound `--member` list, plus
+`--cpu-max-cores N` (whole CPUs, at most the pool CPU set) or
+`--cpu-max-cores max`. It requires every other pool limit to already equal the
+declared policy, writes only `cpu.max` as `<N x 100000> 100000` (or
+`max 100000`), reads it back and repeats the membership checks around the write.
+It accepts an empty or a populated pool and never stops or recreates a worker.
+Its ACK (`reverie-boxed-pool-cpu-max-ack-v1`) carries the pool observation and
+the observed members.
+
+No helper image carrying this command is selected yet and the console does not
+issue it. The component tests exercise owned regular files, not a kernel; an
+actual write must be qualified on its own selected image, like the commands
+above. The owner approval and status API is described under
+[owner operations](../owner-operations.md#employee-group-cpu-ceiling).

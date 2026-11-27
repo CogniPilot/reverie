@@ -16,9 +16,12 @@ else
 fi
 provider_prefix=$provider_data/tools
 export npm_config_prefix="$provider_prefix"
-if [ "$provider" = codex ]; then
-  provider_prefix=$provider_prefix/codex/$release
-fi
+case "$provider" in
+  # One prefix per reviewed release: see reverie-install-clis.mjs.
+  claude|codex)
+    case "$release" in ''|*[!0-9A-Za-z.+-]*) exit 2 ;; esac
+    provider_prefix=$provider_prefix/$provider/$release ;;
+esac
 unset NPM_CONFIG_PREFIX REVERIE_CLI_INSTALL_LOCKED
 
 if [ "$provider" = codex ] && [ "${1:-}" = update ]; then

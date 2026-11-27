@@ -49,6 +49,12 @@ export interface MuxInputOptions {
   stillIdle?: () => boolean;
   /** Original operation authority; distinct from exclusive composer/idle gates. */
   admitted?: () => boolean;
+  /**
+   * What must still hold once the keys are out, read then in place of `admitted`. For a write whose `admitted` also
+   * carries a condition its own keys end: an Enter pressed only while the pane is idle starts a turn, and that turn is
+   * no doubt about where the Enter went.
+   */
+  settled?: () => boolean;
 }
 
 /** Multiplexer session metadata. */

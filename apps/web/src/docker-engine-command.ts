@@ -5,9 +5,42 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { request, type ClientRequest } from 'node:http';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
+import type { DockerTaskFailure } from './docker-continuation-task.js';
+import type { DockerSupersededHelperProof } from './docker-leftover-cleanup-data.js';
+import { classifyDockerResourceHelperFailure } from './docker-resource-helper-failure.js';
+import {
+  prepareSeatDirectory,
+  type DockerSeatDirectoryReceipt,
+  type DockerSeatDirectorySpec,
+} from './docker-seat-directory.js';
+/** The one configuration rejection whose cause the request itself can name: a
+ * bind whose host folder does not exist. The Engine's text and the host path
+ * are dropped; only the container-side target of the request's own mount that
+ * the Engine named is kept. */
+export function missingBindTarget(body: Buffer, configuration: Readonly<Record<string, unknown>>): string | undefined {
+  let message: unknown;
+  try {
+    message = (JSON.parse(body.toString('utf8')) as { message?: unknown } | null)?.message;
+  } catch {
+    return undefined;
+  }
+  const found =
+    typeof message === 'string' ? /bind source path does not exist: (\/[^\r\n\0]{0,4095})$/.exec(message) : null;
+  const mounts = (configuration.HostConfig as { Mounts?: unknown } | null | undefined)?.Mounts;
+  if (!found || !Array.isArray(mounts)) return undefined;
+  const targets = (mounts as Array<{ Type?: unknown; Source?: unknown; Target?: unknown } | null>).flatMap((mount) =>
+    mount?.Type === 'bind' && mount.Source === found[1] && typeof mount.Target === 'string' ? [mount.Target] : []
+  );
+  // eslint-disable-next-line no-control-regex
+  return targets[0] !== undefined && /^\/[^\u0000-\u001f\u007f]{0,4095}$/.test(targets[0]) ? targets[0] : undefined;
+}
 /** A completed rejection describes that response only. It grants no retry,
  * adoption or replacement authority; the continuation retains its issued fence. */
-function createFailure(status?: number): DockerEmployeeContinuationError {
+function createFailure(status?: number, missingMountTarget?: string): DockerEmployeeContinuationError {
+  if (status === 400 && missingMountTarget !== undefined)
+    return new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING', 409, {
+      cause: Object.freeze({ missingMountTarget }),
+    });
   const code =
     status === 400
       ? 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED'
@@ -21,8 +54,174 @@ function createFailure(status?: number): DockerEmployeeContinuationError {
 export interface DockerEngineCommand {
   run(args: readonly string[], input?: string, timeoutMs?: number): Promise<string>;
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string>;
+  /** Why one exited resource writer failed, as a closed class. What the helper
+   * printed never leaves the port, and a read that fails is `unknown`. */
+  helperFailure?(containerId: string): Promise<DockerTaskFailure>;
+  /** Removes one never-started reprovision source, never by force. The owning
+   * workflow separately proves its labels, journal entry and that it is unused. */
+  removeCreatedSource?(name: string, containerId: string, requireCurrent: () => void): Promise<void>;
+  /** Imports the worker image's registered closure into one private Nix store. */
+  prepareWorkerStore?(
+    name: string,
+    spec: Readonly<{ imageId: string; user: string; nixSource: string }>,
+    requireCurrent: () => void
+  ): Promise<void>;
+  /** Makes the default sign-in folder inside one employee's private home, as
+   * the laptop user, with a fixed helper program of the worker image. `auth`
+   * is the office's own signed-in copy of the plan account: it is placed only
+   * when the seat has no sign-in file, and only ever travels on stdin. */
+  prepareSeatDirectory?(
+    name: string,
+    spec: DockerSeatDirectorySpec,
+    requireCurrent: () => void,
+    auth?: string
+  ): Promise<DockerSeatDirectoryReceipt>;
+  /** Removes one recorded laptop container that hosts only its own init. */
+  removeIdleLaptop?(containerId: string, requireCurrent: () => void): Promise<void>;
+  /** Stops (if running) and removes one container the owner asked to discard
+   * with an employee's laptop. The owning workflow proves whose it is; this
+   * port re-reads the container and requires that same proof before each effect. */
+  discardLaptopContainer?(
+    containerId: string,
+    proof: DockerLaptopContainerProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+  /** Removes one exited one-shot helper of a retired laptop operation, never
+   * by force and never with volumes. The owning workflow proves that a retired
+   * record names it; this port reads its name, image, labels and state again
+   * immediately before the removal and refuses anything that is not exited. */
+  removeSupersededHelper?(
+    containerId: string,
+    proof: DockerSupersededHelperProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+  /** Removes the listed tags of one laptop image, never by force. It carries
+   * exactly those tags and no container was created from it; the Engine itself
+   * refuses the last one while any container still uses the image. */
+  removeUnusedLaptopImage?(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void>;
+  /** Removes the anchor container of one box's shared pool while the Engine
+   * reports it dead, never by force and never with volumes. A dead container
+   * is one the Engine failed to remove or stop: it can be neither started nor
+   * used again. The owning workflow proves that it is this box's anchor and
+   * that nothing of the box runs; this port reads its name, image, labels and
+   * state again immediately before the removal and refuses anything that is
+   * not exactly that anchor, or is not dead. The Engine may still refuse. */
+  removeDeadPoolAnchor?(
+    containerId: string,
+    proof: DockerDeadPoolAnchorProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+}
+/** What names the one anchor of a box's shared pool: its fixed name, the
+ * image it was created from and the four labels its creator gave it. */
+export interface DockerDeadPoolAnchorProof {
+  readonly name: string;
+  readonly imageId: string;
+  readonly boxId: string;
+}
+const POOL_ANCHOR_NAME = /^\/reverie-boxed-anchor-[a-f0-9]{32}$/;
+/** Whether an inspected container is exactly the proven anchor and dead. One
+ * that is created, running, paused, restarting or merely exited is not. */
+export function dockerDeadPoolAnchorProven(
+  row: {
+    Id?: unknown;
+    Name?: unknown;
+    Image?: unknown;
+    State?: Record<string, unknown> | null;
+    Config?: { Labels?: Record<string, string> | null } | null;
+  } | null,
+  containerId: string,
+  proof: DockerDeadPoolAnchorProof
+): boolean {
+  const labels = row?.Config?.Labels ?? {},
+    state = row?.State;
+  return (
+    POOL_ANCHOR_NAME.test(proof.name) &&
+    /^[a-f0-9]{64}$/.test(proof.boxId) &&
+    proof.name === '/reverie-boxed-anchor-' + proof.boxId.slice(0, 32) &&
+    row?.Id === containerId &&
+    row.Name === proof.name &&
+    row.Image === proof.imageId &&
+    labels['org.reverie.purpose'] === 'boxed-resource-helper-v1' &&
+    labels['reverie.box.resource.box'] === proof.boxId &&
+    labels['reverie.box.resource.role'] === 'anchor' &&
+    labels['reverie.box.resource.name'] === proof.name.slice(1) &&
+    (state?.Dead === true || state?.Status === 'dead') &&
+    state.Running === false &&
+    state.Paused === false &&
+    state.Restarting === false &&
+    state.Pid === 0
+  );
+}
+// A pool helper is named only by the office's own repair, for an earlier
+// repair writer that a newer acknowledged one has superseded.
+const SUPERSEDED_HELPER_NAME = /^\/reverie-boxed-(?:ephemeral|identity|leaf-helper|pool-helper)-[a-f0-9]{64}$/,
+  LAPTOP_IMAGE_TAG = /^reverie-boxed-(?:worker|source):[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** Whether an inspected container is exactly the proven helper and has run to
+ * its end. A created, running, paused, restarting or dead container is not. */
+export function dockerSupersededHelperProven(
+  row: {
+    Id?: unknown;
+    Name?: unknown;
+    Image?: unknown;
+    State?: Record<string, unknown> | null;
+    Config?: { Labels?: Record<string, string> | null } | null;
+  } | null,
+  containerId: string,
+  proof: DockerSupersededHelperProof
+): boolean {
+  const expected = Object.entries(proof.labels),
+    labels = row?.Config?.Labels ?? {},
+    state = row?.State;
+  return (
+    SUPERSEDED_HELPER_NAME.test(proof.name) &&
+    expected.length >= 2 &&
+    expected.length <= 4 &&
+    expected.every(
+      ([key, value]) =>
+        (key.startsWith('reverie.box.') || key === 'org.reverie.purpose') && value !== '' && labels[key] === value
+    ) &&
+    row?.Id === containerId &&
+    row.Name === proof.name &&
+    row.Image === proof.imageId &&
+    state?.Status === 'exited' &&
+    state.Running === false &&
+    state.Paused === false &&
+    state.Restarting === false &&
+    state.Dead === false &&
+    state.Pid === 0
+  );
+}
+/** How one container is bound to the employee whose laptop is being rebuilt:
+ * by the labels its creator gave it, or, for a container the employee's own
+ * canonical record names, by the fixed boxed laptop name rule. */
+export type DockerLaptopContainerProof =
+  | { readonly kind: 'labels'; readonly labels: Readonly<Record<string, string>> }
+  | { readonly kind: 'recorded' };
+const RECORDED_LAPTOP_NAME = /^\/reverie-boxed-(?:source-)?[a-f0-9]{64}$/;
+export function dockerLaptopContainerProven(
+  row: { Name?: unknown; Config?: { Labels?: Record<string, string> | null } | null },
+  proof: DockerLaptopContainerProof
+): boolean {
+  if (proof.kind === 'recorded') return RECORDED_LAPTOP_NAME.test(String(row.Name));
+  const expected = Object.entries(proof.labels),
+    labels = row.Config?.Labels ?? {};
+  return (
+    expected.length > 0 &&
+    expected.length <= 8 &&
+    expected.every(([key, value]) => key.startsWith('reverie.') && value !== '' && labels[key] === value)
+  );
 }
 const probeOrigin = Symbol('complete native read-only resource ESRCH');
+/** The whole stderr of a probe that only lost a process or thread while reading
+ * it. An earlier helper prints the kernel's text alone; a later one may follow
+ * it with the path it read and whose it was, in exactly this form. */
+const probeReadRace = new RegExp(
+  '^(?:BOXED_RESOURCE_IO: (?:No such process \\(os error 3\\)|No such file or directory \\(os error 2\\))' +
+    '(?: at (?:/[A-Za-z0-9._-]{1,255}){1,16})?' +
+    '(?: \\((?:box|(?:anchor|worker|member) [a-f0-9]{64}(?: task [1-9][0-9]{0,9})?)\\))?' +
+    '|BOXED_RESOURCE_PID_EXITED); effectIssued=false\\n$'
+);
 function probeArgs(args: readonly string[]): boolean {
   return (
     args.length >= 10 &&
@@ -84,9 +283,7 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
             error.signal === null &&
             input === undefined &&
             stdout === '' &&
-            (stderr === 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n' ||
-              stderr === 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n' ||
-              stderr === 'BOXED_RESOURCE_PID_EXITED; effectIssued=false\n') &&
+            probeReadRace.test(stderr) &&
             probeArgs(args)
           )
             reject(new ResourceProbeReadRace(probeOrigin, args));
@@ -99,6 +296,284 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
         child.stdin?.end(input);
       }
     });
+  }
+  /** Reads the retained output of one exited helper and keeps only its class.
+   * A failed helper prints nothing on stdout and one line on stderr; an Engine
+   * error, any stdout or more output than one line can hold is `unknown`. */
+  helperFailure(containerId: string): Promise<DockerTaskFailure> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) return Promise.reject(Error('Fixed resource helper container required'));
+    return new Promise((resolve) => {
+      execFile(
+        '/bin/docker',
+        ['--host', this.endpoint, 'container', 'logs', containerId],
+        {
+          timeout: 30000,
+          maxBuffer: 16384,
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+        },
+        (error, stdout, stderr) =>
+          resolve(error || stdout !== '' ? 'unknown' : classifyDockerResourceHelperFailure(stderr))
+      );
+    });
+  }
+  async removeCreatedSource(name: string, containerId: string, requireCurrent: () => void): Promise<void> {
+    if (!/^reverie-boxed-source-[a-f0-9]{64}$/.test(name) || !/^[a-f0-9]{64}$/.test(containerId))
+      throw Error('Fixed reprovision source required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    const state = row?.State as Record<string, unknown> | undefined;
+    // Only the exact named container, and only before its first START.
+    if (
+      row?.Id !== containerId ||
+      row.Name !== '/' + name ||
+      state?.Status !== 'created' ||
+      state.Running !== false ||
+      state.Pid !== 0
+    )
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_SOURCE_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** The broker's ordinary image preparation: the worker image's own fixed
+   * helper additively imports that image's registered closure into one
+   * employee's private Nix store. Networkless, read-only root, no capabilities,
+   * and only that store is writable. A prior helper under the same name is
+   * settled by observation, never rerun over an unknown outcome. */
+  async prepareWorkerStore(
+    name: string,
+    spec: Readonly<{ imageId: string; user: string; nixSource: string }>,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (
+      !/^reverie-boxed-nix-prepare-[a-f0-9]{32}$/.test(name) ||
+      !/^sha256:[a-f0-9]{64}$/.test(spec.imageId) ||
+      !/^[0-9]{1,9}:[0-9]{1,9}$/.test(spec.user) ||
+      !spec.nixSource.startsWith('/') ||
+      /[\0\r\n,]/.test(spec.nixSource) ||
+      spec.nixSource.split('/').includes('..')
+    )
+      throw Error('Fixed worker store preparation required');
+    const unconfirmed = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED');
+    };
+    const state = async (id: string) => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', id])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const value = row?.State as Record<string, unknown> | undefined;
+      const labels = (row?.Config as { Labels?: Record<string, string> } | undefined)?.Labels;
+      if (row?.Id !== id || row.Name !== '/' + name || row.Image !== spec.imageId || !value) return unconfirmed();
+      if (labels?.['org.reverie.purpose'] !== 'boxed-nix-prepare-v1') return unconfirmed();
+      return value;
+    };
+    requireCurrent();
+    const listed = (
+      await this.run([
+        'container',
+        'ls',
+        '--all',
+        '--no-trunc',
+        '--filter',
+        'name=^/' + name + '$',
+        '--format',
+        '{{.ID}}',
+      ])
+    )
+      .split('\n')
+      .filter((line) => line !== '');
+    if (listed.length > 1 || listed.some((id) => !/^[a-f0-9]{64}$/.test(id))) unconfirmed();
+    let id = listed[0];
+    if (!id) {
+      requireCurrent();
+      id = await this.create(
+        name,
+        {
+          Image: spec.imageId,
+          User: spec.user,
+          Entrypoint: ['/bin/reverie-nix-store-prepare'],
+          Cmd: [],
+          Env: ['HOME=/tmp/nix-bootstrap-home', 'TMPDIR=/tmp'],
+          Labels: { 'org.reverie.purpose': 'boxed-nix-prepare-v1' },
+          NetworkDisabled: true,
+          HostConfig: {
+            Init: true,
+            ReadonlyRootfs: true,
+            CapDrop: ['ALL'],
+            SecurityOpt: ['no-new-privileges'],
+            NetworkMode: 'none',
+            Memory: 512 * 1024 * 1024,
+            MemorySwap: 512 * 1024 * 1024,
+            PidsLimit: 128,
+            NanoCpus: 1_000_000_000,
+            Tmpfs: {
+              '/tmp': 'rw,nosuid,nodev,size=268435456,mode=1777',
+              '/nix/store/.links': 'rw,nosuid,nodev,size=1048576,mode=1777',
+            },
+            Mounts: [{ Type: 'bind', Source: spec.nixSource, Target: '/target/nix' }],
+          },
+        },
+        requireCurrent
+      );
+    }
+    let value = await state(id);
+    if (value.Status === 'created') {
+      requireCurrent();
+      await this.run(['container', 'start', id]);
+      value = await state(id);
+    }
+    // The helper carries the original five-minute budget itself.
+    const end = Date.now() + 330_000;
+    while (value.Running === true || value.Status === 'running') {
+      if (Date.now() >= end) unconfirmed();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      value = await state(id);
+    }
+    if (value.Status !== 'exited' || value.ExitCode !== 0 || value.OOMKilled === true) unconfirmed();
+    await this.run(['container', 'rm', id]);
+  }
+  prepareSeatDirectory(
+    name: string,
+    spec: DockerSeatDirectorySpec,
+    requireCurrent: () => void,
+    auth?: string
+  ): Promise<DockerSeatDirectoryReceipt> {
+    return prepareSeatDirectory(this, name, spec, requireCurrent, auth);
+  }
+  /** Removes one recorded laptop container that hosts no process beyond its
+   * own init, never by force. The owning workflow separately proves that the
+   * container is the employee's recorded one and that no provider ever ran. */
+  async removeIdleLaptop(containerId: string, requireCurrent: () => void): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) throw Error('Fixed laptop container required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE');
+    };
+    const inspect = async () => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const state = row?.State as Record<string, unknown> | undefined;
+      if (row?.Id !== containerId || !state || !/^\/reverie-boxed-(?:source-)?[a-f0-9]{64}$/.test(String(row.Name)))
+        return notRemovable();
+      return state;
+    };
+    requireCurrent();
+    let state = await inspect();
+    if (state.Paused === true || state.Restarting === true) notRemovable();
+    if (state.Running === true) {
+      const rows = (await this.run(['container', 'top', containerId, '-eo', 'pid']))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      // A header and the container's own init; anything else is a live tenant.
+      if (rows.length !== 2 || rows[0] !== 'PID' || rows[1] !== String(state.Pid)) notRemovable();
+      requireCurrent();
+      await this.run(['container', 'stop', '--time', '20', containerId]);
+      state = await inspect();
+    }
+    if (state.Running !== false || !['exited', 'created'].includes(String(state.Status))) notRemovable();
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** The owner's laptop rebuild. Unlike `removeIdleLaptop` this stops a running
+   * container whatever it hosts, because the owner confirmed that its running
+   * conversation is discarded. It is never forced: `stop` gives the container
+   * its ordinary grace period, `rm` takes no `--force` and no `--volumes`, so
+   * the employee's bind-mounted home, Nix store and scratch are not touched.
+   * The proof is re-read immediately before the stop and before the removal. */
+  async discardLaptopContainer(
+    containerId: string,
+    proof: DockerLaptopContainerProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) throw Error('Fixed laptop container required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REBUILD_CONTAINER_NOT_REMOVABLE');
+    };
+    const inspect = async () => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const state = row?.State as Record<string, unknown> | undefined;
+      if (row?.Id !== containerId || !state || !dockerLaptopContainerProven(row, proof)) return notRemovable();
+      return state;
+    };
+    requireCurrent();
+    let state = await inspect();
+    if (state.Paused === true || state.Restarting === true) notRemovable();
+    if (state.Running === true) {
+      requireCurrent();
+      await this.run(['container', 'stop', '--time', '20', containerId]);
+      state = await inspect();
+    }
+    if (state.Running !== false || !['exited', 'created', 'dead'].includes(String(state.Status))) notRemovable();
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** The owner's leftover cleanup. `rm` takes no `--force` and no `--volumes`:
+   * a helper that is running again is refused by this read and by the Engine. */
+  async removeSupersededHelper(
+    containerId: string,
+    proof: DockerSupersededHelperProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId) || !SUPERSEDED_HELPER_NAME.test(proof.name))
+      throw Error('Fixed superseded helper required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    if (!dockerSupersededHelperProven(row, containerId, proof))
+      throw new DockerEmployeeContinuationError('DOCKER_LEFTOVER_HELPER_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  async removeDeadPoolAnchor(
+    containerId: string,
+    proof: DockerDeadPoolAnchorProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId) || !POOL_ANCHOR_NAME.test(proof.name))
+      throw Error('Fixed pool anchor required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    if (!dockerDeadPoolAnchorProven(row, containerId, proof))
+      throw new DockerEmployeeContinuationError('DOCKER_POOL_DEAD_ANCHOR_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** Only tags of the two laptop image repositories, and only while the image
+   * carries exactly the listed ones and no container at all descends from it. */
+  async removeUnusedLaptopImage(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void> {
+    if (
+      !/^sha256:[a-f0-9]{64}$/.test(imageId) ||
+      tags.length < 1 ||
+      tags.length > 16 ||
+      new Set(tags).size !== tags.length ||
+      tags.some((tag) => !LAPTOP_IMAGE_TAG.test(tag))
+    )
+      throw Error('Fixed laptop image required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_LEFTOVER_IMAGE_NOT_REMOVABLE');
+    };
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['image', 'inspect', imageId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    const listed = Array.isArray(row?.RepoTags) ? [...(row.RepoTags as unknown[])].map(String).sort() : [];
+    if (row?.Id !== imageId || JSON.stringify(listed) !== JSON.stringify([...tags].sort())) notRemovable();
+    const users = await this.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'ancestor=' + imageId,
+      '--format',
+      '{{.ID}}',
+    ]);
+    if (users.trim() !== '') notRemovable();
+    for (const tag of tags) {
+      requireCurrent();
+      await this.run(['image', 'rm', '--no-prune', tag]);
+    }
   }
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string> {
     if (!/^reverie-boxed-(?:(?:storage|anchor|pool|leaf)-)?[a-z0-9-]{1,100}$/.test(name))
@@ -154,7 +629,12 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
                 return;
               }
               if (response.statusCode !== 201) {
-                rejectOnce(createFailure(response.statusCode));
+                rejectOnce(
+                  createFailure(
+                    response.statusCode,
+                    response.statusCode === 400 ? missingBindTarget(Buffer.concat(chunks), configuration) : undefined
+                  )
+                );
                 return;
               }
               let id: unknown;

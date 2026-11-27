@@ -18,6 +18,27 @@ describe('website reconnects existing laptops', () => {
     expect((await reattachLaptops(f.deps)).connected).toEqual([f.sid]);
     expect(f.deps.restore.mock.calls[0][0].state).toBe(f.saved);
   });
+  it('reconnects an employee without a subscription account first, and still tries the others when that one fails', async () => {
+    const f = fixture();
+    const planSid = '11111111-2222-3333-4444-555555555555';
+    const recipe = { mode: 'claude', workingDir: '/workspace' };
+    const plan = EmployeeSchema.parse({ ...f.employee, id: 'plan', sessionId: planSid,
+      runtimeRecipe: { ...recipe, subscriptionProfile: { id: 'a', label: 'A', provider: 'anthropic' } } });
+    const local = EmployeeSchema.parse({ ...f.employee,
+      runtimeRecipe: { ...recipe, mode: 'hands', customModel: { endpointId: 'local', modelId: 'qwen' } } });
+    const saved = new Map<string, SessionState>([[f.sid, f.saved], [planSid, { ...f.saved, id: planSid, mode: 'claude' }]]);
+    const tried: string[] = [];
+    const report = await reattachLaptops({
+      inventory: async () => ({ runningSessionIds: [planSid, f.sid] }),
+      // The subscription employee is first in the company list.
+      employees: () => [plan, local],
+      saved: (id) => saved.get(id),
+      live: () => false,
+      restore: async (entry) => { tried.push(entry.sessionId); return entry.sessionId !== f.sid; },
+    });
+    expect(tried).toEqual([f.sid, planSid]);
+    expect(report).toEqual({ connected: [planSid], failed: [f.sid] });
+  });
   it('never starts a missing laptop or reconnects a stopped, vacationed, foreign-owned or already-live expert', async () => {
     for (const change of ['missing', 'stopped', 'vacation', 'foreign', 'live', 'intentional-exit']) {
       const f = fixture();

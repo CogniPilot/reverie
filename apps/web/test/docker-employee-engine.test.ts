@@ -41,6 +41,11 @@ import {
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 import { DockerWorkerReattachHelper } from '../src/docker-worker-reattach-helper.js';
+import { DockerStorageIdentityJournal } from '../src/docker-storage-identity-journal.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { z } from 'zod';
 import { allowedDockerTaskTransition, type DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
   dest = 'd'.repeat(64),
@@ -87,6 +92,8 @@ function namespaceNative(mode: 'presence' | 'observe' | 'attach', runtimeNamespa
     },
     statfsSync: () => ({ type: 0x9fa0 }),
     statSync: () => ({ uid: 1000 }),
+    // The process table of a laptop nothing runs in: the probe asks it before it calls a missing socket absent.
+    readdirSync: () => ['1', 'self'],
     readFileSync(p: string) {
       return p === '/proc/self/status'
         ? 'NoNewPrivs: 1\nCapInh: 0\nCapPrm: 0\nCapEff: 0\nCapAmb: 0\n'
@@ -708,7 +715,10 @@ describe('retained published plan source after historical source deletion', () =
           reads++;
           expect(args.slice(-2)).toEqual(['--filesystem-id','9988']);
           expect(args).toContain('7:5:1000:100:448');
-          if (scenario === 'filesystem' && reads === 2) throw Error('BOXED_STORAGE_FILESYSTEM_CHANGED');
+          // The verifier's own refusal, as the client reports it: exit 1 and its code. A refusal is an answer and
+          // is not asked for a second time.
+          if (scenario === 'filesystem' && reads === 2)
+            throw Object.assign(new Error('Command failed: docker run\nBOXED_STORAGE_FILESYSTEM_CHANGED'), { code: 1 });
           return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null,
             home: { ...f.storage.home, dev: '7' }, nix: { ...f.storage.nix, dev: '7' } });
         }
@@ -2768,4 +2778,634 @@ describe('installed original protocol observation', () => {
       }
     }
   );
+});
+
+describe('the stored home of a stopped laptop after a host restart', () => {
+  const image = 'sha256:' + '8'.repeat(64);
+  type Identity = Parameters<NonNullable<ConstructorParameters<typeof DockerWorkerReattachHelper>[3]>['identity']['remember']>[0];
+  /**
+   * A finished laptop that is stopped, with its storage holder stopped as well. `mounted` is what is at the two bind
+   * sources now; the fake verifier reports it and confirms only a reference that names exactly it.
+   */
+  /** A failed `docker run`, as Node reports it: the command line, then what the client printed. */
+  const failed = (stderr: string, code: number | undefined, killed = false) =>
+    Object.assign(new Error('Command failed: docker run …\n' + stderr), { code, killed });
+  async function restarted(
+    options: {
+      granted?: boolean;
+      recorded?: Identity;
+      accepted?: Identity;
+      oldVerifier?: boolean;
+      /** Keep the two records in real journals in this directory, as the office does. */
+      journals?: string;
+    } = {}
+  ) {
+    const f = await retainedStoppedFixture();
+    f.holder().State = { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 };
+    const state = {
+      mounted: {
+        home: { ...f.storage.home },
+        nix: { ...f.storage.nix },
+        homeFilesystem: { ext4: true, id: '9988' },
+        nixFilesystem: { ext4: true, id: '9988' },
+      },
+      granted: options.granted ?? false,
+      recorded: options.recorded as Identity | undefined,
+      remembered: [] as Identity[],
+      /** What the grant accepted, in its own file. */
+      accepted: options.accepted as Identity | undefined,
+      grantsRemembered: [] as Identity[],
+      verified: [] as string[][],
+      observed: 0,
+      /** The verifier refuses its second confirmation. */
+      changeBetweenReads: false,
+      /** The configured image is not in the Engine. */
+      imageMissing: false,
+      /** How many of the next runs give no answer in time. */
+      timeouts: 0,
+      runs: 0,
+    };
+    const real = options.journals
+      ? {
+          identity: new DockerStorageIdentityJournal(join(options.journals, 'docker-storage-identity.jsonl')),
+          grants: new DockerStorageIdentityJournal(join(options.journals, 'docker-storage-identity-granted.jsonl')),
+        }
+      : undefined;
+    const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); }, real ? { granted: () => state.granted, ...real } : {
+      granted: () => state.granted,
+      identity: {
+        read: () => state.recorded,
+        remember: (identity) => {
+          state.remembered.push(identity);
+          state.recorded = identity;
+        },
+      },
+      grants: {
+        read: () => state.accepted,
+        remember: (identity) => {
+          state.grantsRemembered.push(identity);
+          state.accepted = identity;
+        },
+      },
+    });
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    const text = (value: { dev: string; ino: string; uid: number; gid: number; mode: number }) =>
+      [value.dev, value.ino, value.uid, value.gid, value.mode].join(':');
+    vi.mocked(f.command.run).mockImplementation(async (args, input, _timeout) => {
+      if (args[0] === 'image' && args.at(-1) === image) {
+        if (state.imageMissing) throw failed('Error response from daemon: No such image', 1);
+        return JSON.stringify(image);
+      }
+      if (args[0] === 'run') {
+        state.runs++;
+        expect(_timeout).toBe(30_000);
+        if (state.timeouts > 0) {
+          state.timeouts--;
+          throw failed('', undefined, true);
+        }
+      }
+      if (args[0] === 'run' && args.includes('--help')) {
+        if (options.oldVerifier) throw failed("error: unrecognized subcommand 'observe-storage-reference'", 2);
+        return 'Report the identity of the two fixed read-only reference mounts';
+      }
+      if (args[0] === 'run' && args.includes('observe-storage-reference')) {
+        if (options.oldVerifier) throw failed("error: unrecognized subcommand 'observe-storage-reference'", 2);
+        state.observed++;
+        // The two bind sources of the laptop, read-only, and nothing else.
+        expect(args.filter((value) => value.startsWith('type=bind,'))).toEqual([
+          'type=bind,source=/synthetic/home,target=/run/reverie-worker-home,readonly',
+          'type=bind,source=/synthetic/nix,target=/run/reverie-worker-nix,readonly',
+        ]);
+        return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-filesystem-observation-v1', ...state.mounted });
+      }
+      if (args[0] === 'run' && args.includes('verify-storage-reference')) {
+        const wanted = args.slice(args.indexOf('verify-storage-reference') + 1);
+        state.verified.push(wanted);
+        const id = wanted.includes('--filesystem-id') ? wanted[wanted.indexOf('--filesystem-id') + 1] : undefined;
+        const { home, nix, homeFilesystem, nixFilesystem } = state.mounted;
+        const filesystem = id === undefined || [homeFilesystem, nixFilesystem].every((value) => value.ext4 && value.id === id);
+        if (wanted[1] !== text(home) || wanted[3] !== text(nix) || !filesystem)
+          throw failed('BOXED_STORAGE_REFERENCE_CHANGED', 1);
+        if (state.changeBetweenReads && state.verified.length === 2) throw failed('BOXED_STORAGE_FILESYSTEM_CHANGED', 1);
+        return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null, home, nix });
+      }
+      return original(args, input);
+    });
+    const renumber = (dev: string) => {
+      state.mounted.home.dev = dev;
+      state.mounted.nix.dev = dev;
+    };
+    const read = async (layout?: { home: string; nix: string; user: string }) => {
+      const seen = await f.engine.stoppedStorage(f.row, helper, () => {}, layout);
+      return seen.state === 'unconfirmed' ? `unconfirmed:${seen.cause}` : seen.state === 'renumbered' ? `renumbered:${seen.reason}` : seen.state;
+    };
+    /** The laptop container is gone. `listed`: the Engine still lists it and only cannot inspect it. */
+    const removeLaptop = (listed = false) => {
+      const before = vi.mocked(f.command.run).getMockImplementation()!;
+      const id = f.row.destination!.containerId;
+      vi.mocked(f.command.run).mockImplementation(async (args, input, timeout) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === id) throw failed('No such container', 1);
+        if (args[0] === 'container' && args[1] === 'ls' && args.includes('id=' + id)) return listed ? id : '';
+        return before(args, input, timeout);
+      });
+    };
+    return { f, state, helper, renumber, read, removeLaptop };
+  }
+  const identity = (f: Awaited<ReturnType<typeof retainedStoppedFixture>>, device: string, filesystemId = '9988'): Identity => ({
+    employeeId: f.row.employeeId,
+    home: { ino: f.storage.home.ino, uid: 1000, gid: 100, mode: 448 },
+    nix: { ino: f.storage.nix.ino, uid: 1000, gid: 100, mode: 448 },
+    device,
+    filesystemId,
+  });
+
+  it('verifies the same directories on the same device, and records the filesystem once the verifier confirmed twice', async () => {
+    const w = await restarted();
+    await expect(w.read()).resolves.toBe('verified');
+    expect(w.helper.verdict(w.f.row)).toBe('same');
+    expect(w.state.verified).toEqual([
+      ['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448'],
+      ['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448'],
+    ]);
+    expect(w.state.remembered).toEqual([identity(w.f, '4')]);
+    expect(w.f.command.create).not.toHaveBeenCalled();
+  });
+
+  it('accepts a new device number by itself when the filesystem is the one it recorded, with no grant', async () => {
+    const first = await restarted();
+    const w = await restarted({ recorded: identity(first.f, '4') });
+    w.renumber('7');
+    await expect(w.read()).resolves.toBe('verified');
+    expect(w.helper.verdict(w.f.row)).toBe('renumbered-proved');
+    // The pinned verifier confirms the renumbered reference on both mounts, with the filesystem ID, twice.
+    expect(w.state.verified).toEqual([
+      ['--home', '7:5:1000:100:448', '--nix', '7:6:1000:100:448', '--filesystem-id', '9988'],
+      ['--home', '7:5:1000:100:448', '--nix', '7:6:1000:100:448', '--filesystem-id', '9988'],
+    ]);
+    expect(w.state.remembered).toEqual([identity(w.f, '7')]);
+  });
+
+  it('does not accept a new device number that it cannot prove and that no grant covers', async () => {
+    const w = await restarted();
+    w.renumber('7');
+    await expect(w.read()).resolves.toBe('renumbered:no-record-no-grant');
+    expect(w.helper.verdict(w.f.row)).toBe('renumbered');
+    // The recorded reference was put to the verifier unchanged, and it refused it.
+    expect(w.state.verified).toEqual([['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448']]);
+    expect(w.state.remembered).toEqual([]);
+  });
+
+  it('takes a record of these directories on another filesystem as proof against the home, grant or not', async () => {
+    const seed = await restarted();
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: identity(seed.f, '4', '1234') });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('different');
+      expect(w.state.remembered).toEqual([]);
+    }
+  });
+
+  it('lets no grant override a record that names other directories: the grant is for the case without a record', async () => {
+    const seed = await restarted();
+    const stale = { ...identity(seed.f, '4'), home: { ino: '88', uid: 1000, gid: 100, mode: 448 } };
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: stale });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('renumbered:record-names-other-directories');
+      // Nothing was proposed to the verifier but the recorded reference, and the stale record stays as it is.
+      expect(w.state.verified).toEqual([['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448']]);
+      expect(w.state.remembered).toEqual([]);
+    }
+  });
+
+  it('lets neither the grant nor anything else stand in for a record that cannot be trusted', async () => {
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: 'unreadable' as never });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('renumbered:record-unreadable');
+      expect(w.helper.verdict(w.f.row)).toBe('renumbered-record-unreadable');
+    }
+    // On the same device number the record is not asked: the holder's own receipt is confirmed.
+    const same = await restarted({ recorded: 'unreadable' as never });
+    await expect(same.read()).resolves.toBe('verified');
+  });
+
+  it('accepts an unproved new device number under the standing grant, and proves the next one itself', async () => {
+    const w = await restarted({ granted: true });
+    w.renumber('7');
+    await expect(w.read()).resolves.toBe('verified');
+    expect(w.helper.verdict(w.f.row)).toBe('renumbered-granted');
+    expect(w.state.verified[0]).toEqual(['--home', '7:5:1000:100:448', '--nix', '7:6:1000:100:448', '--filesystem-id', '9988']);
+    expect(w.state.remembered).toEqual([identity(w.f, '7')]);
+    // The grant is withdrawn and the device number changes again: the record made above is the proof now.
+    w.state.granted = false;
+    w.renumber('9');
+    w.state.verified.length = 0;
+    await expect(w.read()).resolves.toBe('verified');
+    expect(w.helper.verdict(w.f.row)).toBe('renumbered-proved');
+  });
+
+  it.each(['inode', 'owner', 'mode'] as const)('never accepts another directory, grant or record: %s', async (what) => {
+    const seed = await restarted();
+    const w = await restarted({ granted: true, recorded: identity(seed.f, '4') });
+    w.renumber('7');
+    if (what === 'inode') w.state.mounted.home.ino = '77';
+    if (what === 'owner') w.state.mounted.nix.uid = 0;
+    if (what === 'mode') w.state.mounted.home.mode = 493;
+    await expect(w.read()).resolves.toBe('different');
+    expect(w.helper.verdict(w.f.row)).toBe('different');
+    expect(w.state.remembered).toEqual([]);
+    // The same on the old device number: a different directory is different.
+    w.renumber('4');
+    await expect(w.read()).resolves.toBe('different');
+  });
+
+  it('accepts no new device number that the verifier cannot check: another filesystem type, or two filesystems', async () => {
+    const other = await restarted({ granted: true });
+    other.renumber('7');
+    other.state.mounted.homeFilesystem.ext4 = false;
+    await expect(other.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
+    const split = await restarted({ granted: true });
+    split.state.mounted.home.dev = '7';
+    split.state.mounted.nix.dev = '8';
+    await expect(split.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
+    const two = await restarted({ granted: true });
+    two.renumber('7');
+    two.state.mounted.nixFilesystem.id = '1';
+    await expect(two.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
+  });
+
+  it('does not accept a renumbered reference that the verifier refuses on its second read', async () => {
+    const w = await restarted({ granted: true });
+    w.renumber('7');
+    w.state.changeBetweenReads = true;
+    await expect(w.read()).resolves.toBe('renumbered:verifier-refused');
+    expect(w.state.remembered).toEqual([]);
+  });
+
+  it('with a verifier image that predates the read of what is mounted, confirms an unchanged home and keeps its refusal of a changed one', async () => {
+    const same = await restarted({ oldVerifier: true, granted: true });
+    await expect(same.read()).resolves.toBe('verified');
+    expect(same.helper.verdict(same.f.row)).toBe('unobserved');
+    expect(same.helper.capability()).toBe('compare-only');
+    // The old verifier refused the recorded reference. That is an answer: the home is not rebuilt on, whether the
+    // device number changed or the directory did. It cannot say which, and no grant can be applied to it.
+    for (const change of ['device', 'directory'] as const) {
+      const changed = await restarted({ oldVerifier: true, granted: true });
+      if (change === 'device') changed.renumber('7');
+      else changed.state.mounted.home.ino = '77';
+      await expect(changed.read(), change).resolves.toBe('changed');
+      expect(changed.state.remembered).toEqual([]);
+      // Once it is known that the image lacks the read, the read is not run again.
+      const runs = changed.state.runs;
+      await expect(changed.read()).resolves.toBe('changed');
+      expect(changed.state.runs - runs).toBe(1);
+    }
+  });
+
+  it('finds out at the start what the configured image can do', async () => {
+    const full = await restarted();
+    await expect(full.helper.probe()).resolves.toBe('full');
+    const old = await restarted({ oldVerifier: true });
+    expect(old.helper.capability()).toBe('unknown');
+    await expect(old.helper.probe()).resolves.toBe('compare-only');
+    const missing = await restarted();
+    missing.state.imageMissing = true;
+    await expect(missing.helper.probe()).resolves.toBe('image-missing');
+    expect(missing.state.runs).toBe(0);
+    // A probe that gives no answer says nothing about the image.
+    const slow = await restarted();
+    slow.state.timeouts = 2;
+    await expect(slow.helper.probe()).resolves.toBe('unknown');
+    // The probe mounts nothing.
+    expect(vi.mocked(old.f.command.run).mock.calls.every(([args]) => !args.some((value) => value.startsWith('type=bind,')))).toBe(true);
+  });
+
+  it('cannot tell, and says why, when the verifier gives no answer: it never passes that off as a home to rebuild on', async () => {
+    // The configured image is not in the Engine.
+    const missing = await restarted({ granted: true });
+    missing.state.imageMissing = true;
+    await expect(missing.read()).resolves.toBe('unconfirmed:verifier-image-missing');
+    expect(missing.helper.capability()).toBe('image-missing');
+    // Every run times out, as on a host that has just restarted under load. Each read is tried twice first.
+    const slow = await restarted({ granted: true });
+    slow.state.timeouts = 99;
+    await expect(slow.read()).resolves.toBe('unconfirmed:verifier-timed-out');
+    expect(slow.state.runs).toBe(4);
+    // One timeout is not the end of a read: the second try answers.
+    const once = await restarted();
+    once.state.timeouts = 1;
+    await expect(once.read()).resolves.toBe('verified');
+    // The read of what is mounted answered and the comparison then gave none.
+    const half = await restarted();
+    const original = vi.mocked(half.f.command.run).getMockImplementation()!;
+    vi.mocked(half.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'run' && args.includes('verify-storage-reference')) throw failed('', 125);
+      return original(args, input, timeout);
+    });
+    await expect(half.read()).resolves.toBe('unconfirmed:verifier-failed');
+    expect(half.state.remembered).toEqual([]);
+  });
+
+  it('cannot tell when the holder, its receipt or the laptop can no longer be read', async () => {
+    const w = await restarted({ granted: true });
+    const original = vi.mocked(w.f.command.run).getMockImplementation()!;
+    // The holder's own record of the two directories is gone.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'logs') return '';
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:receipt-unreadable');
+    expect(w.state.observed).toBe(0);
+    // The holder container is gone.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === w.f.holder().Id) throw failed('No such container', 1);
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:receipt-unreadable');
+    // The laptop container that the record names cannot be inspected.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) throw failed('No such container', 1);
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:laptop-unreadable');
+  });
+
+  describe('what else runs in a laptop besides its agent', () => {
+    const answer = (patch: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        version: 1, purpose: 'reverie-laptop-other-work-v1', agent: true, others: 0, names: [], cpuUsec: '5250999',
+        ...patch,
+      }) + '\n';
+    const laptop = async (output: () => string) => {
+      const w = await restarted();
+      w.f.observed.State = { ...w.f.observed.State, Running: true, Status: 'running', Pid: 4321 };
+      const asked: string[][] = [];
+      const before = vi.mocked(w.f.command.run).getMockImplementation()!;
+      vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+        if (args[0] !== 'exec' || !args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) return before(args, input, timeout);
+        asked.push([...args]);
+        return output();
+      });
+      return { ...w, asked };
+    };
+
+    it('asks the fixed in-laptop program, read-only, and reports what it counted as a plain fact', async () => {
+      const w = await laptop(() => answer({ others: 2, names: ['cargo', 'rustc'] }));
+      await expect(w.f.engine.observeOtherWork(w.f.row)).resolves.toEqual({
+        otherWork: true, processes: 2, names: ['cargo', 'rustc'], agent: true, cpuUsedMs: 5250,
+      });
+      // One exec into the recorded laptop: the program the office passes on every call, in its `work` mode.
+      expect(w.asked).toHaveLength(1);
+      const args = w.asked[0]!;
+      expect(args[0]).toBe('exec');
+      expect(args).toContain(w.f.row.destination!.containerId);
+      expect(args.slice(args.indexOf('--') + 1).filter((value) => !value.startsWith('--runtime-namespace'))).toEqual([
+        'work', w.f.row.request.sessionId, w.f.row.request.operationId, expect.stringMatching(/^(none|generation)$/),
+      ]);
+      expect(w.f.command.create).not.toHaveBeenCalled();
+    });
+
+    it('reports none when the program counted none, and no CPU figure where the laptop could not read one', async () => {
+      const w = await laptop(() => answer({ cpuUsec: null, agent: false }));
+      await expect(w.f.engine.observeOtherWork(w.f.row)).resolves.toEqual({
+        otherWork: false, processes: 0, names: [], agent: false,
+      });
+    });
+
+    it('has nothing to read in a laptop that does not run, and never guesses from an answer it cannot read', async () => {
+      const stopped = await restarted();
+      await expect(stopped.f.engine.observeOtherWork(stopped.f.row)).resolves.toBeUndefined();
+      for (const output of ['', 'ABSENT\n', '{"others":0}\n', answer({ others: -1 }), answer({ extra: true }), answer({ names: ['x'.repeat(2000)] })]) {
+        const w = await laptop(() => output);
+        await expect(w.f.engine.observeOtherWork(w.f.row), output.slice(0, 20)).rejects.toThrow();
+      }
+      const failed = await laptop(() => {
+        throw Error('exec failed');
+      });
+      await expect(failed.f.engine.observeOtherWork(failed.f.row)).rejects.toThrow('exec failed');
+    });
+  });
+
+  describe('a laptop container that no longer exists', () => {
+    // Where a rebuild would bind the two directories from, and the user it would run as.
+    const layout = { home: '/synthetic/home', nix: '/synthetic/nix', user: '1000:100' };
+    const gone = async (options: Parameters<typeof restarted>[0] = {}) => {
+      const w = await restarted(options);
+      w.removeLaptop();
+      return w;
+    };
+
+    it('is confirmed by the office’s own record of exactly these directories on exactly this filesystem', async () => {
+      const first = await restarted();
+      const w = await gone({ recorded: identity(first.f, '4') });
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      // One read of the two paths, and no receipt of a holder was asked for or confirmed.
+      expect(w.state.observed).toBe(1);
+      expect(w.state.verified).toEqual([]);
+      // A new device number changes nothing: the record is of the filesystem, not of the number.
+      w.renumber('7');
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.f.command.create).not.toHaveBeenCalled();
+    });
+
+    it('is never confirmed when the record names another directory or another filesystem, with or without the grant', async () => {
+      const first = await restarted();
+      for (const granted of [false, true]) {
+        const inode = await gone({ granted, recorded: identity(first.f, '4') });
+        inode.state.mounted.home.ino = '77';
+        await expect(inode.read(layout), String(granted)).resolves.toBe('different');
+        const filesystem = await gone({ granted, recorded: identity(first.f, '4', '1111') });
+        await expect(filesystem.read(layout), String(granted)).resolves.toBe('different');
+        const two = await gone({ granted, recorded: identity(first.f, '4') });
+        two.state.mounted.nixFilesystem = { ext4: true, id: '4242' };
+        await expect(two.read(layout), String(granted)).resolves.toBe('different');
+        expect(two.state.remembered).toEqual([]);
+      }
+    });
+
+    it('is not accepted without a record and without the grant, and says so', async () => {
+      const w = await gone();
+      await expect(w.read(layout)).resolves.toBe('renumbered:absent-no-record-no-grant');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-no-record');
+      expect(w.state.remembered).toEqual([]);
+    });
+
+    it('is accepted under the grant without a record when the home is what the laptop ran with, and recorded as granted, not proved', async () => {
+      const w = await gone({ granted: true });
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+      // What the grant accepted is kept apart from the office's own records, which it leaves as they were.
+      expect(w.state.remembered).toEqual([]);
+      expect(w.state.grantsRemembered).toEqual([identity(w.f, '4')]);
+      // The record stands for the grant and proves nothing by itself: with the grant withdrawn it accepts nothing.
+      w.state.granted = false;
+      await expect(w.read(layout)).resolves.toBe('renumbered:absent-grant-withdrawn');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-grant-withdrawn');
+      w.state.granted = true;
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+      // Other directories at the path contradict it, and the grant does not override that.
+      w.state.mounted.home.ino = '77';
+      await expect(w.read(layout)).resolves.toBe('different');
+      // What a missing disk leaves at the path belongs to root: the grant does not accept that.
+      const missing = await gone({ granted: true });
+      missing.state.mounted.home = { ...missing.state.mounted.home, uid: 0, gid: 0, mode: 493 };
+      await expect(missing.read(layout)).resolves.toBe('different');
+      expect([...missing.state.remembered, ...missing.state.grantsRemembered]).toEqual([]);
+    });
+
+    it('keeps what the grant accepted out of the record an earlier office reads, which still reads there', async () => {
+      // The record format of the office before the grant was recorded at all: version 1, exactly these fields.
+      const directory = { ino: z.string(), uid: z.number(), gid: z.number(), mode: z.number() };
+      const earlier = z
+        .object({
+          version: z.literal(1),
+          employeeId: z.string().uuid(),
+          home: z.object(directory).strict(),
+          nix: z.object(directory).strict(),
+          device: z.string(),
+          filesystemId: z.string(),
+          recordedAt: z.number(),
+        })
+        .strict();
+      const dir = mkdtempSync(join(tmpdir(), 'storage-grants-'));
+      try {
+        const w = await gone({ granted: true, journals: dir });
+        await expect(w.read(layout)).resolves.toBe('verified');
+        expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+        const own = join(dir, 'docker-storage-identity.jsonl'),
+          granted = join(dir, 'docker-storage-identity-granted.jsonl');
+        // Nothing was written to the office's own record; the acceptance is in a file of its own.
+        expect(existsSync(own)).toBe(false);
+        expect(readFileSync(granted, 'utf8').trim().split('\n')).toHaveLength(1);
+        // A running laptop gives the office a record of its own: it reads under the earlier format, line by line.
+        new DockerStorageIdentityJournal(own).remember(identity(w.f, '4'));
+        for (const line of readFileSync(own, 'utf8').trim().split('\n')) expect(() => earlier.parse(JSON.parse(line))).not.toThrow();
+        // With the grant withdrawn the acceptance proves nothing; the office's own record proves the home.
+        w.state.granted = false;
+        await expect(w.read(layout)).resolves.toBe('verified');
+        expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('accepts under the grant only what the laptop ran with: one filesystem, two real directories, its user and group', async () => {
+      const split = await gone({ granted: true });
+      split.state.mounted.nixFilesystem = { ext4: true, id: '4242' };
+      await expect(split.read(layout)).resolves.toBe('different');
+      const group = await gone({ granted: true });
+      group.state.mounted.home = { ...group.state.mounted.home, gid: 0 };
+      await expect(group.read(layout)).resolves.toBe('different');
+      const emptyNix = await gone({ granted: true });
+      emptyNix.state.mounted.nix = { ...emptyNix.state.mounted.nix, ino: '0' };
+      await expect(emptyNix.read(layout)).resolves.toBe('different');
+      for (const w of [split, group, emptyNix]) expect([...w.state.remembered, ...w.state.grantsRemembered]).toEqual([]);
+    });
+
+    it('names an acceptance of the grant that named other directories as that, not as a record of its own', async () => {
+      const seed = await restarted();
+      for (const granted of [false, true]) {
+        const w = await restarted({ granted, accepted: { ...identity(seed.f, '4'), home: { ...identity(seed.f, '4').home, ino: '77' } } });
+        w.renumber('7');
+        await expect(w.read(), String(granted)).resolves.toBe('renumbered:grant-names-other-directories');
+        expect(w.helper.verdict(w.f.row)).toBe('renumbered-grant-other');
+      }
+      // The office's own record of other directories is still named as its own.
+      const own = await restarted({ granted: true, recorded: { ...identity(seed.f, '4'), home: { ...identity(seed.f, '4').home, ino: '77' } } });
+      own.renumber('7');
+      await expect(own.read()).resolves.toBe('renumbered:record-names-other-directories');
+    });
+
+    it('does not take a record the grant accepted for a proof of a new device number either', async () => {
+      const seed = await restarted();
+      const w = await restarted({ accepted: identity(seed.f, '4') });
+      w.renumber('7');
+      // Without the grant it proves nothing, and is said to be what the grant had accepted.
+      await expect(w.read()).resolves.toBe('renumbered:grant-withdrawn');
+      // Under the grant it is accepted again, as granted; a record a running laptop gives would prove it.
+      const granted = await restarted({ granted: true, accepted: identity(seed.f, '4') });
+      granted.renumber('7');
+      await expect(granted.read()).resolves.toBe('verified');
+      expect(granted.helper.verdict(granted.f.row)).toBe('renumbered-granted');
+    });
+
+    it('lets neither the grant nor anything else stand in for a record that cannot be trusted', async () => {
+      for (const granted of [false, true]) {
+        const w = await gone({ granted, recorded: 'unreadable' as never });
+        await expect(w.read(layout), String(granted)).resolves.toBe('renumbered:absent-record-unreadable');
+      }
+    });
+
+    it('cannot tell when the verifier gives no answer, and never takes that for a home', async () => {
+      const first = await restarted();
+      const slow = await gone({ granted: true, recorded: identity(first.f, '4') });
+      slow.state.timeouts = 2;
+      await expect(slow.read(layout)).resolves.toBe('unconfirmed:verifier-timed-out');
+      await expect(slow.read(layout)).resolves.toBe('verified');
+      const old = await gone({ granted: true, oldVerifier: true });
+      await expect(old.read(layout)).resolves.toBe('unconfirmed:verifier-lacks-command');
+      const missing = await gone({ granted: true });
+      missing.state.imageMissing = true;
+      await expect(missing.read(layout)).resolves.toBe('unconfirmed:verifier-image-missing');
+    });
+
+    it('is not taken for absent while the Engine still lists it, nor compared without a layout', async () => {
+      const first = await restarted();
+      const listed = await restarted({ granted: true, recorded: identity(first.f, '4') });
+      listed.removeLaptop(true);
+      await expect(listed.read(layout)).resolves.toBe('unconfirmed:laptop-unreadable');
+      expect(listed.state.observed).toBe(0);
+      const bare = await gone({ granted: true, recorded: identity(first.f, '4') });
+      await expect(bare.read()).resolves.toBe('unconfirmed:laptop-unreadable');
+      // With no verifier configured at all there is nothing to check with, as before.
+      await expect(bare.f.engine.stoppedStorage(bare.f.row, undefined, () => {}, layout)).resolves.toEqual({
+        state: 'no-verifier',
+      });
+    });
+  });
+
+  it('has nothing to check with when no verifier is configured, and compares nothing for a laptop that runs or is not finished', async () => {
+    const w = await restarted();
+    await expect(w.f.engine.stoppedStorage(w.f.row, undefined, () => {})).resolves.toEqual({ state: 'no-verifier' });
+    w.f.observed.State = { ...w.f.observed.State, Running: true, Status: 'running', Pid: 4321 };
+    await expect(w.read()).resolves.toBe('not-stopped');
+    await expect(w.f.engine.stoppedStorage({ ...w.f.row, phase: 'resources-issued' }, w.helper, () => {})).resolves.toEqual({
+      state: 'not-stopped',
+    });
+    expect(w.state.observed).toBe(0);
+  });
+
+  it('keeps the owner’s approval for one laptop exactly as it was', async () => {
+    const w = await restarted();
+    w.renumber('7');
+    w.helper.approveStorage(w.f.row, {
+      sessionId: w.f.row.request.sessionId, sessionGeneration: w.f.row.request.sessionGeneration,
+      operationId: w.f.row.request.operationId, containerId: w.f.row.destination!.containerId,
+      historicalDevice: '4', currentDevice: '7', filesystemId: '9988',
+      homeInode: w.f.storage.home.ino, nixInode: w.f.storage.nix.ino,
+    });
+    await expect(w.read()).resolves.toBe('verified');
+    expect(w.helper.verdict(w.f.row)).toBe('owner-approved');
+    // The approval was used as given: nothing was read to stand in for it.
+    expect(w.state.observed).toBe(0);
+  });
+
+  it('records the filesystem of a running laptop only when the verifier sees the directories the laptop itself reports', async () => {
+    const w = await restarted();
+    w.f.observed.State = { ...w.f.observed.State, Running: true, Status: 'running', Pid: 4321 };
+    const live = { home: { ...w.f.storage.home }, nix: { ...w.f.storage.nix } };
+    const destination = DockerEmployeeInspect.parse(w.f.observed);
+    await expect(w.helper.rememberRunning(w.f.row, destination, live, () => {})).resolves.toBe(true);
+    expect(w.state.remembered).toEqual([identity(w.f, '4')]);
+    w.state.remembered.length = 0;
+    await expect(
+      w.helper.rememberRunning(w.f.row, destination, { ...live, home: { ...live.home, ino: '99' } }, () => {})
+    ).resolves.toBe(false);
+    w.state.mounted.homeFilesystem.ext4 = false;
+    await expect(w.helper.rememberRunning(w.f.row, destination, live, () => {})).resolves.toBe(false);
+    expect(w.state.remembered).toEqual([]);
+  });
 });

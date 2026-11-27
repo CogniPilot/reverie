@@ -49,7 +49,10 @@ For a registered console deployment, the local owner can run
 `reverie-deployment --root ROOT status` to inspect the claimed update, even
 while Docker is unavailable. Supply an operation ID to inspect a specific preview
 or historical update. The result distinguishes the recorded stage from
-current readiness. See the [deployment guide](crates/reverie-deployment/README.md).
+current readiness. An update that fails after stopping the office starts the
+original office again and reports both results; `check-storage` and
+`prune-deployments` report backup space before and after updates. See the
+[deployment guide](crates/reverie-deployment/README.md).
 
 The running office still uses TypeScript for HTTP authentication and routing.
 The [owner API specification](spec/SPEC_0001_OWNER_OPERATIONS.md) defines the

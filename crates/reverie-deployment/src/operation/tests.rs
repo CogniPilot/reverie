@@ -100,6 +100,7 @@ fn fixture_operation() -> Operation {
                 profile: None,
                 preserved_networks: None,
                 live_accounts: None,
+                stopped_backup: None,
             },
             bind_identities: Vec::new(),
             network_topology: None,

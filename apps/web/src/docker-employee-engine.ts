@@ -2,7 +2,7 @@ import { requireDockerEffectiveResourceProof } from './docker-contained-resource
 import { dockerPlanDestinationEnvironment, DockerPlanInitialReceipt, DockerPlanLiveReceipt } from './docker-plan-install-data.js';
 import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
-import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import type { DockerVerifierFailure, DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
@@ -18,7 +18,11 @@ import {
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
  */
 import { parseWorkerCredentialReadback } from './worker-client-manifest.js';
-import { DockerEmployeeStorage, type DockerEmployeeStorageObservation } from './docker-employee-storage.js';
+import {
+  DockerEmployeeStorage,
+  probeDockerEmployeeStorage,
+  type DockerEmployeeStorageObservation,
+} from './docker-employee-storage.js';
 import type { DockerContinuationTaskJournal } from './docker-continuation-task.js';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -47,6 +51,7 @@ import {
   dockerEngineRefuse as refuse,
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
+import { parseDockerProviderExit, type DockerProviderExit } from './docker-provider-exit.js';
 import { gpuHostConfig, gpuWorkerEnvironment, workerGpuLabel, type DockerWorkerGpu } from './docker-worker-gpu.js';
 import type { SessionDocker } from './types.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, dockerProviderRuntimeArguments, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
@@ -57,6 +62,10 @@ export interface DockerContainedResourceController {
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null>;
   read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null>;
   configure(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Records a started pool or leaf writer that is proved terminal and failed. No effect. */
+  settleFailedWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Re-applies one published laptop's own approved limits in place. */
+  repairLeaf?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<'unchanged' | 'restored'>;
   existingPolicy?(row: DockerEmployeeContinuationRecord, actual: DockerEmployeeResourcePolicy): unknown;
   readExistingAfterHostRestart?(
     row: DockerEmployeeContinuationRecord,
@@ -71,7 +80,42 @@ export interface DockerEmployeeImageConfiguration {
   /** Accepted actual source base image IDs. No runtime request can add a base. */
   readonly sourceImageIds: readonly string[];
 }
+/** Where a boxed laptop sees the office's shared local model socket. */
+export const BOXED_MODEL_SOCKET_DIRECTORY = '/run/reverie-model';
+/** The in-laptop report of a provider that exited inside its launch window. */
+function exitedProvider(output: string): DockerProviderExit | undefined {
+  try {
+    return parseDockerProviderExit(output);
+  } catch {
+    return refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+  }
+}
 const providerViewOrigin = Symbol('original Engine-observed Docker provider view');
+/** What the read inside a laptop reports of work that is neither the agent nor part of the laptop itself. */
+const laptopOtherWork = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-laptop-other-work-v1'),
+    agent: z.boolean(),
+    others: z.number().int().nonnegative().max(4194304),
+    names: z.array(z.string().regex(/^[A-Za-z0-9._+?-]{1,16}$/)).max(5),
+    cpuUsec: z.string().regex(/^[0-9]{1,20}$/).nullable(),
+  })
+  .strict();
+/**
+ * Whether processes of the laptop's user run outside the agent's own process tree and the laptop's fixed service
+ * processes (the in-laptop program says exactly which those are), how many, the names of up to five, and what
+ * the whole laptop has used of the CPU so far (`cpuUsedMs`, from its own cgroup; absent where the laptop cannot
+ * read it). A plain fact: nothing is decided here.
+ */
+export interface DockerLaptopOtherWork {
+  readonly otherWork: boolean;
+  readonly processes: number;
+  readonly names: readonly string[];
+  /** Whether the agent's own pane process was found. */
+  readonly agent: boolean;
+  readonly cpuUsedMs?: number;
+}
 const providerPane = z
   .object({
     paneId: z.string().regex(/^%[0-9]{1,10}$/),
@@ -293,6 +337,45 @@ function boundDestinationMatches(
     : raw;
   return isDeepStrictEqual(boxedOriginal(selected, subject, deployment, true), row.destination);
 }
+/** Why the stored directories of a stopped laptop could not be confirmed either way. */
+export type DockerStoredHomeCause =
+  | 'verifier-image-missing'
+  | 'verifier-lacks-command'
+  | 'verifier-timed-out'
+  | 'verifier-failed'
+  | 'receipt-unreadable'
+  | 'laptop-unreadable';
+/** See `DockerEmployeeEngine.stoppedStorage`. */
+export type DockerStoppedStorage =
+  | { readonly state: 'verified' | 'different' | 'changed' | 'not-stopped' | 'no-verifier' }
+  | { readonly state: 'renumbered'; readonly reason: DockerRenumberedReason }
+  | { readonly state: 'unconfirmed'; readonly cause: DockerStoredHomeCause };
+/** Why a new device number was not accepted. */
+export type DockerRenumberedReason =
+  | 'no-record-no-grant'
+  | 'record-names-other-directories'
+  | 'not-one-ext4-filesystem'
+  | 'record-unreadable'
+  | 'verifier-refused'
+  | 'absent-no-record-no-grant'
+  | 'absent-record-unreadable'
+  | 'grant-withdrawn'
+  | 'grant-names-other-directories'
+  | 'absent-grant-withdrawn';
+
+/** Where a rebuild of a laptop would bind its HOME and Nix directories from, and the user it would run as. */
+export interface DockerStoredHomeLayout {
+  readonly home: string;
+  readonly nix: string;
+  readonly user: string;
+}
+const VERIFIER_CAUSES: Readonly<Record<DockerVerifierFailure, DockerStoredHomeCause>> = {
+  'image-missing': 'verifier-image-missing',
+  'lacks-command': 'verifier-lacks-command',
+  'timed-out': 'verifier-timed-out',
+  refused: 'verifier-failed',
+  failed: 'verifier-failed',
+};
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
@@ -752,7 +835,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         observed = seen;
         return retained.helper.storage(destination, seen, check, filesystemId);
       }, check, placement === 'stopped' ? retained.observed ?? 'original-reference' : undefined,
-      original => retained.helper.stoppedReference(row, original));
+      (original, destination) => retained.helper.stoppedReference(row, original, destination, check));
       check();
       if (!home || !observed) throw error;
       if (placement === 'running') retained.observed = observed;
@@ -763,6 +846,180 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!after || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
+  }
+  /**
+   * Whether the stored HOME and Nix directories of a finished laptop that is stopped are still the ones its storage
+   * holder recorded. It is the same read a same-plan recovery makes before it reserves a move, and it changes
+   * nothing. There are three kinds of answer, and they are never mixed:
+   *
+   * Confirmed the same:
+   * - `verified`: the retained holder still holds them, or the pinned verifier confirmed them against the holder's
+   *   receipt (under a new device number only when `stoppedReference` could accept that).
+   *
+   * Confirmed not the same:
+   * - `renumbered`: the directories are otherwise unchanged on a new device number that was not accepted, with
+   *   the reason.
+   * - `different`: they are not the directories the laptop was built on.
+   * - `changed`: the verifier refused the recorded reference, and the office could not read what is mounted to
+   *   say which of the two it is (the verifier image predates that read).
+   *
+   * Could not tell (`unconfirmed`, with the cause): the laptop or the holder's receipt could not be read, or the
+   * verifier gave no answer. Nothing is known, and nothing may be concluded from it.
+   *
+   * Beside these: `not-stopped` (the laptop is running or not finished, so there is no stopped storage to
+   * compare) and `no-verifier` (this office is configured with none, and the holder does not hold the directories
+   * any more).
+   *
+   * A laptop container that no longer exists is an ordinary state: containers get removed, and the rebuild is
+   * for exactly that. When the Engine positively reports that no container of the recorded ID exists, and the
+   * caller says where a rebuild would bind the directories from (`layout`), those paths are compared with the
+   * office's own record of the employee: see `absentReference` of the reattach helper. The outcomes are the same
+   * three. A container that is listed and cannot be inspected is not absent: that stays `laptop-unreadable`.
+   */
+  async stoppedStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper | undefined,
+    current: () => void,
+    layout?: DockerStoredHomeLayout | (() => Promise<DockerStoredHomeLayout | undefined>)
+  ): Promise<DockerStoppedStorage> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return { state: 'not-stopped' };
+    const unreadable = async (): Promise<DockerStoppedStorage> => {
+      current();
+      if (!helper) return { state: 'no-verifier' };
+      if (!layout || !(await this.#positivelyAbsent(row.destination!.containerId)))
+        return { state: 'unconfirmed', cause: 'laptop-unreadable' };
+      current();
+      // The layout is asked for only here, where a container is gone: a laptop that is there has its own mounts.
+      const bound = typeof layout === 'function' ? await layout().catch(() => undefined) : layout;
+      current();
+      if (!bound) return { state: 'unconfirmed', cause: 'laptop-unreadable' };
+      return this.#absentStorage(row, helper, bound, current);
+    };
+    let seen: DockerEmployeeInspect | null;
+    try {
+      seen = await this.#destination(row, current, true);
+    } catch {
+      return unreadable();
+    }
+    if (seen === null) return unreadable();
+    current();
+    if (seen.State.Running) return { state: 'not-stopped' };
+    helper?.forgetVerdict(row);
+    try {
+      await this.planReplacementHome(row, current, 'stopped', helper ? { helper } : undefined);
+      return { state: 'verified' };
+    } catch {
+      current();
+      if (!helper) return { state: 'no-verifier' };
+      const verdict = helper.verdict(row),
+        failed = helper.failures(row);
+      if (verdict === 'different') return { state: 'different' };
+      if (verdict === 'renumbered') return { state: 'renumbered', reason: 'no-record-no-grant' };
+      if (verdict === 'renumbered-grant-withdrawn') return { state: 'renumbered', reason: 'grant-withdrawn' };
+      if (verdict === 'renumbered-grant-other') return { state: 'renumbered', reason: 'grant-names-other-directories' };
+      if (verdict === 'renumbered-stale-record') return { state: 'renumbered', reason: 'record-names-other-directories' };
+      if (verdict === 'renumbered-unverifiable') return { state: 'renumbered', reason: 'not-one-ext4-filesystem' };
+      if (verdict === 'renumbered-record-unreadable') return { state: 'renumbered', reason: 'record-unreadable' };
+      // The verifier ran and refused the reference it was given. That is an answer, and it is kept.
+      if (failed.verify === 'refused')
+        return verdict === 'same' || verdict === 'unobserved'
+          ? { state: 'changed' }
+          : { state: 'renumbered', reason: 'verifier-refused' };
+      // No verdict: the holder's receipt was not reached. A verdict and no refusal: the verifier gave no answer.
+      const failure = verdict === undefined ? undefined : (failed.verify ?? failed.observe);
+      return { state: 'unconfirmed', cause: failure ? VERIFIER_CAUSES[failure] : 'receipt-unreadable' };
+    }
+  }
+  /**
+   * Reads, inside the finished laptop this record names, whether anything of the laptop's user runs besides the
+   * agent and the laptop's own fixed processes. Read-only. Undefined when the laptop does not run, so that
+   * nothing can run in it. Anything that cannot be read throws: the caller reports that as unknown.
+   */
+  async observeOtherWork(row: DockerEmployeeContinuationRecord): Promise<DockerLaptopOtherWork | undefined> {
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
+      refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    const raw = await this.#destination(row, () => {}, true);
+    if (!raw?.State.Running) return undefined;
+    const output = await this.command.run([
+      'exec',
+      ...DOCKER_PROVIDER_VIEW_ENV,
+      raw.Id,
+      '/opt/reverie-worker-client/bin/node',
+      '--input-type=commonjs',
+      '-e',
+      DOCKER_PROVIDER_VIEW_PROGRAM,
+      '--',
+      ...dockerProviderRuntimeArguments(row.version === 3 ? row.planReplacement.runtimeNamespace : undefined),
+      'work',
+      row.request.sessionId,
+      row.request.operationId,
+      this.providerHooks(row).kind,
+    ]);
+    if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    const seen = laptopOtherWork.parse(JSON.parse(output));
+    const used = seen.cpuUsec === null ? undefined : Math.floor(Number(seen.cpuUsec) / 1000);
+    return {
+      otherWork: seen.others > 0,
+      processes: seen.others,
+      names: seen.names,
+      agent: seen.agent,
+      ...(used !== undefined && Number.isSafeInteger(used) ? { cpuUsedMs: used } : {}),
+    };
+  }
+  /** Whether the Engine lists no container of exactly this ID, in any state. A census that fails says nothing. */
+  async #positivelyAbsent(containerId: string): Promise<boolean> {
+    try {
+      const listed = await this.command.run([
+        'container', 'ls', '--all', '--no-trunc', '--filter', 'id=' + containerId, '--format', '{{.ID}}',
+      ]);
+      return listed.trim() === '';
+    } catch {
+      return false;
+    }
+  }
+  /** The stored home of a laptop whose container is positively absent, by the office's own record. */
+  async #absentStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper,
+    layout: DockerStoredHomeLayout,
+    current: () => void
+  ): Promise<DockerStoppedStorage> {
+    helper.forgetVerdict(row);
+    let found: Awaited<ReturnType<DockerWorkerReattachHelper['absentReference']>>;
+    try {
+      found = await helper.absentReference(row, layout, current);
+    } catch {
+      found = 'unobserved';
+    }
+    current();
+    if (found === 'proved' || found === 'granted') return { state: 'verified' };
+    if (found === 'different') return { state: 'different' };
+    if (found === 'no-record') return { state: 'renumbered', reason: 'absent-no-record-no-grant' };
+    if (found === 'grant-withdrawn') return { state: 'renumbered', reason: 'absent-grant-withdrawn' };
+    if (found === 'record-unreadable') return { state: 'renumbered', reason: 'absent-record-unreadable' };
+    return { state: 'unconfirmed', cause: VERIFIER_CAUSES[helper.failures(row).observe ?? 'failed'] };
+  }
+  /**
+   * Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix
+   * directories are on. It is the same for every finished laptop, whatever made it (a set-up, a rebuild or a plan
+   * move). Reads only. `recorded`: the office holds a record of what this laptop shows now. `not-running`: there
+   * is no running laptop to read. `not-recorded`: the verifier did not see the directories the laptop itself
+   * reports on one ext4 filesystem, so there is nothing a later proof could use.
+   */
+  async rememberStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper,
+    current: () => void
+  ): Promise<'recorded' | 'not-running' | 'not-recorded'> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-running';
+    const raw = await this.#destination(row, current, true);
+    current();
+    if (!raw?.State.Running) return 'not-running';
+    const live = await probeDockerEmployeeStorage(this.command, raw.Id);
+    current();
+    return (await helper.rememberRunning(row, raw, live, current)) ? 'recorded' : 'not-recorded';
   }
   /** Read-only current stopped worker membership, separate from requester/effect
    * authority. The caller must retain the original binding across every await. */
@@ -1297,6 +1554,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       provider,
       resources,
       credentialDigest,
+      // Engine inspect DATA for the launch preflight: whether this laptop was
+      // created with the shared model socket directory at all.
+      modelSocketMounted: raw.Mounts.some((mount) => mount.Destination === BOXED_MODEL_SOCKET_DIRECTORY),
     };
   }
   async start(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
@@ -1481,7 +1741,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         hooks.kind,
       ]);
       requireCurrent();
-      if (text === 'ABSENT\n') return null;
+      // The retained pane of an exited provider hosts no provider process.
+      if (text === 'ABSENT\n' || exitedProvider(text)) return null;
       if (Buffer.byteLength(text) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       const value = providerPane.parse(JSON.parse(text));
       if (value.hooks.kind !== hooks.kind) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
@@ -1797,6 +2058,31 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     await this.resources.configure(row, current);
   }
+  /** Journal metadata only: this operation's started pool writer proved terminal and failed. */
+  async settlePoolWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    await this.resources.settleFailedWriter?.(row, current);
+  }
+  /** Re-applies the approved limits of one published, running laptop in place.
+   * The laptop is never stopped, started or recreated here. */
+  async repairResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    await this.restoreResources(row, current);
+  }
+  /** The same repair, saying whether the approved limits were already in place (`unchanged`) or were written again
+   * and read back (`restored`). */
+  async restoreResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<'unchanged' | 'restored'> {
+    const raw = await this.#destination(row, current, true);
+    current();
+    if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    if (!this.resources.repairLeaf) refuse('DOCKER_RESOURCE_REPAIR_UNAVAILABLE');
+    return this.resources.repairLeaf(row, current);
+  }
+  /** Journal metadata only: a started resource writer proved terminal and failed. */
+  async settleResourceWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const raw = await this.#destination(row);
+    current();
+    if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    await this.resources.settleFailedWriter?.(row, current);
+  }
   async provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, current: () => void): Promise<void> {
     const raw = await this.#destination(row);
     current();
@@ -1827,6 +2113,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     ]);
     if (!isDeepStrictEqual(this.providerHooks(row), hooks)) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (output === 'ABSENT\n') return { kind: 'absent' };
+    const exit = exitedProvider(output);
+    if (exit) return { kind: 'exited', exit };
     if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (providerPane.parse(JSON.parse(output)).hooks.kind !== hooks.kind)
       refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');

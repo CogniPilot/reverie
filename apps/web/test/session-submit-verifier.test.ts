@@ -44,7 +44,112 @@ describe('promptStillInComposer', () => {
     expect(composerIsEmpty(welcome + styled + chrome, '❯')).toBe(true);
     expect(composerIsEmpty(welcome + '❯ Try "create a test..."' + chrome, '❯')).toBe(false);
     expect(composerIsEmpty(welcome + styled + '\nMore draft text' + chrome, '❯')).toBe(false);
-    expect(composerIsEmpty(styled + chrome, '❯')).toBe(false);
+    // Without the welcome banner the same faint row is still nobody's draft: it is read by its style.
+    expect(composerIsEmpty(styled + chrome, '❯')).toBe(true);
+    expect(composerIsEmpty('❯ Try "create a test..."' + chrome, '❯')).toBe(false);
+  });
+  describe('Claude’s suggested next prompt', () => {
+    /** The pane of a plan-move candidate that had finished a turn (2026-11-24), as a capture without styles shows it. */
+    const frame = (composer: string) =>
+      [
+        '✻ Sautéed for 18s · done 7:35 AM',
+        '──────────────────────────────────────────────────── Ada ─',
+        composer,
+        '────────────────────────────────────────────────────────',
+        '  Opus 5.5  in:50,206 out:648  ctx:5%  cache:until 08:35',
+        '  ⏵⏵ bypass permissions on (shift+tab to cycle)',
+      ].join('\n');
+    const words = 'yes, check Vulkan and start the RTX run';
+    /** Drawn as Claude Code draws its composer placeholder: the cursor on the first character, the rest faint. */
+    const ghost =
+      '❯ \x1b[7my\x1b[0;2mes,\x1b[0m ' +
+      words
+        .split(' ')
+        .slice(1)
+        .map((word) => `\x1b[2m${word}\x1b[0m`)
+        .join(' ');
+    it('reads a composer that shows only the faint suggestion as empty', () => {
+      expect(composerIsEmpty(frame(ghost), '❯')).toBe(true);
+      expect(promptStillInComposer(frame(ghost), 'Continue the work you were handed.', '❯')).toBe(false);
+      // No cursor drawn (the terminal is not focused): every character faint.
+      expect(composerIsEmpty(frame(`❯ \x1b[2m${words}\x1b[0m`), '❯')).toBe(true);
+      // Faint text may carry a foreground colour, and a long suggestion wraps onto a faint second row.
+      expect(composerIsEmpty(frame(`❯ \x1b[2;38;5;246m${words}\x1b[0m`), '❯')).toBe(true);
+      expect(composerIsEmpty(frame(`${ghost}\n  \x1b[2mand report back\x1b[0m`), '❯')).toBe(true);
+      // tmux carries attributes across rows: a faint state opened on an earlier row still applies.
+      expect(composerIsEmpty(`\x1b[2m` + frame(`❯ ${words}`), '❯')).toBe(true);
+    });
+    it('accepts both composer rows captured from live Claude Code 2.1.308 panes with `tmux capture-pane -e -p`', () => {
+      // Verbatim: the glyph is followed by a no-break space and a space, the cursor is the inverse first character, the rest
+      // is faint, and in the second form the spaces between the faint words are emitted with the attributes reset.
+      const wholeRun = '\x1b[39m❯  \x1b[7my\x1b[0;2mes, check Vulkan and start the RTX run\x1b[0m';
+      const perWord =
+        '\x1b[39m❯  \x1b[7mk\x1b[0;2meep\x1b[0m \x1b[2mgoing\x1b[0m \x1b[2mon\x1b[0m \x1b[2mthe\x1b[0m \x1b[2munowned\x1b[0m \x1b[2missues\x1b[0m';
+      for (const row of [wholeRun, perWord]) {
+        expect(composerIsEmpty(frame(row), '❯')).toBe(true);
+        expect(promptStillInComposer(frame(row), 'Continue the work you were handed.', '❯')).toBe(false);
+      }
+      // The same two rows with the words typed instead: no faint run, so each is a draft.
+      expect(composerIsEmpty(frame('\x1b[39m❯  yes, check Vulkan and start the RTX run\x1b[7m \x1b[0m'), '❯')).toBe(false);
+      expect(composerIsEmpty(frame('\x1b[39m❯  \x1b[7mk\x1b[0meep going on the unowned issues'), '❯')).toBe(false);
+      // One typed word among the faint ones is enough to keep it a draft.
+      expect(composerIsEmpty(frame(perWord.replace('\x1b[2mthe\x1b[0m', 'the')), '❯')).toBe(false);
+    });
+    it('reads Claude Code 2.1.326 composers captured with `tmux capture-pane -e -p`, under a hyperlink', () => {
+      // Verbatim rows from a live 2.1.326 pane (2026-11-24). This version draws no inverse cursor cell, ends styled runs with
+      // SGR 39 rather than a full reset, and its welcome notice carries a link, which tmux writes as an OSC 8 pair.
+      const link = '\x1b[38;5;246m\x1b]8;id=11prv8;https://clau.de/api-credits\x1b\\https://clau.de/api-credits\x1b[39m\x1b]8;;\x1b\\';
+      const rule = '\x1b[38;5;244m' + '─'.repeat(40);
+      const footer = '\x1b[39m  \x1b[38;5;211m⏵⏵ bypass permissions on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m';
+      const pane = (composer: string, above = link) => [' Claude Code v2.1.326', above, rule, composer, rule, footer].join('\n');
+      const welcome = '\x1b[39m❯\u00a0\x1b[2mTry "edit <filepath> to…"\x1b[0m';
+      const typed = '\x1b[39m❯\u00a0hello draft text';
+      expect(composerIsEmpty(pane(welcome), '❯')).toBe(true);
+      expect(promptStillInComposer(pane(welcome), 'Continue the work you were handed.', '❯')).toBe(false);
+      expect(composerIsEmpty(pane(typed), '❯')).toBe(false);
+      expect(promptStillInComposer(pane(typed), 'hello draft text', '❯')).toBe(true);
+      // BEL-terminated links are the same thing.
+      expect(composerIsEmpty(pane(welcome, '\x1b]8;;https://example.org\x07link\x1b]8;;\x07'), '❯')).toBe(true);
+      // An escape this reader does not model still keeps the composer a draft: an unterminated OSC, or a cursor move.
+      expect(composerIsEmpty(pane(welcome, '\x1b]8;;https://example.org'), '❯')).toBe(false);
+      expect(composerIsEmpty(pane(welcome, '\x1b[2Aup'), '❯')).toBe(false);
+      // A link inside the composer row changes nothing: faint words stay a suggestion, plain words stay a draft.
+      expect(composerIsEmpty(pane('\x1b[39m❯\u00a0\x1b[2m\x1b]8;;https://example.org\x1b\\see the docs\x1b]8;;\x1b\\\x1b[0m'), '❯')).toBe(true);
+      expect(composerIsEmpty(pane('\x1b[39m❯\u00a0\x1b]8;;https://example.org\x1b\\see the docs\x1b]8;;\x1b\\'), '❯')).toBe(false);
+    });
+    it('keeps the very same words a draft when they were typed, or when the capture has no styles', () => {
+      // Exactly the screen in the report, as plain text: a suggestion and typed text cannot be told apart, so it is a draft.
+      expect(composerIsEmpty(frame(`❯ ${words}`), '❯')).toBe(false);
+      expect(promptStillInComposer(frame(`❯ ${words}`), words, '❯')).toBe(true);
+      // Typed, with the drawn cursor after it or on its first character.
+      expect(composerIsEmpty(frame(`❯ ${words}\x1b[7m \x1b[0m`), '❯')).toBe(false);
+      expect(composerIsEmpty(frame(`❯ \x1b[7my\x1b[0mes, check Vulkan`), '❯')).toBe(false);
+      // Typed text followed by a faint completion or hint.
+      expect(composerIsEmpty(frame(`❯ yes, check\x1b[2m Vulkan and start the RTX run\x1b[0m`), '❯')).toBe(false);
+      expect(composerIsEmpty(frame(`❯ /model \x1b[2m[model]\x1b[0m`), '❯')).toBe(false);
+      // One typed character under the cursor and nothing faint.
+      expect(composerIsEmpty(frame('❯ \x1b[7my\x1b[0m'), '❯')).toBe(false);
+      // A faint first row with a typed second row.
+      expect(composerIsEmpty(frame(`${ghost}\n  typed below`), '❯')).toBe(false);
+    });
+    it('keeps a draft for any style it does not model', () => {
+      for (const composer of [
+        `❯ \x1b[1;2m${words}\x1b[0m`, // bold and faint
+        `❯ \x1b[2;4m${words}\x1b[0m`, // underlined
+        `❯ \x1b[2;41m${words}\x1b[0m`, // a background
+        `❯ \x1b[36m${words}\x1b[0m`, // coloured, not faint
+        `❯ \x1b[2m${words}\x1b[K\x1b[0m`, // an escape that is not a style
+        `❯ \x1b[2:3m${words}\x1b[0m`, // a sub-parameter form
+        `❯ \x1b[2myes\x1b[0m \x1b[7mc\x1b[0;2mheck\x1b[0m`, // the cursor inside the text
+        `❯ \x1b[7;31my\x1b[0;2mes, check\x1b[0m`, // a coloured cursor cell
+      ])
+        expect(composerIsEmpty(frame(composer), '❯')).toBe(false);
+      // The composer has to be closed by Claude's own ruler.
+      expect(composerIsEmpty(['────────', ghost].join('\n'), '❯')).toBe(false);
+      expect(composerIsEmpty([ghost, '  ⏵⏵ bypass permissions on (shift+tab to cycle)'].join('\n'), '❯')).toBe(false);
+      // Only Claude's glyph: a faint Codex row is read by Codex's own rule.
+      expect(composerIsEmpty(`› \x1b[2m${words}\x1b[0m\n────────\n`, '›')).toBe(false);
+    });
   });
   it('sees the prompt sitting in the composer, no-break space and wrapping included', () => {
     expect(promptStillInComposer(STRANDED, PROMPT, '❯')).toBe(true);

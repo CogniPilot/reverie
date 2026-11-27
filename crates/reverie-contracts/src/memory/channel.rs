@@ -257,10 +257,16 @@ pub struct ChannelEvidence {
     pub sources: Vec<ChatMessageId>,
 }
 
-/// Closed projection of the ordinary channels returned by the existing
-/// authenticated `rooms --json` command. Membership is established there.
+/// Closed projection of the rooms returned by the existing authenticated
+/// `rooms --json` command. Membership is established there.
+///
+/// Ordinary channels can be selected by name and hold shared work context.
+/// Direct conversations are kept apart: they are never selected by name and
+/// count only for [`Membership::contains_conversation`], the automatic memory
+/// that is written and read back in that one conversation.
 pub struct Membership {
     rooms: Vec<(ChatRoomId, Option<String>)>,
+    direct: Vec<ChatRoomId>,
 }
 
 impl Membership {
@@ -271,6 +277,7 @@ impl Membership {
         };
         Some(Self {
             rooms: rows.iter().filter_map(ordinary_channel).collect(),
+            direct: rows.iter().filter_map(direct_conversation).collect(),
         })
     }
     pub fn select(&self, name_or_id: &str) -> Option<ChatRoomId> {
@@ -284,6 +291,26 @@ impl Membership {
     pub fn contains(&self, selected: &ChatRoomId) -> bool {
         self.rooms.iter().any(|(id, _)| id == selected)
     }
+    /// An ordinary channel or a direct conversation the caller is in. Only for
+    /// memory that is written and read back in that same room.
+    pub fn contains_conversation(&self, selected: &ChatRoomId) -> bool {
+        self.contains(selected) || self.direct.iter().any(|id| id == selected)
+    }
+}
+
+/// A direct conversation: `kind: "dm"`, private, with a member list.
+fn direct_conversation(value: &Value) -> Option<ChatRoomId> {
+    let Node::Object(fields) = &value.0 else {
+        return None;
+    };
+    let field = |name: &str| fields.get(&text(name));
+    if scalar(field("kind")?)?.as_str() != "dm"
+        || scalar(field("visibility")?)?.as_str() != "private"
+        || !matches!(&field("members")?.0, Node::Array(_))
+    {
+        return None;
+    }
+    ChatRoomId::parse(&scalar(field("id")?)?).ok()
 }
 
 fn ordinary_channel(value: &Value) -> Option<(ChatRoomId, Option<String>)> {

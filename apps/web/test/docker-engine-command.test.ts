@@ -97,6 +97,42 @@ describe('fixed packaged Engine creation response', () => {
     expect(requestMock).toHaveBeenCalledOnce();
     expect(f.call.end).toHaveBeenCalledOnce();
   });
+  it('names only the laptop-side target of its own mount when the Engine says a bind source is missing', async () => {
+    const mounts = [
+      { Type: 'bind', Source: '/private/host/home', Target: '/home/agent' },
+      { Type: 'bind', Source: '/private/host/drive', Target: '/reverie_workspace' },
+      { Type: 'bind', Source: '/private/host/drive', Target: '/workspace' },
+      { Type: 'tmpfs', Target: '/reverie_workspace/attachments' },
+    ];
+    const rejected = async (message: unknown, configuration: Record<string, unknown> = { HostConfig: { Mounts: mounts } }) => {
+      const f = fixture(),
+        pending = f.command.create(name, { Image: 'sha256:' + 'c'.repeat(64), ...configuration }, () => {});
+      f.respond(400, JSON.stringify({ message }));
+      return pending.catch((error) => error);
+    };
+    const missing = await rejected(
+      'invalid mount config for type "bind": bind source path does not exist: /private/host/drive'
+    );
+    expect(missing).toBeInstanceOf(DockerEmployeeContinuationError);
+    expect(missing).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING', status: 409 });
+    expect(missing.cause).toEqual({ missingMountTarget: '/reverie_workspace' });
+    // Neither the host path nor the Engine's sentence survives.
+    expect(JSON.stringify(missing) + JSON.stringify(missing.cause) + String(missing.stack)).not.toContain('/private');
+    expect(String(missing.message)).toBe('DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING');
+    // A path that is not one of the request's own binds, or any other 400, stays the bare class.
+    for (const other of [
+      'invalid mount config for type "bind": bind source path does not exist: /somewhere/else',
+      'bind source path does not exist: /private/host/drive and more\ntext',
+      'No such image: sha256:' + 'c'.repeat(64),
+      { nested: 'bind source path does not exist: /private/host/drive' },
+    ]) {
+      const error = await rejected(other);
+      expect(error).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED' });
+      expect(error.cause).toBeUndefined();
+    }
+    const unmounted = await rejected('bind source path does not exist: /private/host/drive', {});
+    expect(unmounted).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED' });
+  });
   it.each([200, 202, 302, 401, 500, 503])('keeps HTTP%s unknown, without an implicit retry', async (status) => {
     const f = fixture(),
       pending = f.start();
@@ -243,5 +279,58 @@ describe('fixed packaged Engine creation response', () => {
     expect(diagnostic[0]!.locations.some((x) => x.module === 'docker-engine-command')).toBe(true);
     expect(JSON.stringify(diagnostic)).not.toContain(secret);
     expect(JSON.stringify(diagnostic)).not.toContain('message');
+  });
+});
+describe('removal of a never-started reprovision source', () => {
+  const source = 'reverie-boxed-source-' + 'a'.repeat(64);
+  const setup = (row: Record<string, unknown> | null) => {
+    const command = new PackagedDockerEngineCommand(),
+      calls: string[][] = [];
+    command.run = async (args) => {
+      calls.push([...args]);
+      if (args[1] === 'inspect') {
+        if (!row) throw Error('No such container');
+        return JSON.stringify([row]);
+      }
+      return '';
+    };
+    return { command, calls };
+  };
+  const created = { Id: id, Name: '/' + source, State: { Status: 'created', Running: false, Pid: 0 } };
+  it('removes exactly the named created container, never by force', async () => {
+    const { command, calls } = setup(created);
+    const current = vi.fn();
+    await command.removeCreatedSource(source, id, current);
+    expect(calls).toEqual([
+      ['container', 'inspect', id],
+      ['container', 'rm', id],
+    ]);
+    expect(current).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ['another name', { ...created, Name: '/reverie-boxed-' + 'a'.repeat(64) }],
+    ['another container', { ...created, Id: 'c'.repeat(64) }],
+    ['a running container', { ...created, State: { Status: 'running', Running: true, Pid: 7 } }],
+    ['an exited container', { ...created, State: { Status: 'exited', Running: false, Pid: 0 } }],
+  ])('refuses %s', async (_name, row) => {
+    const { command, calls } = setup(row);
+    await expect(command.removeCreatedSource(source, id, () => {})).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_NOT_REMOVABLE',
+    });
+    expect(calls).toEqual([['container', 'inspect', id]]);
+  });
+  it('refuses any other container family and revoked authority before the Engine', async () => {
+    for (const other of [name, 'reverie-boxed-storage-' + 'a'.repeat(64), 'reverie-boxed-source-short']) {
+      const { command, calls } = setup(created);
+      await expect(command.removeCreatedSource(other, id, () => {})).rejects.toThrow('Fixed reprovision source');
+      expect(calls).toEqual([]);
+    }
+    const { command, calls } = setup(created);
+    await expect(
+      command.removeCreatedSource(source, id, () => {
+        throw Error('revoked');
+      })
+    ).rejects.toThrow('revoked');
+    expect(calls).toEqual([]);
   });
 });

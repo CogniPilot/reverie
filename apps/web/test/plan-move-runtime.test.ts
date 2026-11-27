@@ -728,4 +728,34 @@ describe('normal replacement composer uses the strict Claude task footer', () =>
       expect(h.runtime.cleanup).not.toHaveBeenCalled();
     }
   );
+  it.each([
+    [
+      'a sign-in prompt',
+      [' Select login method:', ' ❯ 1. Claude account with subscription', '   2. Anthropic Console account'],
+      "new session is waiting at Claude's sign-in screen",
+    ],
+    [
+      'a first-run screen nobody answered',
+      [' WARNING: Claude Code running in Bypass Permissions mode', ' ❯ No, exit', '   Yes, I accept'],
+      "new session is stuck at Claude's Bypass Permissions warning",
+    ],
+  ] as const)('names %s when the replacement misses its deadline there', async (_name, screen, sentence) => {
+    const h = harness(),
+      candidate = h.sessions.get('new')!;
+    Object.defineProperty(candidate, 'mode', { value: 'claude', configurable: true });
+    h.runtime.plans.account = vi.fn(
+      async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount
+    );
+    h.runtime.mux.capturePaneText = vi.fn(() => screen.join('\n'));
+    await h.executor.create({ ...input, targetMode: 'claude' }, undefined);
+    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(90_001);
+    try {
+      await expect(h.executor.ready('new')).rejects.toThrow(sentence);
+    } finally {
+      clock.mockRestore();
+    }
+    // Naming the screen is description only: nothing is typed at it and nothing is cleaned up.
+    expect(candidate.writeViaMux).not.toHaveBeenCalled();
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
 });

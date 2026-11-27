@@ -15,7 +15,7 @@
 
 import { execSync } from 'child_process';
 import { createRequire } from 'module';
-import { appendFileSync, readFileSync, writeFileSync, renameSync } from 'fs';
+import { appendFileSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { join, extname, basename, dirname } from 'path';
@@ -176,12 +176,15 @@ console.log('\n[build] content-hash cache busting');
     renameSync(filePath, join(distPublic, hashed));
     manifest[file] = hashed;
   }
-  // Rewrite index.html to reference hashed filenames
-  let html = readFileSync(join(distPublic, 'index.html'), 'utf8');
-  for (const [original, hashed] of Object.entries(manifest)) {
-    html = html.replaceAll(`"${original}"`, `"${hashed}"`);
+  // Rewrite every page to reference hashed filenames. index.html is not the only one: workspace-files.html loads
+  // sanitize-html.js, and a page left on the old name gets a 404 in the build.
+  for (const page of readdirSync(distPublic).filter((name) => name.endsWith('.html'))) {
+    let html = readFileSync(join(distPublic, page), 'utf8');
+    for (const [original, hashed] of Object.entries(manifest)) {
+      html = html.replaceAll(`"${original}"`, `"${hashed}"`);
+    }
+    writeFileSync(join(distPublic, page), html);
   }
-  writeFileSync(join(distPublic, 'index.html'), html);
 
   // Rewrite sw.js from the SAME manifest that just renamed the files.
   //

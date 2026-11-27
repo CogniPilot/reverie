@@ -43,7 +43,10 @@ vi.mock('../src/docker-contained-resource-controller.js', async (original) => {
   };
 });
 
-it('forwards the optional restore image at the actual Actor work-construction boundary', () => {
+it.each([
+  'poolRestoreHelperImageId',
+  'leafWriterHelperImageId',
+])('forwards the optional %s at the actual Actor work-construction boundary', (pin) => {
   const file = new URL('../src/docker-plan-move-actor.ts', import.meta.url);
   const source = ts.createSourceFile(file.pathname, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
   const actor = source.statements.find(
@@ -66,10 +69,10 @@ it('forwards the optional restore image at the actual Actor work-construction bo
     input && ts.isObjectLiteralExpression(input)
       ? input.properties.find(
           (node): node is ts.PropertyAssignment =>
-            ts.isPropertyAssignment(node) && node.name.getText(source) === 'poolRestoreHelperImageId'
+            ts.isPropertyAssignment(node) && node.name.getText(source) === pin
         )
       : undefined;
-  expect(field?.initializer.getText(source)).toBe('this.#d.configuration.poolRestoreHelperImageId');
+  expect(field?.initializer.getText(source)).toBe('this.#d.configuration.' + pin);
 });
 vi.mock('../src/docker-employee-engine.js', async (original) => {
   const actual = await original<typeof import('../src/docker-employee-engine.js')>();
@@ -513,6 +516,50 @@ describe('original Docker target work', () => {
       expect(f.command.create).not.toHaveBeenCalled();
     }
   );
+
+  it('lets a terminally failed leaf writer through inspection, and the continued move runs its resource step again', async () => {
+    const f = await fixture('resources-issued');
+    await f.task('leaf-helper', 'start-issued');
+    const started = f.state.work!.tasks![0]!;
+    if (started.phase !== 'start-issued') throw Error('Expected a started leaf writer');
+    await expect(f.work.inspect()).rejects.toThrow('writer outcome is unconfirmed');
+    // What the read-only settlement records once the writer is proved failed.
+    const failed = { ...started, phase: 'failed' as const, exitCode: 1, failure: 'lost-process' as const };
+    await f.port.publish(f.work.row(), started, failed, () => {});
+    await f.work.inspect();
+    expect(f.configure).not.toHaveBeenCalled();
+    // The claimed continuation then reaches the same resource step, which
+    // reruns the writer under the next attempt's own journal intent.
+    const retried = {
+      role: started.role,
+      name: 'reverie-boxed-synthetic-leaf-helper-second',
+      imageId: started.imageId,
+      configurationDigest: 'e'.repeat(64),
+      attempt: 2,
+      phase: 'create-issued' as const,
+    };
+    f.configure.mockImplementationOnce(async () => {
+      const row = f.work.row();
+      expect(row.tasks?.[0]).toEqual(failed);
+      await f.port.publish(row, failed, retried, () => {});
+    });
+    f.observe({
+      original: f.destination,
+      state: 'running',
+      provider: { kind: 'absent' },
+      resources: f.work.row().policy,
+      credentialDigest: null,
+    });
+    await expect(
+      f.port.publish(f.work.row(), failed, { ...started, phase: 'completed', resultDigest: 'd'.repeat(64) }, () => {})
+    ).rejects.toThrow('original native task changed');
+    await f.work.prepareNative();
+    expect(f.configure).toHaveBeenCalledOnce();
+    expect(f.work.row().phase).toBe('resources-ready');
+    expect(f.work.row().tasks?.[0]).toMatchObject({ phase: 'create-issued', attempt: 2, name: retried.name });
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.start).not.toHaveBeenCalled();
+  });
 
   it.each(['settle-storage', 'settle-helpers', 'observe-storage', 'observe-pool', 'observe'])(
     'rejects revoked original authority after the %s inspection await',

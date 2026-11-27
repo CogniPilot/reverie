@@ -40,6 +40,8 @@ Use these Linux paths:
 
 `/tmp` uses this laptop's private directory on the scratch disk, rather than a small RAM filesystem. `/scratch` is also disposable and remains for compatibility. Temporary storage may be wiped periodically: recreate it and verify source revisions, input hashes and required tools at each run. Check shared disk capacity before heavy work. Use normal project commands and the provided environment defaults.
 
+Your case folder has a 20 GiB budget, Nix store excluded: keep only git clones, push work to GitHub; permanent items need owner approval and the shared company drive.
+
 Keep unique data, unpushed or uncommitted work, cited evidence, results, latches, configuration, credentials and installed tools in verified durable storage. Verify backing storage; project mounts and owner files take precedence over aliases.
 
 Save and verify a handoff before cleanup; after sealing remove only task-owned registered disposable outputs. Registration, names and gitignore do not prove disposability. Respect live leases, protect sockets and runtime state, never move active caches or sockets, and preserve other tasks' work and shared stores.
