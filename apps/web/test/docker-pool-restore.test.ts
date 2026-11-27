@@ -579,9 +579,10 @@ describe('a running laptop after a reload of the service manager', () => {
     f.setMemoryCurrent(String(policy.memoryMaxBytes + 1));
     await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE');
     // A read that gives no answer is no answer either.
-    for (const answer of [new Error('exec failed'), 'max', ''])
-      f.setMemoryCurrent(answer),
-        await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
+    for (const answer of [new Error('exec failed'), 'max', '']) {
+      f.setMemoryCurrent(answer);
+      await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
+    }
     expect(f.creates).toHaveLength(creates);
     expect(entries()).toHaveLength(journal);
     // At the limit or under it, the next look writes it.
