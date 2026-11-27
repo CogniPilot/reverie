@@ -16,11 +16,12 @@
  * Keeping limits. A reload of the host's service manager resets the limits a helper wrote on every running laptop,
  * whoever it belongs to. So beside the ladder, at most once per pass and once per `limitsCheckMs` for each
  * employee, the supervisor asks the `keepLimits` port to put the approved limits of a finished, running laptop back.
- * It is asked for an employee who is stopped or out of the office and for one who is running normally: the two
- * states in which no repair step looks at the laptop. It writes only values the owner already approved, attaches
- * nothing, starts nothing, changes no attendance and spends no attempt of the ladder. An employee who is held by
- * the shared pool's limits, and for whom the ladder has no step left, is asked for in the same way: the pool's
- * limits are put back about every `limitsCheckMs`, for as long as it takes.
+ * It is asked for every employee whose laptop may be running, whatever their attendance and whatever their condition
+ * reads: a laptop keeps running through most of what the ladder repairs (a lost terminal, a start-up screen, a
+ * handoff that is still owed), and the reload resets its limits all the same. The port itself finds out whether
+ * the laptop is finished and running and whether a set-up step, a rebuild or another repair of it is in flight. It
+ * writes only values the owner already approved, attaches nothing, starts nothing, changes no attendance and spends
+ * no attempt of the ladder. One state is left out: while a step of a plan move is running, the move owns the laptop.
  *
  * Keeping the pool. All laptops share one pool, and its anchor does not survive a host restart: every laptop and
  * the anchor are then stopped, and no laptop can be set up before the anchor runs again. That is no employee's
@@ -64,7 +65,6 @@ import {
   type SupervisorStoredHome,
   SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_POLICY,
-  sharedPoolCode,
 } from './employee-supervisor-policy.js';
 
 /** The identity of one employee as the company records it right now. */
@@ -474,15 +474,17 @@ export class EmployeeSupervisor {
   }
 
   /**
-   * Whether no repair step looks at this employee's laptop right now: the employee is stopped or out of the office,
-   * or was just read as running normally. Every other condition belongs to the ladder, which repairs limits itself.
+   * Whether the approved limits of this employee's laptop are looked at now. They are for every employee, whatever
+   * their attendance and whatever their condition reads: what a report says about an employee says nothing about
+   * whether their laptop runs, and a running laptop needs its limits. An employee who reads as anything but
+   * running normally used to be left to the ladder, which puts limits back only for the holds it has a step for;
+   * a lost terminal, a start-up screen or a handoff that is still owed left the laptop without the check for as
+   * long as they lasted. The one state that is left out is a plan move step in flight: the move stops, builds and
+   * starts laptops of this employee until it has come back, and the check knows nothing of a move's flight.
    */
-  #unattended(employee: SupervisedEmployee): boolean {
+  #limitsLookedAt(employee: SupervisedEmployee): boolean {
     if (employee.desiredRunning !== true || employee.onVacation) return true;
-    const report = this.#reports.get(employee.id);
-    // Held by the limits of the pool every laptop shares, with no step of the ladder pending: the pool's limits
-    // are put back from here, for as long as it takes.
-    return report?.condition === 'healthy' || (!!report && !report.next && sharedPoolCode(report.code));
+    return this.#reports.get(employee.id)?.condition !== 'move-in-progress';
   }
 
   /** An employee who should be in the office has a terminal attached to a laptop, so laptops run in the pool. */
@@ -629,7 +631,7 @@ export class EmployeeSupervisor {
           due(row) <= now &&
           !row.bindingMigration &&
           !this.#acting.has(row.id) &&
-          this.#unattended(row) &&
+          this.#limitsLookedAt(row) &&
           this.ports.flags(row.owner).enabled
       )
       .sort((a, b) => due(a) - due(b) || a.id.localeCompare(b.id))[0];

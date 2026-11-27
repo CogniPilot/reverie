@@ -1074,12 +1074,47 @@ describe('EmployeeSupervisor: keeping approved limits in place', () => {
     expect(w.state.acts).toEqual([]);
   });
 
-  it('leaves a laptop the repair ladder is working on to the ladder', async () => {
+  it('checks a laptop the repair ladder is working on as well, and leaves the ladder its own step', async () => {
     const held = hold(person('a'), 'DOCKER_RESOURCE_LEAF_ACK_MISSING', ['observe', 'repair']);
     const w = world([held], { keepLimits: restored });
     await w.run(3);
-    expect(w.state.kept).toEqual([]);
+    expect(w.state.kept).toEqual(['30:a']);
     expect(w.state.acts[0]).toBe('resend-continuation:a');
+  });
+
+  it('checks the limits of an employee whatever their condition reads, as long as no move step is running', async () => {
+    // A lost terminal, a handoff that is still owed, a held move, a record of the retired runtime: in each the
+    // laptop may well be running, and none of them is "running normally".
+    const lost = person('a');
+    lost.glance = { ...lost.glance, session: { ...lost.glance.session, viewerHealth: 'disconnected' } };
+    const owing = person('b');
+    owing.move = { id: 'move-b', docker: true, phase: 'handoff-owed', busy: false, allowedActions: [] };
+    const heldBack = heldMove(person('c'), 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+    const retired = person('d');
+    retired.move = { id: 'native', docker: false, phase: 'recovery-required', busy: false, error: 'x', allowedActions: ['settle'] };
+    const w = world([lost, owing, heldBack, retired], { keepLimits: unchanged });
+    w.state.respond = async () => ({ outcome: 'refused' });
+    await w.run(3);
+    expect(['a', 'b', 'c', 'd'].map((id) => w.report(id).condition)).toEqual([
+      'viewer-lost',
+      'move-held-retryable',
+      'move-held-retryable',
+      'move-held-dead-end',
+    ]);
+    expect(w.state.kept).toEqual(['30:a', '60:b', '90:c', '120:d']);
+    expect(w.report('b').limits).toMatchObject({ outcome: 'done', detail: 'unchanged' });
+  });
+
+  it('does not check the limits of a laptop while a step of a plan move is running, and does once it has come back', async () => {
+    const moving = heldMove(person('a'), 'x');
+    moving.move = { ...moving.move!, busy: true };
+    const w = world([moving], { keepLimits: unchanged });
+    await w.run(15);
+    expect(w.report('a').condition).toBe('move-in-progress');
+    expect(w.state.kept).toEqual([]);
+    moving.move = undefined;
+    await w.run(1);
+    expect(w.state.kept).toHaveLength(1);
   });
 
   it('reports a refusal once, and again only when it changes or ends', async () => {

@@ -358,9 +358,14 @@ same calls.
 That reload resets the limits of every running laptop, whoever it belongs to.
 So beside the repair steps the supervisor checks the approved limits of each
 finished laptop about every ten minutes, one employee per pass, and puts them
-back when they are gone. It does this for an employee who is running normally
-and for one who is stopped or out of the office while their laptop still runs:
-the two states in which no repair step looks at the laptop. The check needs
+back when they are gone. It does this for every employee whose laptop may be
+running, whatever their attendance and whatever their condition reads: one who
+is running normally, one who is stopped or out of the office, and one who is
+waiting for any repair, such as a lost terminal, a start-up screen or a
+handoff that is still owed. The check itself finds out whether the laptop is
+finished and running and whether another operation on it is in flight. Only
+while a step of a plan move is running is the laptop left to the move. The
+check needs
 `supervisorEnabled` only. It writes only values the owner already approved,
 attaches no terminal, reads and starts no agent, changes no attendance and
 spends no attempt of a repair step. `GET /api/company` shows the last check as
