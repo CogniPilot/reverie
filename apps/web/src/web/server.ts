@@ -2685,7 +2685,19 @@ export class WebServer extends EventEmitter {
           inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
           ready: () => this.companyWakeReady && dockerRuntime.current(),
           notReady: () => officeSelfRestart.status(),
-          laptops: dockerRuntime.supervisorLaptops(),
+          laptops: dockerRuntime.supervisorLaptops({
+            // While a rebuild is about to stop a laptop its agent runs in, nothing may be typed into that session and
+            // chat for it stays queued. Both are the holds a plan move takes; the chat is delivered to the new laptop.
+            holdInput: (sessionId) => {
+              const releases = [
+                this.chatroomService.delivery.pauseForMigration(sessionId),
+                this.sessions.get(sessionId)?.pauseCapacityRetry() ?? (() => {}),
+              ];
+              return () => {
+                for (const release of releases) release();
+              };
+            },
+          }),
           restorations: () => dockerRuntime.restorationReports,
           providerHealth: (employee) => this.workerProviderHealth?.read(employee),
           ownerStopPending,

@@ -1273,6 +1273,9 @@ export class DockerAbsentReprovision {
           refuse('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED');
         // Before the laptop is discarded: a seat that cannot be signed in stops here.
         await this.#seat(input.operationId, scope.account, scope.basis, scope.template, scope.current);
+        // The seat preparation above runs a helper and takes a while. The caller's last word comes after it.
+        scope.current();
+        authority.discarding?.();
         await this.#discardForRebuild(scope);
         await this.#forgetViewer(scope);
         // The recorded state is now true; the ordinary workflow takes over.

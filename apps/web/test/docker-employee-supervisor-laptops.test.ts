@@ -98,6 +98,11 @@ function world() {
     /** Resource limits saved through the store, and what runs inside that save before it writes. */
     saved: [] as unknown[],
     duringSave: undefined as (() => void) | undefined,
+    /** What happens after the rebuild service was called and before it says that the stop is next. */
+    beforeStop: undefined as (() => void) | undefined,
+    /** The input holds taken and released for a session, in order. */
+    holds: [] as string[],
+    now: 10 * 60_000,
   };
   const took = (name: string, argument: unknown, authority: DockerContinuationAuthority) => {
     state.calls.push([name, argument]);
@@ -199,6 +204,10 @@ function world() {
       },
       rebuild: async (_id: string, request: unknown, authority: DockerContinuationAuthority) => {
         took('rebuild', request, authority);
+        // As the service does: its checks and the seat preparation, then word that the stop is next, then the stop.
+        state.beforeStop?.();
+        authority.require();
+        authority.discarding?.();
         state.during?.();
         authority.require();
         return state.rebuilt;
@@ -206,6 +215,11 @@ function world() {
     },
     sessions: { get: () => state.session },
     inputHeldOnRecord: () => state.heldOnRecord,
+    holdInput: (sessionId: string) => {
+      state.holds.push('hold ' + sessionId);
+      return () => void state.holds.push('release ' + sessionId);
+    },
+    now: () => state.now,
     current: () => state.current,
   } as unknown as DockerSupervisorLaptopDeps;
   const guard = () => {
@@ -1191,6 +1205,123 @@ describe('rebuilding any laptop an agent runs in, between that agent’s turns',
       // Without the long wait, an unread pane still refuses, held on record or not.
       w.state.session = undefined;
       expect(await w.laptops.rebuild(EMPLOYEE, w.guard, ['terminal-input-held'])).toEqual(UNREAD);
+    });
+  });
+});
+
+describe('proving "between turns" up to the moment a laptop is stopped', () => {
+  const BETWEEN = ['agent-between-turns'] as const;
+  const BUSY_TURN = { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
+  const SESSION = EMPLOYEE.sessionId;
+  /** The one running laptop is the recorded one, an agent runs in it, and its pane has been idle since `quietSince`. */
+  const occupied = (quietSince = 1000, terminal: Record<string, unknown> = {}) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'running', operationId: 'o', sessionId: 's' } };
+    w.state.session = { pid: 77, status: 'idle', isWorking: false, lastActivityAt: quietSince, lastPromptTime: quietSince, ...terminal };
+    return w;
+  };
+
+  it('asks for the same two silent minutes as the policy, at the step itself', async () => {
+    const w = occupied();
+    w.state.session = { ...w.state.session!, lastActivityAt: w.state.now - 119_000 };
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).toEqual({
+      outcome: 'busy',
+      detail: "the agent's terminal has not been silent for two minutes",
+    });
+    expect(w.made('rebuild')).toEqual([]);
+    w.state.session = { ...w.state.session!, lastActivityAt: w.state.now - 120_000 };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+    // An idle pane with no time on it is no reading at all.
+    const timeless = occupied(0);
+    expect(await timeless.laptops.rebuild(EMPLOYEE, timeless.guard, BETWEEN)).toEqual({
+      outcome: 'refused',
+      detail: "the office is not reading the agent's terminal",
+    });
+  });
+
+  it.each([
+    ['a turn starts', (s: Record<string, unknown>) => (s.isWorking = true)],
+    ['the pane prints', (s: Record<string, unknown>) => (s.lastActivityAt = 9 * 60_000)],
+    ['a prompt is submitted', (s: Record<string, unknown>) => (s.lastPromptTime = 9 * 60_000)],
+  ])('stops nothing when %s after the proof and before the stop, and gives the attempt back', async (_title, change) => {
+    const w = occupied();
+    w.state.beforeStop = () => change(w.state.session as Record<string, unknown>);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).toEqual(BUSY_TURN);
+    // The same at the last look, the one the service asks for immediately before it stops the laptop.
+    const last = occupied();
+    const state = last.state;
+    let asked = 0;
+    const session = state.session as Record<string, unknown>;
+    Object.defineProperty(state, 'session', {
+      get: () => {
+        // The proof, the fence's own start, the service's check, and then the look that precedes the stop.
+        if (++asked === 6) change(session);
+        return session;
+      },
+    });
+    expect(await last.laptops.rebuild(EMPLOYEE, last.guard, BETWEEN)).toEqual(BUSY_TURN);
+  });
+
+  it('does not take what a stopping laptop prints for a turn', async () => {
+    const w = occupied();
+    w.state.during = () => {
+      const session = w.state.session as Record<string, unknown>;
+      session.isWorking = true;
+      session.lastActivityAt = w.state.now;
+    };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+  });
+
+  it('asks the pane nothing more of a laptop that a read showed to be empty', async () => {
+    const w = occupied();
+    w.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    w.state.beforeStop = () => ((w.state.session as Record<string, unknown>).isWorking = true);
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+    // Input is held all the same while a running laptop is stopped: nothing is typed into a pane that is going.
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+  });
+
+  describe('holding input to the session meanwhile', () => {
+    it('takes the hold before the last look at the pane and releases it when the rebuild has returned', async () => {
+      const w = occupied();
+      const order: string[] = [];
+      w.state.beforeStop = () => order.push('service called with ' + w.state.holds.join(','));
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+      expect(order).toEqual(['service called with hold ' + SESSION]);
+      expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+      // The hold is in place before the pane is read for the proof: a wake cannot slip in between.
+      const early = occupied();
+      const session = early.state.session;
+      let heldAtProof: boolean | undefined;
+      Object.defineProperty(early.state, 'session', {
+        get: () => {
+          heldAtProof ??= early.state.holds.length === 1;
+          return session;
+        },
+      });
+      await early.laptops.rebuild(EMPLOYEE, early.guard, BETWEEN);
+      expect(heldAtProof).toBe(true);
+    });
+
+    it.each<[string, (w: ReturnType<typeof world>) => void, RegExp | undefined]>([
+      ['the pane shows a turn', (w) => ((w.state.session as Record<string, unknown>).isWorking = true), undefined],
+      ['a turn starts before the stop', (w) => (w.state.beforeStop = () => ((w.state.session as Record<string, unknown>).isWorking = true)), undefined],
+      ['the service refuses', (w) => (w.state.rebuilt = { operationId: 'new', state: 'held', code: 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED' }), undefined],
+      ['the service throws a refusal', (w) => (w.state.during = () => { throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_BUSY'); }), undefined],
+      ['the supervisor is switched off meanwhile', (w) => (w.state.during = () => (w.state.guard = false)), /switched off/],
+    ])('releases the hold when %s', async (_title, arrange, throws) => {
+      const w = occupied();
+      arrange(w);
+      if (throws) await expect(w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).rejects.toThrow(throws);
+      else expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).not.toBe('done');
+      expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    });
+
+    it('is not taken for a rebuild that stops no running laptop', async () => {
+      const w = world();
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+      expect(w.state.holds).toEqual([]);
     });
   });
 });

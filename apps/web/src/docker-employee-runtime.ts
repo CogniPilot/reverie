@@ -14,7 +14,7 @@ import {
   type DockerAbsentReprovisionSeatAccounts,
 } from './docker-absent-reprovision.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
-import { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
+import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from './docker-employee-supervisor-laptops.js';
 import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
 import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
@@ -678,10 +678,13 @@ export class DockerEmployeeRuntime {
   }
   /** Server composition only: the office supervisor's laptop reads and steps. Each one is a call to the same
    * service the owner's route for that step calls, under the authority `DockerSupervisorLaptops` documents. */
-  supervisorLaptops(): DockerSupervisorLaptops | undefined {
+  supervisorLaptops(
+    office: Pick<DockerSupervisorLaptopDeps, 'holdInput'> = {}
+  ): DockerSupervisorLaptops | undefined {
     const a = this.#attached;
     if (!a) return undefined;
     return new DockerSupervisorLaptops({
+      ...office,
       company: a.company,
       store: a.store,
       engine: a.engine,

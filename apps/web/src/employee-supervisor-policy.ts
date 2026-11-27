@@ -1478,6 +1478,21 @@ const REACHABLE_AGENT =
   "the laptop's hold to clear: its agent runs and the office can reach it, and what holds the laptop is not " +
   'something a rebuild is known to settle, so the laptop is kept';
 
+/**
+ * "Between turns", as one rule: the office terminal shows the pane idle, and it has been silent for
+ * `heldInputIdleMs`. The policy decides with it, and the step that stops the laptop asks it again itself
+ * (`DockerSupervisorLaptops`), so the two cannot differ. A pane with no time on it is not a reading.
+ */
+export function paneQuiet(
+  reading: Pick<SupervisorObservation['session'], 'turn' | 'idleSince'>,
+  now: number,
+  policy: SupervisorPolicy = SUPERVISOR_POLICY
+): boolean {
+  return (
+    reading.turn === 'idle' && reading.idleSince !== undefined && now - reading.idleSince >= policy.heldInputIdleMs
+  );
+}
+
 /** The laptop's own read still says it is held or unfinished. Asked to be proved again by the step. */
 function laptopHeld(observed: SupervisorObservation): readonly SupervisorPrecondition[] {
   const seen = observed.laptop.continuation;
@@ -1515,7 +1530,7 @@ function betweenTurnsGate(
   const grace = proof.includes('agent-parked-at-screen') ? policy.heldInputTurnMs : policy.backgroundGraceMs,
     leftSince = history.backgroundSince,
     overdue = leftSince !== undefined && now - leftSince >= grace;
-  const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
+  const quiet = paneQuiet(observed.session, now, policy);
   if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: proof };
   if (quiet)
     return {
