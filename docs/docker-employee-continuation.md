@@ -194,6 +194,13 @@ record of the employee's storage. See
 [owner operations](owner-operations.md#the-stored-home-of-a-stopped-laptop) for
 what the supervisor does with each finding.
 
+For a finished laptop whose container the Engine positively reports absent,
+the stored-home read takes the HOME and Nix paths from the laptop record and
+the layout of the employee's last operation, has the verifier report what is
+at them, and compares that with the office's identity record. No holder
+receipt is used. A container that is listed and cannot be inspected is not
+absent.
+
 A cold recovery of the shared pool admits a stopped anchor however it ended,
 refuses a dead one with `DOCKER_POOL_COLD_ANCHOR_DEAD` and any other state with
 `DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`. A pool writer that no record names as

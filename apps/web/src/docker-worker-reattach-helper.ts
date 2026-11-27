@@ -75,6 +75,10 @@ export type DockerStoredHomeVerdict =
   | 'renumbered-stale-record'
   | 'renumbered-unverifiable'
   | 'renumbered-record-unreadable'
+  | 'absent-proved'
+  | 'absent-granted'
+  | 'absent-no-record'
+  | 'absent-record-unreadable'
   | 'different'
   | 'unobserved';
 
@@ -97,6 +101,13 @@ export type DockerVerifierFailure = 'image-missing' | 'lacks-command' | 'timed-o
  * probe did not answer.
  */
 export type DockerVerifierCapability = 'full' | 'compare-only' | 'image-missing' | 'unknown';
+
+/** What a read of the two bind sources needs to know of a laptop: its ID, its user and where its mounts come from. */
+interface ReferenceSource {
+  readonly Id: string;
+  readonly Config: { readonly User: string };
+  readonly Mounts: readonly { readonly Type?: string; readonly Source: string; readonly Destination: string }[];
+}
 
 class VerifierRunFailed extends Error {
   constructor(readonly failure: DockerVerifierFailure) {
@@ -271,6 +282,76 @@ export class DockerWorkerReattachHelper {
     return { observation: { ...historical, home, nix }, filesystemId: identity!.filesystemId };
   }
 
+  /**
+   * The stored home of a laptop whose container no longer exists. There is no container to take the two bind
+   * sources from, so they come from the layout a rebuild of this laptop would bind (`layout`), and no holder's
+   * receipt is asked: what is at those paths now is compared with the office's own record of this employee.
+   *
+   * - `proved`: the record names exactly these directories (inode, owner, mode) on exactly this ext4 filesystem.
+   * - `different`: the record names other directories or another filesystem; or, with no record, the directory
+   *   at the home path does not belong to the laptop's user.
+   * - `granted`: the office holds no record of this employee, the owner's standing grant is set, and the
+   *   directory at the employee's own home path belongs to the laptop's user. That is all that can be known
+   *   without a record, and the grant is the owner's word for exactly the case without one. The filesystem is
+   *   recorded, so the next time is proved.
+   * - `no-record`: no record, and no grant. Nothing proves the directory, and it is not accepted.
+   * - `record-unreadable`: the record cannot be trusted. That is neither a record nor the absence of one.
+   * - `unobserved`: the verifier gave no answer; `failures` says why. Nothing is known.
+   */
+  async absentReference(
+    row: DockerEmployeeContinuationRecord,
+    layout: Readonly<{ home: string; nix: string; user: string }>,
+    current: () => void
+  ): Promise<'proved' | 'granted' | 'different' | 'no-record' | 'record-unreadable' | 'unobserved'> {
+    if (!row.destination) return refuse();
+    const source: ReferenceSource = {
+      Id: row.destination.containerId,
+      Config: { User: layout.user },
+      Mounts: [
+        { Type: 'bind', Source: layout.home, Destination: '/home/agent' },
+        { Type: 'bind', Source: layout.nix, Destination: '/nix' },
+      ],
+    };
+    const seen = await this.observe(source, current).catch(() => undefined);
+    current();
+    if (!seen) return 'unobserved';
+    const held = this.renumbering?.identity.read(row.employeeId);
+    if (held === 'unreadable') {
+      this.#decided(row, 'absent-record-unreadable');
+      return 'record-unreadable';
+    }
+    const identity = {
+      employeeId: row.employeeId, home: withoutDevice(seen.home), nix: withoutDevice(seen.nix),
+      device: seen.home.dev, filesystemId: seen.homeFilesystem.id,
+    };
+    if (held) {
+      const same = oneFilesystem(seen) && seen.home.ino !== '0' && seen.nix.ino !== '0' &&
+        isDeepStrictEqual(held.home, identity.home) && isDeepStrictEqual(held.nix, identity.nix) &&
+        held.filesystemId === identity.filesystemId;
+      this.#decided(row, same ? 'absent-proved' : 'different');
+      return same ? 'proved' : 'different';
+    }
+    if (this.renumbering?.granted(row.owner) !== true) {
+      this.#decided(row, 'absent-no-record');
+      return 'no-record';
+    }
+    // A disk that is missing leaves the mount point, which belongs to root, at the path.
+    if (seen.home.ino === '0' || String(seen.home.uid) !== layout.user.split(':')[0]) {
+      this.#decided(row, 'different');
+      return 'different';
+    }
+    this.#decided(row, 'absent-granted');
+    // A record that cannot be written loses a later proof and nothing else.
+    if (oneFilesystem(seen)) {
+      try {
+        this.renumbering.identity.remember(identity);
+      } catch {
+        /* the next read under the grant records it */
+      }
+    }
+    return 'granted';
+  }
+
   /** Records what a running laptop's own mounts are on, for a later proof. `live` is what the laptop itself
    * reports of its HOME and Nix directories; the record is kept only when the verifier sees exactly the same
    * directories through the same two bind sources, on one ext4 filesystem. True when a record is held now. */
@@ -366,7 +447,7 @@ export class DockerWorkerReattachHelper {
   }
 
   /** The two bind sources of a laptop, mounted read-only where the verifier expects them. */
-  #referenceMounts(destination: DockerEmployeeInspect): string[] {
+  #referenceMounts(destination: ReferenceSource): string[] {
     const bind = (guest: string, target: string) => {
       const mounts = destination.Mounts.filter(mount => mount.Destination === guest);
       const mount = mounts[0];
@@ -382,7 +463,7 @@ export class DockerWorkerReattachHelper {
 
   /** What the two bind sources of a laptop are now: each directory and the filesystem it is on. Read-only. A
    * verifier image that predates this read refuses, and is not asked again: `failures` says why. */
-  async observe(destination: DockerEmployeeInspect, current: () => void): Promise<DockerStorageFilesystemObservation> {
+  async observe(destination: ReferenceSource, current: () => void): Promise<DockerStorageFilesystemObservation> {
     const mounts = this.#referenceMounts(destination);
     let output: string;
     try {

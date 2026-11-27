@@ -2863,11 +2863,21 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       state.mounted.home.dev = dev;
       state.mounted.nix.dev = dev;
     };
-    const read = async () => {
-      const seen = await f.engine.stoppedStorage(f.row, helper, () => {});
+    const read = async (layout?: { home: string; nix: string; user: string }) => {
+      const seen = await f.engine.stoppedStorage(f.row, helper, () => {}, layout);
       return seen.state === 'unconfirmed' ? `unconfirmed:${seen.cause}` : seen.state === 'renumbered' ? `renumbered:${seen.reason}` : seen.state;
     };
-    return { f, state, helper, renumber, read };
+    /** The laptop container is gone. `listed`: the Engine still lists it and only cannot inspect it. */
+    const removeLaptop = (listed = false) => {
+      const before = vi.mocked(f.command.run).getMockImplementation()!;
+      const id = f.row.destination!.containerId;
+      vi.mocked(f.command.run).mockImplementation(async (args, input, timeout) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === id) throw failed('No such container', 1);
+        if (args[0] === 'container' && args[1] === 'ls' && args.includes('id=' + id)) return listed ? id : '';
+        return before(args, input, timeout);
+      });
+    };
+    return { f, state, helper, renumber, read, removeLaptop };
   }
   const identity = (f: Awaited<ReturnType<typeof retainedStoppedFixture>>, device: string, filesystemId = '9988'): Identity => ({
     employeeId: f.row.employeeId,
@@ -3087,6 +3097,101 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       return original(args, input, timeout);
     });
     await expect(w.read()).resolves.toBe('unconfirmed:laptop-unreadable');
+  });
+
+  describe('a laptop container that no longer exists', () => {
+    // Where a rebuild would bind the two directories from, and the user it would run as.
+    const layout = { home: '/synthetic/home', nix: '/synthetic/nix', user: '1000:100' };
+    const gone = async (options: Parameters<typeof restarted>[0] = {}) => {
+      const w = await restarted(options);
+      w.removeLaptop();
+      return w;
+    };
+
+    it('is confirmed by the office’s own record of exactly these directories on exactly this filesystem', async () => {
+      const first = await restarted();
+      const w = await gone({ recorded: identity(first.f, '4') });
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      // One read of the two paths, and no receipt of a holder was asked for or confirmed.
+      expect(w.state.observed).toBe(1);
+      expect(w.state.verified).toEqual([]);
+      // A new device number changes nothing: the record is of the filesystem, not of the number.
+      w.renumber('7');
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.f.command.create).not.toHaveBeenCalled();
+    });
+
+    it('is never confirmed when the record names another directory or another filesystem, with or without the grant', async () => {
+      const first = await restarted();
+      for (const granted of [false, true]) {
+        const inode = await gone({ granted, recorded: identity(first.f, '4') });
+        inode.state.mounted.home.ino = '77';
+        await expect(inode.read(layout), String(granted)).resolves.toBe('different');
+        const filesystem = await gone({ granted, recorded: identity(first.f, '4', '1111') });
+        await expect(filesystem.read(layout), String(granted)).resolves.toBe('different');
+        const two = await gone({ granted, recorded: identity(first.f, '4') });
+        two.state.mounted.nixFilesystem = { ext4: true, id: '4242' };
+        await expect(two.read(layout), String(granted)).resolves.toBe('different');
+        expect(two.state.remembered).toEqual([]);
+      }
+    });
+
+    it('is not accepted without a record and without the grant, and says so', async () => {
+      const w = await gone();
+      await expect(w.read(layout)).resolves.toBe('renumbered:absent-no-record-no-grant');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-no-record');
+      expect(w.state.remembered).toEqual([]);
+    });
+
+    it('is accepted under the grant without a record when the home belongs to the laptop’s user, and proved from then on', async () => {
+      const w = await gone({ granted: true });
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+      expect(w.state.remembered).toEqual([identity(w.f, '4')]);
+      w.state.granted = false;
+      await expect(w.read(layout)).resolves.toBe('verified');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      // What a missing disk leaves at the path belongs to root: the grant does not accept that.
+      const missing = await gone({ granted: true });
+      missing.state.mounted.home = { ...missing.state.mounted.home, uid: 0, gid: 0, mode: 493 };
+      await expect(missing.read(layout)).resolves.toBe('different');
+      expect(missing.state.remembered).toEqual([]);
+    });
+
+    it('lets neither the grant nor anything else stand in for a record that cannot be trusted', async () => {
+      for (const granted of [false, true]) {
+        const w = await gone({ granted, recorded: 'unreadable' as never });
+        await expect(w.read(layout), String(granted)).resolves.toBe('renumbered:absent-record-unreadable');
+      }
+    });
+
+    it('cannot tell when the verifier gives no answer, and never takes that for a home', async () => {
+      const first = await restarted();
+      const slow = await gone({ granted: true, recorded: identity(first.f, '4') });
+      slow.state.timeouts = 2;
+      await expect(slow.read(layout)).resolves.toBe('unconfirmed:verifier-timed-out');
+      await expect(slow.read(layout)).resolves.toBe('verified');
+      const old = await gone({ granted: true, oldVerifier: true });
+      await expect(old.read(layout)).resolves.toBe('unconfirmed:verifier-lacks-command');
+      const missing = await gone({ granted: true });
+      missing.state.imageMissing = true;
+      await expect(missing.read(layout)).resolves.toBe('unconfirmed:verifier-image-missing');
+    });
+
+    it('is not taken for absent while the Engine still lists it, nor compared without a layout', async () => {
+      const first = await restarted();
+      const listed = await restarted({ granted: true, recorded: identity(first.f, '4') });
+      listed.removeLaptop(true);
+      await expect(listed.read(layout)).resolves.toBe('unconfirmed:laptop-unreadable');
+      expect(listed.state.observed).toBe(0);
+      const bare = await gone({ granted: true, recorded: identity(first.f, '4') });
+      await expect(bare.read()).resolves.toBe('unconfirmed:laptop-unreadable');
+      // With no verifier configured at all there is nothing to check with, as before.
+      await expect(bare.f.engine.stoppedStorage(bare.f.row, undefined, () => {}, layout)).resolves.toEqual({
+        state: 'no-verifier',
+      });
+    });
   });
 
   it('has nothing to check with when no verifier is configured, and compares nothing for a laptop that runs or is not finished', async () => {

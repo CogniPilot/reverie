@@ -77,7 +77,8 @@
  * a laptop that runs has no stopped storage to compare and is not held up by it.
  */
 import { randomUUID } from 'node:crypto';
-import type { DockerStoppedStorage } from './docker-employee-engine.js';
+import type { DockerStoppedStorage, DockerStoredHomeLayout } from './docker-employee-engine.js';
+import { reprovisionStorage } from './docker-absent-reprovision-source.js';
 import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
@@ -145,7 +146,11 @@ export interface DockerSupervisorLaptopDeps {
   /** Reads of an employee's stored HOME and Nix directories. Absent where the office has no laptops to verify. */
   readonly storage?: {
     /** See `DockerEmployeeEngine.stoppedStorage`. */
-    stopped(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerStoppedStorage>;
+    stopped(
+      row: DockerEmployeeContinuationRecord,
+      current: () => void,
+      layout?: DockerStoredHomeLayout
+    ): Promise<DockerStoppedStorage>;
     /** What the configured verifier image can do; `none` when the office is configured with no verifier. */
     capability?(): 'none' | DockerVerifierCapability;
     /** Record which filesystem a running laptop's directories are on. See `DockerEmployeeEngine.rememberStorage`. */
@@ -659,13 +664,30 @@ export class DockerSupervisorLaptops {
     if (!row || !storage) return { found: 'unchecked' };
     try {
       const authority = this.#authority(employee, guard);
-      const seen = await storage.stopped(row, authority.require);
+      const seen = await storage.stopped(row, authority.require, this.#storedLayout(row));
       if (seen.state === 'not-stopped' || seen.state === 'no-verifier') return { found: 'unchecked' };
       if (seen.state === 'unconfirmed') return { found: 'unknown', cause: seen.cause };
       if (seen.state === 'renumbered') return { found: 'renumbered', cause: seen.reason };
       return { found: seen.state };
     } catch {
       return { found: 'unknown', cause: 'read-refused' };
+    }
+  }
+
+  /**
+   * Where a rebuild of this laptop would bind its HOME and Nix directories from, and as which user: from the
+   * laptop record and the layout the rebuild would use anyway. Asked for a laptop whose container no longer
+   * exists, which has no mounts to read. Undefined when there is no layout, or the record's home is not one a
+   * rebuild supports: nothing is compared then, and the read stays unknown.
+   */
+  #storedLayout(row: DockerEmployeeContinuationRecord): DockerStoredHomeLayout | undefined {
+    const template = this.#template(row.employeeId);
+    if (!template) return undefined;
+    try {
+      const storage = reprovisionStorage(row, template);
+      return { home: storage.home, nix: storage.nix, user: template.user };
+    } catch {
+      return undefined;
     }
   }
 

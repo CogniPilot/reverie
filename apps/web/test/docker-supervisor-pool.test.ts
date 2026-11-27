@@ -53,6 +53,8 @@ function world() {
     resume: undefined as ((id: string) => Status | Error) | undefined,
     stopped: { state: 'verified' } as DockerStoppedStorage | Error,
     remembered: [] as string[],
+    /** The layout each stored-home read was given, for a laptop whose container is gone. */
+    layouts: [] as unknown[],
     /** What the configured verifier image can do, and what one attempt to record a home answers. */
     capability: 'none' as 'none' | 'full' | 'compare-only' | 'image-missing' | 'unknown',
     remember: (() => 'recorded') as () => 'recorded' | 'not-running' | 'not-recorded',
@@ -109,6 +111,9 @@ function world() {
               phase: 'ready',
               request: { operationId: 'op-' + id },
               destination: {},
+              original: {
+                home: { type: 'bind', source: `/host/state/employees/${id}/home`, destination: '/home/agent' },
+              },
             }
           : undefined,
       policy: () => ({}),
@@ -175,9 +180,10 @@ function world() {
       },
     },
     storage: {
-      stopped: async (row: { employeeId: string }, current: () => void) => {
+      stopped: async (row: { employeeId: string }, current: () => void, layout?: unknown) => {
         current();
         state.calls.push(['stored-home', row.employeeId]);
+        state.layouts.push(layout);
         return give(state.stopped);
       },
       capability: () => state.capability,
@@ -527,6 +533,20 @@ describe('the stored home of a stopped laptop', () => {
       detail: 'the stored home could not be read',
     });
     expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('tells the read where a rebuild would bind the home and the Nix store from, and as which user', async () => {
+    const w = world();
+    await w.laptops.storedHome(A, guard);
+    // From the laptop record and the layout a rebuild would use anyway: nothing here is chosen by the supervisor.
+    expect(w.state.layouts).toEqual([
+      { home: `/host/state/employees/${A.id}/home`, nix: '/host/state/nix', user: '1000:1000' },
+    ]);
+    // The absent-laptop reasons reach the report as they are.
+    for (const reason of ['absent-no-record-no-grant', 'absent-record-unreadable'] as const) {
+      w.state.stopped = { state: 'renumbered', reason };
+      await expect(w.laptops.storedHome(A, guard)).resolves.toEqual({ found: 'renumbered', cause: reason });
+    }
   });
 
   it('reads a refused read as unknown, and an employee with no laptop record as nothing to compare', async () => {

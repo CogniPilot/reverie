@@ -331,7 +331,16 @@ export type DockerRenumberedReason =
   | 'record-names-other-directories'
   | 'not-one-ext4-filesystem'
   | 'record-unreadable'
-  | 'verifier-refused';
+  | 'verifier-refused'
+  | 'absent-no-record-no-grant'
+  | 'absent-record-unreadable';
+
+/** Where a rebuild of a laptop would bind its HOME and Nix directories from, and the user it would run as. */
+export interface DockerStoredHomeLayout {
+  readonly home: string;
+  readonly nix: string;
+  readonly user: string;
+}
 const VERIFIER_CAUSES: Readonly<Record<DockerVerifierFailure, DockerStoredHomeCause>> = {
   'image-missing': 'verifier-image-missing',
   'lacks-command': 'verifier-lacks-command',
@@ -832,23 +841,37 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
    * Beside these: `not-stopped` (the laptop is running or not finished, so there is no stopped storage to
    * compare) and `no-verifier` (this office is configured with none, and the holder does not hold the directories
    * any more).
+   *
+   * A laptop container that no longer exists is an ordinary state: containers get removed, and the rebuild is
+   * for exactly that. When the Engine positively reports that no container of the recorded ID exists, and the
+   * caller says where a rebuild would bind the directories from (`layout`), those paths are compared with the
+   * office's own record of the employee: see `absentReference` of the reattach helper. The outcomes are the same
+   * three. A container that is listed and cannot be inspected is not absent: that stays `laptop-unreadable`.
    */
   async stoppedStorage(
     row: DockerEmployeeContinuationRecord,
     helper: DockerWorkerReattachHelper | undefined,
-    current: () => void
+    current: () => void,
+    layout?: DockerStoredHomeLayout
   ): Promise<DockerStoppedStorage> {
     current();
     if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return { state: 'not-stopped' };
+    const unreadable = async (): Promise<DockerStoppedStorage> => {
+      current();
+      if (!helper) return { state: 'no-verifier' };
+      if (!layout || !(await this.#positivelyAbsent(row.destination!.containerId)))
+        return { state: 'unconfirmed', cause: 'laptop-unreadable' };
+      current();
+      return this.#absentStorage(row, helper, layout, current);
+    };
     let seen: DockerEmployeeInspect | null;
     try {
       seen = await this.#destination(row, current, true);
     } catch {
-      current();
-      return helper ? { state: 'unconfirmed', cause: 'laptop-unreadable' } : { state: 'no-verifier' };
+      return unreadable();
     }
+    if (seen === null) return unreadable();
     current();
-    if (seen === null) return helper ? { state: 'unconfirmed', cause: 'laptop-unreadable' } : { state: 'no-verifier' };
     if (seen.State.Running) return { state: 'not-stopped' };
     helper?.forgetVerdict(row);
     try {
@@ -873,6 +896,38 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       const failure = verdict === undefined ? undefined : (failed.verify ?? failed.observe);
       return { state: 'unconfirmed', cause: failure ? VERIFIER_CAUSES[failure] : 'receipt-unreadable' };
     }
+  }
+  /** Whether the Engine lists no container of exactly this ID, in any state. A census that fails says nothing. */
+  async #positivelyAbsent(containerId: string): Promise<boolean> {
+    try {
+      const listed = await this.command.run([
+        'container', 'ls', '--all', '--no-trunc', '--filter', 'id=' + containerId, '--format', '{{.ID}}',
+      ]);
+      return listed.trim() === '';
+    } catch {
+      return false;
+    }
+  }
+  /** The stored home of a laptop whose container is positively absent, by the office's own record. */
+  async #absentStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper,
+    layout: DockerStoredHomeLayout,
+    current: () => void
+  ): Promise<DockerStoppedStorage> {
+    helper.forgetVerdict(row);
+    let found: Awaited<ReturnType<DockerWorkerReattachHelper['absentReference']>>;
+    try {
+      found = await helper.absentReference(row, layout, current);
+    } catch {
+      found = 'unobserved';
+    }
+    current();
+    if (found === 'proved' || found === 'granted') return { state: 'verified' };
+    if (found === 'different') return { state: 'different' };
+    if (found === 'no-record') return { state: 'renumbered', reason: 'absent-no-record-no-grant' };
+    if (found === 'record-unreadable') return { state: 'renumbered', reason: 'absent-record-unreadable' };
+    return { state: 'unconfirmed', cause: VERIFIER_CAUSES[helper.failures(row).observe ?? 'failed'] };
   }
   /**
    * Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix

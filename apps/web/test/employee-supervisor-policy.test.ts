@@ -2818,6 +2818,12 @@ describe('employee supervisor: after a host restart', () => {
     expect(reason('record-names-other-directories')).not.toMatch(/Set acceptStorageRenumbering/);
     expect(reason('not-one-ext4-filesystem')).toMatch(/not on one ext4 filesystem.*neither the office nor an approval can accept it/);
     expect(reason('verifier-refused')).toMatch(/The verifier refused the filesystem it was asked to confirm/);
+    // A laptop container that no longer exists, with nothing that proves the directory at its path.
+    expect(reason('absent-no-record-no-grant')).toMatch(
+      /laptop container no longer exists.*holds no record of its own.*acceptStorageRenumbering is off.*Set acceptStorageRenumbering to true \(PUT \/api\/company\/settings\).*docker-rebuild\/preview/
+    );
+    expect(reason('absent-record-unreadable')).toMatch(/laptop container no longer exists.*holds a line that does not read/);
+    expect(reason('absent-record-unreadable')).not.toMatch(/Set acceptStorageRenumbering/);
     expect(reason('record-unreadable')).toMatch(/holds a line that does not read, so it proves nothing, and acceptStorageRenumbering applies only where the office holds no record/);
     // A verifier image that can only compare refused the recorded directories: never rebuilt on, and it says so.
     const changed = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'changed' });

@@ -701,7 +701,7 @@ export class DockerEmployeeRuntime {
       limits: a.limits,
       absent: a.absent,
       storage: {
-        stopped: (row, current) => a.engine.stoppedStorage(row, a.recoveryHelper, current),
+        stopped: (row, current, layout) => a.engine.stoppedStorage(row, a.recoveryHelper, current, layout),
         capability: () => a.recoveryHelper?.capability() ?? 'none',
         ...(a.recoveryHelper
           ? {

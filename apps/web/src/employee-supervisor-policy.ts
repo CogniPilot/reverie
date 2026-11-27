@@ -322,6 +322,8 @@ export type SupervisorStoredHomeCause =
   | 'not-one-ext4-filesystem'
   | 'record-unreadable'
   | 'verifier-refused'
+  | 'absent-no-record-no-grant'
+  | 'absent-record-unreadable'
   | 'verifier-image-missing'
   | 'verifier-lacks-command'
   | 'verifier-timed-out'
@@ -1780,6 +1782,9 @@ const APPROVE_ONE_LAPTOP = 'approve this one laptop: POST /api/company/employees
 const STORED_HOME_RENUMBERED_FACT =
   "The filesystem this employee's home is on has a new device number since their laptop was built. Both recorded " +
   'directories are otherwise unchanged (inode, owner, mode). ';
+const STORED_HOME_ABSENT_FACT =
+  "This employee's laptop container no longer exists, so the office compares the directory at their home path " +
+  'with its own record of the filesystem their home is on. ';
 /** Why a new device number is not accepted, and exactly what settles it. */
 const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
   'no-record-no-grant':
@@ -1797,6 +1802,20 @@ const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
     '. ' +
     STORED_HOME_REREAD +
     'it is approved.',
+  'absent-no-record-no-grant':
+    STORED_HOME_ABSENT_FACT +
+    'The office holds no record of its own of the filesystem their home is on, so nothing proves that the ' +
+    'directory at the recorded path is their home, and the company setting acceptStorageRenumbering is off, so the ' +
+    'laptop is not rebuilt onto it. Set acceptStorageRenumbering to true (PUT /api/company/settings) and the ' +
+    "office rebuilds the laptop at its next read, within ten minutes, when the directory belongs to the laptop's " +
+    'user. Or rebuild this one laptop onto the directory that is there: ' +
+    REBUILD_BY_HAND,
+  'absent-record-unreadable':
+    STORED_HOME_ABSENT_FACT +
+    "The office's record of employee storage (docker-storage-identity.jsonl in the office data directory) holds a " +
+    'line that does not read, so it proves nothing, and acceptStorageRenumbering applies only where the office ' +
+    'holds no record. To rebuild this laptop onto the directory that is there: ' +
+    REBUILD_BY_HAND,
   'record-unreadable':
     STORED_HOME_RENUMBERED_FACT +
     "The office's record of employee storage (docker-storage-identity.jsonl in the office data directory) holds a " +

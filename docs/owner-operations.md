@@ -482,6 +482,29 @@ There are three kinds of answer, and the office never takes one for another.
 | Could not tell | The helper did not answer in thirty seconds, twice in a row for each read; the configured image is not in the Engine; the holder container or its record of the directories is gone; the laptop container cannot be inspected | does not rebuild. Reads again after 1, 2 and 5 minutes and then every 10. After 30 minutes of the same cause without a break, `needsHuman` names that cause and the number of reads; the office goes on reading and rebuilds by itself once a read confirms the home |
 | Nothing to check with | No recovery helper image is configured at all (`recoveryHelperImageId` absent) | rebuilds by the recorded path, as before this check existed |
 
+A laptop container that no longer exists is an ordinary state: containers get
+removed, and the rebuild is for exactly that. It has no mounts to read and its
+holder's receipt is not asked. When the Engine positively reports that no
+container of the recorded ID exists, the office takes the two paths from the
+laptop record and the layout a rebuild would use anyway, has the recovery
+helper read what is at them, and compares that with its own record of the
+employee's storage:
+
+| Answer | Finding for a laptop whose container is gone | What the supervisor does |
+| --- | --- | --- |
+| Confirmed the same | The office's record names exactly these directories (inode, owner, mode) on exactly this ext4 filesystem. The device number may have changed | rebuilds |
+| Confirmed not the same | The record names another directory or another filesystem | never rebuilds on it, with or without the grant |
+| Confirmed the same | No record of this employee, `acceptStorageRenumbering` set, and the directory at the employee's own home path belongs to the laptop's user | rebuilds, and records the filesystem, so the next time is proved |
+| Confirmed not the same | No record, the grant set, and the directory at the home path does not belong to the laptop's user (a missing disk leaves root's mount point there) | never rebuilds on it |
+| Confirmed not the same | No record and the grant off | never rebuilds; `needsHuman` names the setting and the rebuild by hand |
+| Confirmed not the same | The record file cannot be trusted | never rebuilds; the grant does not apply; `needsHuman` names the rebuild by hand |
+| Could not tell | The helper gave no answer, the image is missing or was built before the read existed, the Engine still lists the container and cannot inspect it, or there is no layout for the employee | does not rebuild; reads again as above, and names the cause after 30 minutes |
+
+Without a record the office has no evidence of what the directories were: a
+laptop record keeps the path and not the inode. So the rule for that case is
+the owner's standing grant, and with it the one check that is left, the owner of
+the directory. With the grant off nothing is accepted.
+
 A read that could not tell is never treated as a home that may be rebuilt on.
 That holds for the rebuild step as well, which makes the read once more itself:
 when it stops the step, nothing was tried and the attempt is given back, so a
