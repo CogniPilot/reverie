@@ -422,7 +422,10 @@ export class DockerEmployeeStorage {
     verify: (destination: DockerEmployeeInspect, observation: Storage, filesystemId?: string) => Promise<unknown>,
     current: () => void,
     stoppedObservation?: Storage | 'original-reference',
-    migrate?: (original: Storage) => { observation: Storage; filesystemId?: string }
+    migrate?: (
+      original: Storage,
+      destination: DockerEmployeeInspect
+    ) => Promise<{ observation: Storage; filesystemId?: string }> | { observation: Storage; filesystemId?: string }
   ): Promise<(DockerCredentialHome & { readonly originalHomeDev: string }) | undefined> {
     current();
     this.#checkExistingDestination(row, destination, !stoppedObservation);
@@ -451,7 +454,8 @@ export class DockerEmployeeStorage {
     // A stopped worker cannot probe its own mounts. Without a previous live
     // observation the verifier must match even the original device numbers.
     const original = { ...historical, holderStartTicks: null };
-    const migration = stoppedObservation === 'original-reference' ? migrate?.(original) : undefined;
+    const migration = stoppedObservation === 'original-reference' ? await migrate?.(original, destination) : undefined;
+    current();
     const seen = stoppedObservation === 'original-reference'
       ? migration?.observation ?? original
       : stoppedObservation ?? await probeDockerEmployeeStorage(this.command, destination.Id);

@@ -327,6 +327,13 @@ export const CompanySettingsSchema = z.object({
   supervisorEnabled: z.boolean().optional(),
   /** The supervisor may also abandon a dead-end plan move and rebuild a laptop nothing runs in, or one whose office terminal can never take input again. Absent means on. */
   supervisorAutoRepair: z.boolean().optional(),
+  /**
+   * The owner's standing answer to a storage device change. After a host restart the filesystem an employee's home
+   * is on can have a new device number. The office accepts that by itself when it recorded that filesystem earlier.
+   * When it has no such record, this grant lets it accept the new number while both recorded directories are
+   * otherwise unchanged (inode, owner, mode) on one ext4 filesystem. Absent means off: the office then waits.
+   */
+  acceptStorageRenumbering: z.boolean().optional(),
   crashWakeEmployeeId: z.string().min(1).optional(),
   timeZone: z
     .string()
