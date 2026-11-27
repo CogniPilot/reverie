@@ -176,6 +176,18 @@ The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “t
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
 next day the ladder goes on by itself.
 
+Every wait above that ends in a laptop being rebuilt (fifteen minutes of
+starting or of an unreadable laptop, thirty minutes of an unrecognized code or
+of work left running, two hours without a reading of the pane) counts only an
+unbroken run of that same state as this office process saw it. A start that
+follows a plan move, a start-up screen or the wait for the office's own restart
+begins its own fifteen minutes, and a state that cleared and came back is
+counted from its return. An office start begins all of these again at the
+first look: the office watched nothing while it was down, and every employee
+reads as starting for a minute while their terminal is attached again. What
+paces the steps (when a problem was first seen, the attempts, the day's
+rebuilds) is kept across an office start.
+
 It never types into a sign-in screen (what it does about one is described
 [below](#provider-start-up-screens)), never chooses limits
 or a laptop layout of its own, never returns anyone to the office, and never

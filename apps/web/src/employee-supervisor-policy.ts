@@ -494,8 +494,20 @@ export interface SupervisorHistory {
   readonly since: number;
   /** When the employee was last seen to become healthy; cleared by the next problem. */
   readonly healthySince?: number;
-  /** When the employee was first seen starting or between states without having become healthy since. */
+  /**
+   * Since when the employee has been seen, without a break, in the starting or between-states condition that
+   * `transitOf` names. Any other observation ends that run, and so does an office start (`resumeSupervisorHistory`).
+   */
   readonly transitSince?: number;
+  /** The condition `transitSince` counts; see `transitKey`. */
+  readonly transitOf?: string;
+  /**
+   * Since when this office process has seen the problem `fingerprint` names without a break. `since` says when a
+   * problem was first seen, across the moments it reads as starting or healthy and across office restarts, and it
+   * paces the steps. This clock is what every bound that allows a laptop to be discarded is measured by
+   * (`watchedSince`): time in which the office saw something else, or was not running, does not count.
+   */
+  readonly watchSince?: number;
   readonly attempts: Readonly<Partial<Record<SupervisorAction, SupervisorAttempt>>>;
   /** Times of this employee's automatic rebuilds within the last day. */
   readonly rebuilds: readonly number[];
@@ -1284,17 +1296,17 @@ function betweenTurnsGate(
   proof: readonly SupervisorPrecondition[]
 ): Gate {
   const { turn = 'unknown', idleSince, background } = observed.session;
-  const overdue = history.since > 0 && now - history.since >= policy.heldInputTurnMs;
+  const watched = watchedSince(history);
+  const overdue = watched > 0 && now - watched >= policy.heldInputTurnMs;
   const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
   if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: proof };
-  if (quiet)
-    return { kind: 'wait', waitingFor: HELD_INPUT_BACKGROUND_WAIT, at: history.since + policy.heldInputTurnMs };
+  if (quiet) return { kind: 'wait', waitingFor: HELD_INPUT_BACKGROUND_WAIT, at: watched + policy.heldInputTurnMs };
   if (turn === 'working' || (turn === 'idle' && idleSince !== undefined))
     return { kind: 'wait', waitingFor: HELD_INPUT_WAIT[turn] };
   // A laptop that this read shows to be empty never comes here: `rebuildGate` decides for it.
   if (observed.laptop.provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
-  const at = history.since + policy.blindRebuildMs;
-  if (history.since > 0 && now >= at)
+  const at = watched + policy.blindRebuildMs;
+  if (watched > 0 && now >= at)
     return {
       kind: 'ok',
       preconditions: [...proof.filter((name) => name !== 'agent-between-turns'), 'agent-unreadable'],
@@ -1437,7 +1449,8 @@ function rebuildGate(
 ): Gate {
   const limit = rebuildLimit(observed, history, now, policy, REBUILD_BY_HAND);
   if (limit) return limit;
-  const settles = history.since + policy.unrecognizedAfterMs;
+  const watched = watchedSince(history),
+    settles = watched + policy.unrecognizedAfterMs;
   if (base && unrecognizedCode(base) && now < settles)
     return {
       kind: 'wait',
@@ -1445,7 +1458,7 @@ function rebuildGate(
       at: settles,
     };
   const provider = observed.laptop.provider;
-  if (provider === 'unknown' && !(history.since > 0 && now - history.since >= policy.stalledAfterMs))
+  if (provider === 'unknown' && !(watched > 0 && now - watched >= policy.stalledAfterMs))
     return { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
   if (provider === 'running' || provider === 'unknown')
     return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', ...laptopHeld(observed)]);
@@ -1676,7 +1689,7 @@ export function assessEmployee(
         : undefined,
     stalled = stalledFrom !== undefined && now >= stalledFrom,
     path = ladderPath(base, heldInput, stalled && observed.boxed),
-    clock = path === SUPERVISOR_STALLED_PATH ? { ...history, since: stalledFrom! } : history;
+    clock = path === SUPERVISOR_STALLED_PATH ? { ...history, since: stalledFrom!, watchSince: stalledFrom! } : history;
   const result = (
     next: SupervisorNextStep,
     rung?: SupervisorAction,
@@ -1753,10 +1766,15 @@ export function assessEmployee(
  * the employee has stayed healthy or once the owner has stopped them, and with the round: `ladderRestartMs` after
  * the newest attempt they are cleared and the ladder starts again (`ladderRestartAt`). This is the one place that
  * rule lives, so it holds for every path. The record of the day's rebuilds is never cleared by it.
+ *
+ * Two clocks count unbroken runs of observations and nothing else. `transitSince` counts the run of one starting or
+ * between-states condition: a start that follows a plan move, a start-up screen or the wait for the office's own
+ * restart begins its own run, so it is never called stalled for the time those took. `watchSince` counts the run
+ * of one problem. Both end with any other observation, and neither survives an office start.
  */
 export function rollSupervisorHistory(
   history: SupervisorHistory,
-  seen: Pick<SupervisorClassification, 'condition' | 'fingerprint'>,
+  seen: Pick<SupervisorClassification, 'condition' | 'fingerprint'> & { readonly code?: string },
   now: number,
   policy: SupervisorPolicy = SUPERVISOR_POLICY
 ): SupervisorHistory {
@@ -1780,16 +1798,62 @@ export function rollSupervisorHistory(
   }
   const kept = { attempts, rebuilds, ...last };
   // In transit (starting, moving): the problem being worked on, if any, keeps its clock.
-  if (seen.fingerprint === '')
+  if (seen.fingerprint === '') {
+    const transitOf = transitKey(seen),
+      running = history.transitOf === transitOf && history.transitSince !== undefined;
     return {
       fingerprint: history.fingerprint,
       since: history.since,
-      transitSince: history.transitSince ?? now,
+      transitSince: running ? history.transitSince : now,
+      transitOf,
       ...kept,
     };
-  return seen.fingerprint === history.fingerprint
-    ? { fingerprint: history.fingerprint, since: history.since, ...kept }
-    : { fingerprint: seen.fingerprint, since: now, ...kept };
+  }
+  const same = seen.fingerprint === history.fingerprint;
+  return {
+    fingerprint: seen.fingerprint,
+    since: same ? history.since : now,
+    watchSince: same ? (history.watchSince ?? now) : now,
+    ...kept,
+  };
+}
+
+/**
+ * The starting or between-states condition a run of `transitSince` counts. The wait for the office's own restart is
+ * a state of its own: it is not the laptop that is starting.
+ */
+function transitKey(seen: { readonly condition: SupervisorCondition; readonly code?: string }): string {
+  return seen.code === RUNTIME_CHANGED ? `${seen.condition}:office-restart` : seen.condition;
+}
+
+/**
+ * Since when this office process has watched the current problem without a break. Every wait that ends in a laptop
+ * being discarded is measured from here: the thirty minutes of an unrecognized code, the fifteen of a laptop that
+ * cannot be read, the thirty for work left running and the two hours of a pane that cannot be read. A history that
+ * was never rolled has no such clock, and then the problem's own start is all there is.
+ */
+function watchedSince(history: SupervisorHistory): number {
+  return history.watchSince ?? history.since;
+}
+
+/**
+ * A history as an office that has just started may use it. What paces the ladder is kept, so a restart cannot
+ * repeat a step for free: the problem and when it was first seen, the attempts, the day's rebuilds and the last
+ * step. The clocks that count how long this office has WATCHED a state are dropped, and each starts again at the
+ * first observation of that state: while the office was down it watched nothing and tried nothing, and for a
+ * minute after every start each employee reads as starting while their terminal is attached again. Without this a
+ * bound could be met at the first look after a restart, and a laptop be rebuilt that the office had not tried to
+ * read. The healthy clock is dropped for the same reason: ten healthy minutes are ten minutes that were seen.
+ */
+export function resumeSupervisorHistory(history: SupervisorHistory): SupervisorHistory {
+  const {
+    transitSince: _transitSince,
+    transitOf: _transitOf,
+    watchSince: _watchSince,
+    healthySince: _healthySince,
+    ...kept
+  } = history;
+  return kept;
 }
 
 /** Count one attempt, before its effect: a throw or an office restart in the middle has still spent it. */

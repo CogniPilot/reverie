@@ -25,6 +25,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  resumeSupervisorHistory,
   rollSupervisorHistory,
   settleSupervisorAttempt,
   type SupervisorAction,
@@ -226,7 +227,8 @@ export class EmployeeSupervisor {
     private readonly policy: SupervisorPolicy = SUPERVISOR_POLICY,
     private readonly limits: EmployeeSupervisorLimits = SUPERVISOR_LIMITS
   ) {
-    this.#histories = ports.load();
+    // The pacing is kept across an office start; the clocks that count what this process has watched are not.
+    this.#histories = new Map([...ports.load()].map(([id, history]) => [id, resumeSupervisorHistory(history)]));
     this.#startedAt = ports.now();
   }
 

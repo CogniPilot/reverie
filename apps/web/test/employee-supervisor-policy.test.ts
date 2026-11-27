@@ -16,6 +16,7 @@ import {
   readSupervisedTerminal,
   readTerminalTurn,
   recordSupervisorAttempt,
+  resumeSupervisorHistory,
   settleSupervisorAttempt,
   rollSupervisorHistory,
   supervisorCodeKind,
@@ -2211,6 +2212,225 @@ describe('employee supervisor: no path ends for good', () => {
       for (const unread of [undefined, { ...pane, pid: null }, { ...pane, runtimeHealth: 'disconnected' }, { ...pane, paneExit: {} }, { pid: 7 }])
         expect(readTerminalTurn(unread)).toEqual({ turn: 'unknown' });
       expect(readSupervisedTerminal(pane)).toEqual({});
+    });
+  });
+
+  describe('the clocks behind every bound count unbroken runs that this office has watched', () => {
+    const STEP = 30_000;
+    /** Nothing here starts at time zero: a problem with no clock at all is never called overdue. */
+    const T = 1000;
+    type Assessment = ReturnType<typeof assessEmployee>;
+    /** One observation every thirty seconds from `from` up to, not including, `to`. */
+    const watch = (history: SupervisorHistory, seen: SupervisorObservation, from: number, to: number) => {
+      for (let now = from; now < to; now += STEP) history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+      return history;
+    };
+    /** How long after `from` the first pass comes at which `hit` holds, while `seen` is observed every thirty seconds. */
+    const until = (history: SupervisorHistory, seen: SupervisorObservation, from: number, hit: (result: Assessment) => boolean) => {
+      for (let now = from; now < from + 8 * HOUR; now += STEP) {
+        history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+        if (hit(assessEmployee(seen, history, ON, now))) return now - from;
+      }
+      return undefined;
+    };
+    const starting = held('DOCKER_CONTINUATION_BUSY');
+    const stalled = (result: Assessment) => result.condition !== 'starting' || result.next.action !== null;
+    const rebuilds = (result: Assessment) => result.next.action === 'rebuild-laptop';
+    const odd = held('DOCKER_CONTINUATION_SOMETHING_NEW');
+    /** An agent runs in the held laptop and the office has no reading of its pane. */
+    const unread = withLaptop(failed, { provider: 'running' });
+
+    describe('a laptop that is starting', () => {
+      it('after hours of running normally, is stalled fifteen minutes after it was first seen starting and not before', () => {
+        const healthy = watch(EMPTY_SUPERVISOR_HISTORY, observed(), T, T + 3 * HOUR);
+        expect(healthy.transitSince).toBeUndefined();
+        const from = T + 3 * HOUR;
+        expect(assessEmployee(starting, rollSupervisorHistory(healthy, classifyEmployee(starting), from), ON, from)).toMatchObject({
+          condition: 'starting',
+          next: { action: null },
+        });
+        expect(until(healthy, starting, from, stalled)).toBe(15 * MINUTE);
+        // And the rebuild keeps its own three minutes from that moment.
+        const seen = watch(healthy, starting, from, from + 15 * MINUTE + STEP);
+        expect(assessEmployee(starting, seen, ON, from + 15 * MINUTE).next).toMatchObject({
+          action: 'rebuild-laptop',
+          at: from + 18 * MINUTE,
+          preconditions: ['no-agent-running'],
+        });
+      });
+
+      it.each<[string, SupervisorObservation]>([
+        ['was stopped by the owner', observed({ desiredRunning: false })],
+        ['was out of the office', observed({ onVacation: true })],
+        ['was being moved to another plan', move(undefined, { phase: 'starting' })],
+        ['was being moved to another session', observed({ bindingMigration: true })],
+        ['was at a start-up screen the office was answering', observed({ session: { startupScreen: { label: 'a chooser', kind: 'first-run', answering: true } } })],
+        ['waited for the office to restart itself', held('DOCKER_CONTINUATION_RUNTIME_CHANGED')],
+      ])('that for two hours before %s is not stalled for that time', (_title, before) => {
+        const earlier = watch(EMPTY_SUPERVISOR_HISTORY, before, T, T + 2 * HOUR);
+        const from = T + 2 * HOUR;
+        const first = rollSupervisorHistory(earlier, classifyEmployee(starting), from);
+        expect(first).toMatchObject({ transitSince: from, transitOf: 'starting' });
+        expect(assessEmployee(starting, first, ON, from)).toMatchObject({ condition: 'starting', next: { action: null } });
+        expect(until(earlier, starting, from, stalled)).toBe(15 * MINUTE);
+      });
+
+      it('starts its fifteen minutes again with each new stretch: a flapping read never adds up', () => {
+        // Ten minutes starting, one healthy minute, starting again.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 10 * MINUTE);
+        history = watch(history, observed(), T + 10 * MINUTE, T + 11 * MINUTE);
+        expect(until(history, starting, T + 11 * MINUTE, stalled)).toBe(15 * MINUTE);
+        // Fourteen minutes starting, then a plan move for a minute, then starting again.
+        history = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 14 * MINUTE);
+        history = watch(history, observed({ bindingMigration: true }), T + 14 * MINUTE, T + 15 * MINUTE);
+        expect(until(history, starting, T + 15 * MINUTE, stalled)).toBe(15 * MINUTE);
+        // Five minutes starting and half a minute healthy, over and over for three hours: never stalled.
+        history = EMPTY_SUPERVISOR_HISTORY;
+        for (let now = T; now < T + 3 * HOUR; now += STEP) {
+          const seen = Math.floor((now - T) / STEP) % 11 === 10 ? observed() : starting;
+          history = rollSupervisorHistory(history, classifyEmployee(seen), now);
+          expect([now, stalled(assessEmployee(starting, history, ON, now))]).toEqual([now, false]);
+        }
+      });
+
+      it('that is seen without a break is stalled after fifteen minutes whatever the wait is called', () => {
+        // Two different waits of the same starting laptop are one run.
+        const history = watch(EMPTY_SUPERVISOR_HISTORY, held('DOCKER_CONTINUATION_UNCONFIRMED'), T, T + 10 * MINUTE);
+        expect(until(history, starting, T + 10 * MINUTE, stalled)).toBe(5 * MINUTE);
+      });
+    });
+
+    describe('an office start', () => {
+      it('keeps what paces the ladder and drops every clock of what was watched', () => {
+        const saved: SupervisorHistory = {
+          fingerprint: FAILED,
+          since: 5000,
+          healthySince: 6000,
+          transitSince: 7000,
+          transitOf: 'starting',
+          watchSince: 5000,
+          attempts: tried('rebuild-laptop', 1, 8000),
+          rebuilds: [8000],
+          lastAction: { action: 'rebuild-laptop', at: 8000, outcome: 'refused', detail: 'x' },
+        };
+        expect(resumeSupervisorHistory(saved)).toEqual({
+          fingerprint: FAILED,
+          since: 5000,
+          attempts: tried('rebuild-laptop', 1, 8000),
+          rebuilds: [8000],
+          lastAction: { action: 'rebuild-laptop', at: 8000, outcome: 'refused', detail: 'x' },
+        });
+        expect(resumeSupervisorHistory(EMPTY_SUPERVISOR_HISTORY)).toEqual(EMPTY_SUPERVISOR_HISTORY);
+      });
+
+      it('does not make an employee who is being attached again look stalled for the time the office was down', () => {
+        // Starting for ten minutes when the office went down; it is back three hours later.
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, starting, T, T + 10 * MINUTE);
+        const up = T + 3 * HOUR;
+        // What the saved clock would say, which is why it is not used:
+        expect(until(saved, starting, up, stalled)).toBe(0);
+        expect(until(resumeSupervisorHistory(saved), starting, up, stalled)).toBe(15 * MINUTE);
+        // A file an earlier office wrote, with a clock that names no condition, is not trusted either.
+        expect(until({ ...EMPTY_SUPERVISOR_HISTORY, transitSince: T }, starting, up, stalled)).toBe(15 * MINUTE);
+      });
+
+      it('does not count the time the office was down as healthy time', () => {
+        const spent = since(T, FAILED, { attempts: tried('rebuild-laptop', 2, T), healthySince: T + MINUTE });
+        const up = T + 3 * HOUR;
+        expect(rollSupervisorHistory(spent, classifyEmployee(observed()), up).attempts).toEqual({});
+        const resumed = rollSupervisorHistory(resumeSupervisorHistory(spent), classifyEmployee(observed()), up);
+        expect(resumed).toMatchObject({ healthySince: up, attempts: tried('rebuild-laptop', 2, T) });
+      });
+    });
+
+    describe('a code the office does not recognize', () => {
+      const held30 = (history: SupervisorHistory, from: number) => until(history, odd, from, rebuilds);
+
+      it('is watched for thirty minutes from when that code was first seen, whatever was seen before', () => {
+        expect(held30(EMPTY_SUPERVISOR_HISTORY, T)).toBe(30 * MINUTE);
+        // Two hours of another problem first.
+        expect(held30(watch(EMPTY_SUPERVISOR_HISTORY, failed, T, T + 2 * HOUR), T + 2 * HOUR)).toBe(30 * MINUTE);
+        // Two hours of a plan move first.
+        expect(held30(watch(EMPTY_SUPERVISOR_HISTORY, observed({ bindingMigration: true }), T, T + 2 * HOUR), T + 2 * HOUR)).toBe(30 * MINUTE);
+      });
+
+      it('must stand without a break: a code that cleared and came back is watched for thirty minutes again', () => {
+        // Twenty minutes, five healthy minutes (the same episode: the problem keeps when it was first seen), back.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 20 * MINUTE);
+        history = watch(history, observed(), T + 20 * MINUTE, T + 25 * MINUTE);
+        const back = rollSupervisorHistory(history, classifyEmployee(odd), T + 25 * MINUTE);
+        expect(back).toMatchObject({ since: T, watchSince: T + 25 * MINUTE });
+        expect(held30(history, T + 25 * MINUTE)).toBe(30 * MINUTE);
+        // The same when it read as starting for a minute in between.
+        history = watch(watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 29 * MINUTE), starting, T + 29 * MINUTE, T + 30 * MINUTE);
+        expect(held30(history, T + 30 * MINUTE)).toBe(30 * MINUTE);
+      });
+
+      it('is watched for thirty minutes again after an office start, however long it stood before', () => {
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 29 * MINUTE);
+        const up = T + 4 * HOUR;
+        const first = rollSupervisorHistory(resumeSupervisorHistory(saved), classifyEmployee(odd), up);
+        expect(first).toMatchObject({ since: T, watchSince: up });
+        expect(assessEmployee(odd, first, ON, up).next).toMatchObject({ action: null, at: up + 30 * MINUTE });
+        expect(held30(resumeSupervisorHistory(saved), up)).toBe(30 * MINUTE);
+      });
+    });
+
+    describe('a laptop whose pane the office cannot read', () => {
+      const heldInput = observed({
+        session: { inputHeld: true },
+        laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }, provider: 'running' },
+      });
+
+      it('is rebuilt two hours after that problem was first seen in an unbroken run', () => {
+        expect(until(EMPTY_SUPERVISOR_HISTORY, unread, T, rebuilds)).toBe(2 * HOUR);
+        // Ninety minutes, five healthy minutes, and the problem is back: two hours from then, not twenty-five minutes.
+        let history = watch(EMPTY_SUPERVISOR_HISTORY, unread, T, T + 90 * MINUTE);
+        history = watch(history, observed(), T + 90 * MINUTE, T + 95 * MINUTE);
+        expect(until(history, unread, T + 95 * MINUTE, rebuilds)).toBe(2 * HOUR);
+        // Another problem for three hours first: two hours from the first sight of this one.
+        expect(until(watch(EMPTY_SUPERVISOR_HISTORY, odd, T, T + 3 * HOUR), unread, T + 3 * HOUR, rebuilds)).toBe(2 * HOUR);
+      });
+
+      it('is not rebuilt at the first look after an office start: the two hours start again there', () => {
+        // The problem stood for five hours before the office went down, so the saved history is far past the bound.
+        const saved = watch(EMPTY_SUPERVISOR_HISTORY, unread, T, T + 5 * HOUR);
+        const up = T + 6 * HOUR;
+        const first = rollSupervisorHistory(resumeSupervisorHistory(saved), classifyEmployee(unread), up);
+        expect(first).toMatchObject({ since: T, watchSince: up });
+        expect(assessEmployee(unread, first, ON, up).next).toMatchObject({
+          action: null,
+          at: up + 2 * HOUR,
+          waitingFor: `a reading of the agent's terminal; if there is still none, the laptop is rebuilt at ${stamp(up + 2 * HOUR)}`,
+        });
+        expect(until(resumeSupervisorHistory(saved), unread, up, rebuilds)).toBe(2 * HOUR);
+      });
+
+      it('holds the same for a held terminal input, the laptop that has no terminal object after an office start', () => {
+        const FINGERPRINT = classifyEmployee(heldInput).fingerprint;
+        const saved = recordSupervisorAttempt(since(T, FINGERPRINT, { watchSince: T }), 'reconnect-viewer', T + 45_000, 'refused');
+        // Back three hours later, within the same round of steps: the one nudge is not repeated.
+        const up = T + 3 * HOUR;
+        // Used as it was saved, the bound would be met at the first look:
+        expect(until(saved, heldInput, up, rebuilds)).toBe(0);
+        const resumed = resumeSupervisorHistory(saved);
+        expect(until(resumed, heldInput, up, rebuilds)).toBe(2 * HOUR);
+        // A read inside the laptop that finds no agent is still acted on at once: that is a read, made now.
+        const empty = withLaptop(heldInput, { provider: 'exited', poolAlive: true });
+        expect(until(resumed, empty, up, rebuilds)).toBe(0);
+      });
+
+      it('measures the two shorter waits the same way', () => {
+        const up = T + 6 * HOUR;
+        // A read that cannot say what runs in the laptop: fifteen minutes before it counts as an agent.
+        const unknown = withLaptop(failed, { provider: 'unknown' }, { turn: 'idle', idleSince: 0 });
+        const savedUnknown = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, unknown, T, T + 5 * HOUR));
+        expect(until(savedUnknown, unknown, up, rebuilds)).toBe(15 * MINUTE);
+        // Work the agent left running: thirty minutes.
+        const left = withLaptop(failed, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true });
+        const savedLeft = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, left, T, T + 5 * HOUR));
+        expect(until(savedLeft, left, up, rebuilds)).toBe(30 * MINUTE);
+      });
     });
   });
 });

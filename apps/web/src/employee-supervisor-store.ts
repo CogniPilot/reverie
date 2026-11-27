@@ -29,6 +29,8 @@ const History = z
     since: time,
     healthySince: time.optional(),
     transitSince: time.optional(),
+    transitOf: z.string().max(100).optional(),
+    watchSince: time.optional(),
     attempts: z.partialRecord(action, z.object({ count: z.number().int().min(0).max(1000), lastAt: time }).strict()),
     rebuilds: z.array(time).max(8),
     lastAction: z

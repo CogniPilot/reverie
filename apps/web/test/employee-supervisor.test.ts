@@ -1522,3 +1522,82 @@ describe('EmployeeSupervisor: no path ends for good', () => {
     expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
   });
 });
+
+describe('EmployeeSupervisor: an office start does not carry over what an earlier office watched', () => {
+  const HOUR = 60 * MINUTE;
+  /** The office starts ten hours in; whatever is in the store was written before it went down. */
+  const START = 10 * HOUR;
+  const started = (target: Person, history: SupervisorHistory) => {
+    const w = world([target], { histories: new Map([[target.employee.id, history]]) });
+    w.state.now = START;
+    return w;
+  };
+
+  it('gives an employee who is being attached again fifteen minutes, whatever the saved clock says', async () => {
+    // Starting since the first hour, by the saved history. A read inside the laptop would find no agent yet.
+    const starting = hold(person('a'), 'DOCKER_CONTINUATION_BUSY');
+    const w = started(starting, {
+      fingerprint: '',
+      since: 0,
+      transitSince: HOUR,
+      transitOf: 'starting',
+      attempts: {},
+      rebuilds: [],
+    });
+    await w.run(14.5);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'starting' });
+    expect(w.state.reads.filter((read) => read === 'provider:a')).toEqual([]);
+    // Fifteen minutes after it was first seen starting by this office, and three more for the rebuild.
+    await w.run(3);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild', next: { action: 'rebuild-laptop' } });
+    await w.run(1);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+  });
+
+  it('gives a laptop whose pane cannot be read its two hours again, and still acts on a read made now', async () => {
+    const saved: SupervisorHistory = {
+      fingerprint: 'code:DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED',
+      since: HOUR,
+      watchSince: HOUR,
+      attempts: { 'reconnect-viewer': { count: 1, lastAt: 9 * HOUR } },
+      rebuilds: [],
+      lastAction: { action: 'reconnect-viewer', at: 9 * HOUR, outcome: 'refused', detail: 'start-unconfirmed' },
+    };
+    // Held for nine hours by the saved history; the office has no terminal object for it after its start.
+    const w = started(heldTerminal(person('a'), 'unknown'), saved);
+    await w.run(110);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({
+      since: HOUR,
+      waitingFor: expect.stringMatching(/^a reading of the agent's terminal; if there is still none, the laptop is rebuilt at/),
+      waitingUntil: START + 30_000 + 2 * HOUR,
+    });
+    // It was asked what runs in the laptop, so the wait is not blind to an empty one.
+    expect(w.state.reads.filter((read) => read === 'provider:a').length).toBeGreaterThan(0);
+    await w.run(11);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['terminal-input-held', 'agent-unreadable']]]);
+
+    const empty = heldTerminal(person('a'), 'unknown');
+    empty.provider = 'exited';
+    const now = started(empty, saved);
+    await now.run(1);
+    expect(now.state.proved).toEqual([['rebuild-laptop', []]]);
+  });
+
+  it('writes its clocks to the store and reads them back as a file', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'supervisor-clocks-')), 'employee-supervisor.json');
+    const history: SupervisorHistory = {
+      fingerprint: 'code:X',
+      since: 1000,
+      transitSince: 3000,
+      transitOf: 'starting',
+      watchSince: 2000,
+      attempts: {},
+      rebuilds: [],
+    };
+    await new EmployeeSupervisorStore(file).save(new Map([['a', history]]));
+    expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
+  });
+});
