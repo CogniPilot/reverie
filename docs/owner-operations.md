@@ -353,8 +353,10 @@ was first made, and lapses when it is not repeated):
 - `supervisorAutoRepair` is not switched off;
 - nothing the office itself runs is in flight for any employee, in the office
   or not: no open plan move, no laptop set-up, rebuild or limits repair, and
-  for a request of the supervisor also no step of its own and no step for the
-  shared pool. A restart would cut such an operation off, and for a plan move
+  no step for the shared pool that the supervisor is taking right now (the
+  start of the stopped anchor, the end of a recovery, the removal of a dead
+  anchor); for a request of the supervisor also no step of its own and no pool
+  step that is still to be taken. A restart would cut such an operation off, and for a plan move
   it would reset what the move has watched. `waitingFor` then reads “the
   office to restart itself once … has ended”;
 - it has not restarted itself within the last hour, nor twice within a day.
@@ -654,7 +656,10 @@ ID of the ext4 filesystem the two directories are on, in
 restart may come at any time, the records are made promptly: two laptops per
 thirty-second pass from the first pass after an office start, those of
 employees in the office first, so that every running laptop has its record
-within a few minutes. Every finished laptop is recorded alike, whether a
+within a few minutes. The records of a pass are made one after the other,
+never two helper containers at once; the pass waits five seconds for them and
+goes on, and no further record is started until they have ended, so a slow
+helper holds up neither the repair steps nor the limits check. Every finished laptop is recorded alike, whether a
 set-up, a rebuild or a plan move made it, and wherever its employee is. A
 laptop operation is recorded once and a new one (a rebuild, a plan move) again.
 An attempt that recorded nothing is tried again after 1, 5, 15 and 60 minutes
