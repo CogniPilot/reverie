@@ -27,6 +27,7 @@ import {
   type SupervisorFlags,
   type SupervisorHistory,
   type SupervisorObservation,
+  type SupervisorStoredHomeCause,
 } from '../src/employee-supervisor-policy.js';
 import { dockerRecoveryGuidance } from '../src/docker-recovery-guidance.js';
 import { describeStartupScreen } from '../src/session-first-run-screens.js';
@@ -2739,7 +2740,25 @@ describe('employee supervisor: after a host restart', () => {
     const renumbered = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'renumbered' });
     expect(renumbered.next.action).toBeNull();
     expect(renumbered.needsHuman).toMatch(/new device number.*acceptStorageRenumbering.*docker-storage\/device-approval/);
-    expect(renumbered.needsHuman).toMatch(/reads the home again about every ten minutes and rebuilds the laptop by itself/);
+    // Without a cause it is the plain case, and the sentence says exactly what settles it.
+    expect(renumbered.needsHuman).toMatch(
+      /The office holds no record of its own of that filesystem, and the company setting acceptStorageRenumbering is off, so the laptop is not rebuilt onto it\. Set acceptStorageRenumbering to true \(PUT \/api\/company\/settings\) and the office rebuilds the laptop at its next read, within ten minutes/
+    );
+    const reason = (cause: 'record-names-other-directories' | 'not-one-ext4-filesystem' | 'verifier-refused') =>
+      assess({
+        provider: 'no-laptop',
+        pool: 'up',
+        storedHome: 'renumbered',
+        storedHomeDetail: { cause, since: 0, reads: 1 },
+      }).needsHuman;
+    expect(reason('record-names-other-directories')).toMatch(/names other directories.*applies only where the office holds no record/);
+    expect(reason('record-names-other-directories')).not.toMatch(/Set acceptStorageRenumbering/);
+    expect(reason('not-one-ext4-filesystem')).toMatch(/not on one ext4 filesystem.*neither the office nor an approval can accept it/);
+    expect(reason('verifier-refused')).toMatch(/The verifier refused the filesystem it was asked to confirm/);
+    // A verifier image that can only compare refused the recorded directories: never rebuilt on, and it says so.
+    const changed = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'changed' });
+    expect(changed.next.action).toBeNull();
+    expect(changed.needsHuman).toMatch(/cannot say whether only the device number changed.*not rebuilt onto them.*recoveryHelperImageId/);
     const different = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'different' });
     expect(different.next.action).toBeNull();
     expect(different.needsHuman).toMatch(/not the one their laptop was built on.*will not start them on it/);
@@ -2750,6 +2769,34 @@ describe('employee supervisor: after a host restart', () => {
       action: null,
       waitingFor: "a read of the laptop's stored home directory",
     });
+    // A read that could not tell never allows the rebuild, however long it lasts. After half an hour of it
+    // without a break the cause is said; before that nobody is asked.
+    const unread = (cause: SupervisorStoredHomeCause, since: number, at: number) =>
+      assess(
+        { provider: 'no-laptop', pool: 'up', storedHome: 'unknown', storedHomeDetail: { cause, since, reads: 7 } },
+        at
+      );
+    for (const at of [20 * MINUTE, 29 * MINUTE]) {
+      expect(unread('verifier-timed-out', 0, at).next.action).toBeNull();
+      expect(unread('verifier-timed-out', 0, at).needsHuman).toBeUndefined();
+    }
+    for (const at of [30 * MINUTE, 6 * HOUR, 72 * HOUR]) {
+      const late = unread('verifier-timed-out', 0, at);
+      expect(late.next.action, String(at)).toBeNull();
+      expect(late.needsHuman).toMatch(/did not answer within thirty seconds, each time it was tried.*\(7 reads in a row since 1970-01-01 00:00 UTC\)/);
+      expect(late.needsHuman).toMatch(/rebuilds the laptop by itself once the read confirms the home/);
+    }
+    const causes: Array<[SupervisorStoredHomeCause, RegExp]> = [
+      ['verifier-image-missing', /is not in the container engine\. Load that image/],
+      ['verifier-lacks-command', /was built before the read of what is mounted existed/],
+      ['verifier-failed', /ended with an error the office does not recognize/],
+      ['receipt-unreadable', /the holder container is gone or was changed/],
+      ['laptop-unreadable', /the laptop container that the record names cannot be inspected/],
+      ['read-refused', /was not allowed to make the read/],
+    ];
+    for (const [cause, sentence] of causes) expect(unread(cause, 0, HOUR).needsHuman, cause).toMatch(sentence);
+    // The count is of an unbroken run: a finding that began ten minutes ago is still only waited for.
+    expect(unread('verifier-timed-out', 50 * MINUTE, HOUR).needsHuman).toBeUndefined();
     // Nothing was spent: the same observation with a verified home is rebuilt at once.
     expect(assess({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 72 * HOUR).next.action).toBe(
       'rebuild-laptop'

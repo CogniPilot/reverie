@@ -2,7 +2,7 @@ import { requireDockerEffectiveResourceProof } from './docker-contained-resource
 import { dockerPlanDestinationEnvironment, DockerPlanInitialReceipt, DockerPlanLiveReceipt } from './docker-plan-install-data.js';
 import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
-import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import type { DockerVerifierFailure, DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
@@ -312,6 +312,32 @@ function boundDestinationMatches(
     : raw;
   return isDeepStrictEqual(boxedOriginal(selected, subject, deployment, true), row.destination);
 }
+/** Why the stored directories of a stopped laptop could not be confirmed either way. */
+export type DockerStoredHomeCause =
+  | 'verifier-image-missing'
+  | 'verifier-lacks-command'
+  | 'verifier-timed-out'
+  | 'verifier-failed'
+  | 'receipt-unreadable'
+  | 'laptop-unreadable';
+/** See `DockerEmployeeEngine.stoppedStorage`. */
+export type DockerStoppedStorage =
+  | { readonly state: 'verified' | 'different' | 'changed' | 'not-stopped' | 'no-verifier' }
+  | { readonly state: 'renumbered'; readonly reason: DockerRenumberedReason }
+  | { readonly state: 'unconfirmed'; readonly cause: DockerStoredHomeCause };
+/** Why a new device number was not accepted. */
+export type DockerRenumberedReason =
+  | 'no-record-no-grant'
+  | 'record-names-other-directories'
+  | 'not-one-ext4-filesystem'
+  | 'verifier-refused';
+const VERIFIER_CAUSES: Readonly<Record<DockerVerifierFailure, DockerStoredHomeCause>> = {
+  'image-missing': 'verifier-image-missing',
+  'lacks-command': 'verifier-lacks-command',
+  'timed-out': 'verifier-timed-out',
+  refused: 'verifier-failed',
+  failed: 'verifier-failed',
+};
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
@@ -786,40 +812,64 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   /**
    * Whether the stored HOME and Nix directories of a finished laptop that is stopped are still the ones its storage
    * holder recorded. It is the same read a same-plan recovery makes before it reserves a move, and it changes
-   * nothing.
+   * nothing. There are three kinds of answer, and they are never mixed:
    *
+   * Confirmed the same:
    * - `verified`: the retained holder still holds them, or the pinned verifier confirmed them against the holder's
    *   receipt (under a new device number only when `stoppedReference` could accept that).
-   * - `renumbered`: the directories are otherwise unchanged on a new device number that was not accepted.
+   *
+   * Confirmed not the same:
+   * - `renumbered`: the directories are otherwise unchanged on a new device number that was not accepted, with
+   *   the reason.
    * - `different`: they are not the directories the laptop was built on.
-   * - `not-stopped`: the laptop is running, absent or not finished, so there is no stopped storage to compare.
-   * - `unverifiable`: nothing was found against the stored directories and they could not be confirmed either.
-   *   This office has no verifier, the holder's receipt can no longer be read, the verifier cannot report what is
-   *   mounted, or it saw the recorded directories on the recorded device and its confirmation then failed for
-   *   another reason. Only a finding (`renumbered`, `different`) says that the directories changed.
+   * - `changed`: the verifier refused the recorded reference, and the office could not read what is mounted to
+   *   say which of the two it is (the verifier image predates that read).
+   *
+   * Could not tell (`unconfirmed`, with the cause): the laptop or the holder's receipt could not be read, or the
+   * verifier gave no answer. Nothing is known, and nothing may be concluded from it.
+   *
+   * Beside these: `not-stopped` (the laptop is running or not finished, so there is no stopped storage to
+   * compare) and `no-verifier` (this office is configured with none, and the holder does not hold the directories
+   * any more).
    */
   async stoppedStorage(
     row: DockerEmployeeContinuationRecord,
     helper: DockerWorkerReattachHelper | undefined,
     current: () => void
-  ): Promise<'verified' | 'renumbered' | 'different' | 'not-stopped' | 'unverifiable'> {
+  ): Promise<DockerStoppedStorage> {
     current();
-    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-stopped';
-    const seen = await this.#destination(row, current, true).catch(() => undefined);
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return { state: 'not-stopped' };
+    let seen: DockerEmployeeInspect | null;
+    try {
+      seen = await this.#destination(row, current, true);
+    } catch {
+      current();
+      return helper ? { state: 'unconfirmed', cause: 'laptop-unreadable' } : { state: 'no-verifier' };
+    }
     current();
-    if (seen === undefined) return 'unverifiable';
-    if (seen === null || seen.State.Running) return 'not-stopped';
+    if (seen === null) return helper ? { state: 'unconfirmed', cause: 'laptop-unreadable' } : { state: 'no-verifier' };
+    if (seen.State.Running) return { state: 'not-stopped' };
     helper?.forgetVerdict(row);
     try {
       await this.planReplacementHome(row, current, 'stopped', helper ? { helper } : undefined);
-      return 'verified';
+      return { state: 'verified' };
     } catch {
       current();
-      const verdict = helper?.verdict(row);
-      if (verdict === 'different') return 'different';
-      // A new device number that nothing accepts, or one the verifier then refused.
-      if (verdict && verdict !== 'same' && verdict !== 'unobserved') return 'renumbered';
-      return 'unverifiable';
+      if (!helper) return { state: 'no-verifier' };
+      const verdict = helper.verdict(row),
+        failed = helper.failures(row);
+      if (verdict === 'different') return { state: 'different' };
+      if (verdict === 'renumbered') return { state: 'renumbered', reason: 'no-record-no-grant' };
+      if (verdict === 'renumbered-stale-record') return { state: 'renumbered', reason: 'record-names-other-directories' };
+      if (verdict === 'renumbered-unverifiable') return { state: 'renumbered', reason: 'not-one-ext4-filesystem' };
+      // The verifier ran and refused the reference it was given. That is an answer, and it is kept.
+      if (failed.verify === 'refused')
+        return verdict === 'same' || verdict === 'unobserved'
+          ? { state: 'changed' }
+          : { state: 'renumbered', reason: 'verifier-refused' };
+      // No verdict: the holder's receipt was not reached. A verdict and no refusal: the verifier gave no answer.
+      const failure = verdict === undefined ? undefined : (failed.verify ?? failed.observe);
+      return { state: 'unconfirmed', cause: failure ? VERIFIER_CAUSES[failure] : 'receipt-unreadable' };
     }
   }
   /** Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix

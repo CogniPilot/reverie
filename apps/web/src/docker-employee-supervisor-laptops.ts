@@ -74,6 +74,8 @@
  * a laptop that runs has no stopped storage to compare and is not held up by it.
  */
 import { randomUUID } from 'node:crypto';
+import type { DockerStoppedStorage } from './docker-employee-engine.js';
+import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
 import type { CompanyState } from './company-types.js';
@@ -103,6 +105,7 @@ import type {
   SupervisorPoolGuard,
   SupervisorPoolResult,
   SupervisorPoolStep,
+  SupervisorStoredHomeReading,
 } from './employee-supervisor.js';
 import {
   readParkedScreen,
@@ -112,6 +115,7 @@ import {
   type SupervisedScreenTerminal,
   type SupervisorObservation,
   type SupervisorPrecondition,
+  type SupervisorStoredHome,
   type SupervisorProviderPresence,
 } from './employee-supervisor-policy.js';
 
@@ -138,10 +142,9 @@ export interface DockerSupervisorLaptopDeps {
   /** Reads of an employee's stored HOME and Nix directories. Absent where the office has no laptops to verify. */
   readonly storage?: {
     /** See `DockerEmployeeEngine.stoppedStorage`. */
-    stopped(
-      row: DockerEmployeeContinuationRecord,
-      current: () => void
-    ): Promise<'verified' | 'renumbered' | 'different' | 'not-stopped' | 'unverifiable'>;
+    stopped(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerStoppedStorage>;
+    /** What the configured verifier image can do; `none` when the office is configured with no verifier. */
+    capability?(): 'none' | DockerVerifierCapability;
     /** Record which filesystem a running laptop's directories are on. See `DockerEmployeeEngine.rememberStorage`. */
     remember?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<boolean>;
   };
@@ -159,11 +162,10 @@ export interface DockerSupervisorLaptopDeps {
 }
 
 /** Findings about the stored home of a stopped laptop with which the rebuild step itself refuses. */
-const STORED_HOME_REFUSALS: Readonly<
-  Partial<Record<Awaited<ReturnType<DockerSupervisorLaptops['storedHome']>>, string>>
-> = {
+const STORED_HOME_REFUSALS: Readonly<Partial<Record<SupervisorStoredHome, string>>> = {
   renumbered: 'the stored home has a new device number that nothing accepts',
   different: 'the stored home is not the directory the laptop was built on',
+  changed: 'the stored home no longer matches what was recorded',
   unknown: 'the stored home could not be read',
 };
 /** What a read answers when this employee's record cannot stand for the pool; another one may. */
@@ -640,23 +642,29 @@ export class DockerSupervisorLaptops {
 
   /**
    * Whether the stored HOME and Nix directories of this employee's stopped, finished laptop are still the ones the
-   * laptop was built on. `unchecked`: there is no stopped, finished laptop to compare, or this office cannot
-   * verify one. `unknown`: the read itself was refused or failed.
+   * laptop was built on. `unchecked`: there is no stopped, finished laptop to compare, or this office is
+   * configured with no verifier at all. `unknown`: a verifier exists and could not tell, or the read itself was
+   * refused; the cause says which. Nothing that could not be confirmed is ever reported as `unchecked`.
    */
-  async storedHome(
-    employee: SupervisedEmployee,
-    guard: SupervisorGuard
-  ): Promise<'verified' | 'unchecked' | 'renumbered' | 'different' | 'unknown'> {
+  async storedHome(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorStoredHomeReading> {
     const row = this.#row(employee.id),
       storage = this.deps.storage;
-    if (!row || !storage) return 'unchecked';
+    if (!row || !storage) return { found: 'unchecked' };
     try {
       const authority = this.#authority(employee, guard);
-      const found = await storage.stopped(row, authority.require);
-      return found === 'not-stopped' || found === 'unverifiable' ? 'unchecked' : found;
+      const seen = await storage.stopped(row, authority.require);
+      if (seen.state === 'not-stopped' || seen.state === 'no-verifier') return { found: 'unchecked' };
+      if (seen.state === 'unconfirmed') return { found: 'unknown', cause: seen.cause };
+      if (seen.state === 'renumbered') return { found: 'renumbered', cause: seen.reason };
+      return { found: seen.state };
     } catch {
-      return 'unknown';
+      return { found: 'unknown', cause: 'read-refused' };
     }
+  }
+
+  /** What the office checks of a stored home with the verifier image it is configured with. */
+  storedHomeCheck(): 'none' | DockerVerifierCapability {
+    return this.deps.storage?.capability?.() ?? 'none';
   }
 
   /** Once for each laptop operation that this office process sees finished and running: record which filesystem
@@ -843,8 +851,10 @@ export class DockerSupervisorLaptops {
       }
       // The home the new laptop will be bound to is read once more, last, whatever led to this rebuild: a
       // finished laptop that is stopped is never replaced while its home path holds other directories.
-      const home = STORED_HOME_REFUSALS[await this.storedHome(employee, guard)];
-      if (home) return { outcome: 'refused', detail: home };
+      // Nothing was tried when it stops the step, so the attempt is given back: the next pass reads the home
+      // first and waits on what it finds, without spending a round's two rebuilds on a read that gave no answer.
+      const home = STORED_HOME_REFUSALS[(await this.storedHome(employee, guard)).found];
+      if (home) return { outcome: 'busy', detail: home };
       const result = await this.deps.absent.rebuild(
         employee.id,
         {

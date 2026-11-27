@@ -417,15 +417,39 @@ at the recorded paths are still the ones the laptop's storage holder recorded
 makes before it reserves a move, made by the pinned verifier, and it changes
 nothing.
 
-| Finding | What the supervisor does |
+There are three kinds of answer, and the office never takes one for another.
+
+| Answer | Finding | What the supervisor does |
+| --- | --- | --- |
+| Confirmed the same | The same directories on the same device number | rebuilds |
+| Confirmed the same | The same directories, a new device number, and the filesystem is the one the office itself recorded for this employee earlier | rebuilds |
+| Confirmed the same | The same directories, a new device number, the office holds no record of this employee's storage, `acceptStorageRenumbering` set | rebuilds, and records the filesystem for the next time |
+| Confirmed not the same | The same directories, a new device number, no record, the grant off | never rebuilds on it; reads again every ten minutes; `needsHuman` names the setting and the approval route |
+| Confirmed not the same | The same directories, a new device number, and the office's record names other directories | the same; the grant does not apply, because it is for the case without a record |
+| Confirmed not the same | These directories are on record on another filesystem | never rebuilds on it, with or without the grant |
+| Confirmed not the same | Another inode, owner or mode | never rebuilds on it; reads again every ten minutes |
+| Confirmed not the same | The verifier refused the recorded directories, and the image cannot read what is mounted to say why (`changed`) | never rebuilds on it; `needsHuman` names the image |
+| Could not tell | The helper did not answer in thirty seconds, twice in a row for each read; the configured image is not in the Engine; the holder container or its record of the directories is gone; the laptop container cannot be inspected | does not rebuild. Reads again after 1, 2 and 5 minutes and then every 10. After 30 minutes of the same cause without a break, `needsHuman` names that cause and the number of reads; the office goes on reading and rebuilds by itself once a read confirms the home |
+| Nothing to check with | No recovery helper image is configured at all (`recoveryHelperImageId` absent) | rebuilds by the recorded path, as before this check existed |
+
+A read that could not tell is never treated as a home that may be rebuilt on.
+That holds for the rebuild step as well, which makes the read once more itself:
+when it stops the step, nothing was tried and the attempt is given back, so a
+round's two rebuilds are not used up by a helper that timed out.
+
+What the office can check depends on the recovery helper image it is
+configured with, and that image is pinned separately from the office build. At
+office start the office probes the image once, writes one console line
+`[supervisor] stored home check: …`, and shows the result on every employee as
+`supervisor.storedHomeCheck`:
+
+| `storedHomeCheck` | What the office does with it |
 | --- | --- |
-| The same directories on the same device number | rebuilds |
-| The same directories, a new device number, and the filesystem is the one the office itself recorded for this employee earlier | rebuilds |
-| The same directories, a new device number, no such record, `acceptStorageRenumbering` set | rebuilds, and records the filesystem for the next time |
-| The same directories, a new device number, no record, no grant | does not rebuild; reads again every ten minutes |
-| Another inode, owner or mode | never rebuilds on it; reads again every ten minutes |
-| The read failed | waits and reads again at the next pass |
-| No verifier (`recoveryHelperImageId` not configured), a verifier that cannot report what is mounted, or a holder receipt that no longer exists | rebuilds by the recorded path, as before this check existed |
+| `full` | everything in the table above |
+| `compare-only` | the image was built before the read of what is mounted existed. An unchanged home is confirmed and rebuilt on. A changed one is refused by the verifier and never rebuilt on, but a new device number cannot be told from another directory, so neither the record nor the grant can accept it, and no record of a filesystem is made |
+| `image-missing` | the configured image is not in the Engine. Nothing can be confirmed; no stopped laptop is rebuilt until it is loaded |
+| `unknown` | the probe did not answer; the first read settles it |
+| `none` | no image is configured; nothing is checked |
 
 Device numbers of one filesystem can change across a restart. The office
 proves that case itself: about once per laptop and office process, while the
@@ -438,12 +462,13 @@ the filesystem ID on both mounts, twice, exactly as it does for an owner's
 approval. The record is only ever compared; it selects no path and authorizes
 no write.
 
-When the office holds no record yet, the owner's standing grant decides:
-`acceptStorageRenumbering` (`PUT /api/company/settings`, owner only, absent
-means off). With it the office accepts a new device number while both
-directories are otherwise unchanged on one ext4 filesystem. It never accepts
-another directory, a filesystem that is not ext4, or directories on two
-filesystems. The owner's approval for one laptop
+When the office holds no record of an employee's storage, the owner's standing
+grant decides: `acceptStorageRenumbering` (`PUT /api/company/settings`, owner
+only, absent means off). With it the office accepts a new device number while
+both directories are otherwise unchanged on one ext4 filesystem. The grant is
+for the case without a record only: a record that does not match what is
+mounted is never overridden by it. It never accepts another directory, a
+filesystem that is not ext4, or directories on two filesystems. The owner's approval for one laptop
 (`POST /api/company/employees/:id/docker-storage/device-approval`) works as
 before and takes precedence. The same rules serve a plan move that reads a
 stopped laptop.

@@ -183,8 +183,14 @@ the owner's standing grant (company setting `acceptStorageRenumbering`) covers
 it. The verifier then checks that reference, with the filesystem ID, on both
 reads, as it does for an approval. Another inode, owner or mode, a filesystem
 that is not ext4 and directories on two filesystems are never proposed. A
-verifier image that predates the command is used as before: an unchanged device
-verifies, a changed one needs the approval. See
+verifier image that predates the command can only compare: an unchanged device
+verifies, and a changed one is refused and needs the approval, because the
+office cannot read whether only the device number changed. The office probes
+the configured image for the command once at start and says what it found. A
+run of the verifier is given thirty seconds and a read is tried twice; a read
+that gave no answer is reported as such, with its cause, and is never taken
+for a confirmed home. The standing grant applies only where the office holds no
+record of the employee's storage. See
 [owner operations](owner-operations.md#the-stored-home-of-a-stopped-laptop) for
 what the supervisor does with each finding.
 

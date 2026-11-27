@@ -20,6 +20,7 @@ import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
+import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
 import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
 import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
@@ -681,6 +682,16 @@ export class DockerEmployeeRuntime {
   supervisorLaptops(): DockerSupervisorLaptops | undefined {
     const a = this.#attached;
     if (!a) return undefined;
+    // Once, at office start: what the office can check of a stopped laptop's stored home with the recovery helper
+    // image it is configured with. The same is shown on every employee (`supervisor.storedHomeCheck`).
+    const said = (capability: 'none' | DockerVerifierCapability) =>
+      console.log('[supervisor] stored home check: ' + DOCKER_STORED_HOME_CHECKS[capability]);
+    if (a.recoveryHelper)
+      void a.recoveryHelper
+        .probe()
+        .then(said)
+        .catch(() => said('unknown'));
+    else said('none');
     return new DockerSupervisorLaptops({
       company: a.company,
       store: a.store,
@@ -691,6 +702,7 @@ export class DockerEmployeeRuntime {
       absent: a.absent,
       storage: {
         stopped: (row, current) => a.engine.stoppedStorage(row, a.recoveryHelper, current),
+        capability: () => a.recoveryHelper?.capability() ?? 'none',
         ...(a.recoveryHelper
           ? {
               remember: (row: DockerEmployeeContinuationRecord, current: () => void) =>
@@ -1224,6 +1236,25 @@ export class DockerEmployeeRuntime {
     if (errors.length) throw new AggregateError(errors, 'Boxed runtime close is unconfirmed');
   }
 }
+/** What the office checks of a stopped laptop's stored home, by what its recovery helper image can do. */
+export const DOCKER_STORED_HOME_CHECKS: Readonly<Record<'none' | DockerVerifierCapability, string>> = {
+  none:
+    'no recovery helper image is configured (recoveryHelperImageId), so nothing is checked: a stopped laptop is ' +
+    'rebuilt by its recorded home path, as before this check existed.',
+  full:
+    'the recovery helper image reads what is mounted. A stopped laptop is rebuilt only on a confirmed home; a new ' +
+    'device number is told from another directory, and the filesystem of each running laptop is recorded.',
+  'compare-only':
+    'the recovery helper image was built before the read of what is mounted existed. An unchanged home is ' +
+    'confirmed. A changed one cannot be told apart (new device number or another directory) and is never rebuilt ' +
+    'on, and no record of a filesystem is made. Configure an image built from this office’s source.',
+  'image-missing':
+    'the configured recovery helper image is not in the container engine. Nothing can be confirmed, so no stopped ' +
+    'laptop is rebuilt until the image is loaded.',
+  unknown:
+    'the recovery helper image did not answer the probe. What it can do is found out at the first read; until a ' +
+    'home is confirmed no stopped laptop is rebuilt.',
+};
 export function openDockerEmployeeRuntime(directory: string): DockerEmployeeRuntime | undefined {
   const mode = process.env.REVERIE_RUNTIME_BACKEND;
   if (mode === undefined) return;

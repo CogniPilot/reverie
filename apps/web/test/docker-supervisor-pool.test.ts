@@ -9,6 +9,7 @@ import {
   type DockerContinuationAuthority,
 } from '../src/docker-employee-continuation.js';
 import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from '../src/docker-employee-supervisor-laptops.js';
+import type { DockerStoppedStorage } from '../src/docker-employee-engine.js';
 import type { SupervisedEmployee, SupervisorPoolGuard } from '../src/employee-supervisor.js';
 
 const employee = (digit: string, patch: Partial<SupervisedEmployee> = {}): SupervisedEmployee => ({
@@ -50,7 +51,7 @@ function world() {
     preview: undefined as ((id: string) => Error | undefined) | undefined,
     recover: undefined as ((id: string) => Status | Error) | undefined,
     resume: undefined as ((id: string) => Status | Error) | undefined,
-    stopped: 'verified' as 'verified' | 'renumbered' | 'different' | 'not-stopped' | 'unverifiable' | Error,
+    stopped: { state: 'verified' } as DockerStoppedStorage | Error,
     remembered: [] as string[],
     limits: 'unchanged' as 'unchanged' | 'restored' | Error,
     calls: [] as Array<[string, string, unknown?]>,
@@ -445,29 +446,53 @@ describe('the shared pool after a host restart', () => {
 describe('the stored home of a stopped laptop', () => {
   const guard = () => {};
   it.each([
-    ['verified', 'verified'],
-    ['renumbered', 'renumbered'],
-    ['different', 'different'],
-    ['not-stopped', 'unchecked'],
-    ['unverifiable', 'unchecked'],
-  ] as const)('reads %s as %s', async (found, expected) => {
+    [{ state: 'verified' }, { found: 'verified' }],
+    [{ state: 'different' }, { found: 'different' }],
+    [{ state: 'changed' }, { found: 'changed' }],
+    [
+      { state: 'renumbered', reason: 'no-record-no-grant' },
+      { found: 'renumbered', cause: 'no-record-no-grant' },
+    ],
+    // Nothing stopped to compare, and an office that is configured with no verifier at all.
+    [{ state: 'not-stopped' }, { found: 'unchecked' }],
+    [{ state: 'no-verifier' }, { found: 'unchecked' }],
+  ] as const)('reads %j as %j', async (seen, expected) => {
     const w = world();
-    w.state.stopped = found;
-    await expect(w.laptops.storedHome(A, guard)).resolves.toBe(expected);
+    w.state.stopped = seen;
+    await expect(w.laptops.storedHome(A, guard)).resolves.toEqual(expected);
     expect(w.made('stored-home')).toHaveLength(1);
   });
 
-  it('reads a failed or refused read as unknown, and an employee with no laptop record as nothing to compare', async () => {
+  it.each([
+    'verifier-image-missing',
+    'verifier-lacks-command',
+    'verifier-timed-out',
+    'verifier-failed',
+    'receipt-unreadable',
+    'laptop-unreadable',
+  ] as const)('never reads a check that could not tell (%s) as a home to rebuild on', async (cause) => {
+    const w = world();
+    w.state.stopped = { state: 'unconfirmed', cause };
+    await expect(w.laptops.storedHome(A, guard)).resolves.toEqual({ found: 'unknown', cause });
+    // The rebuild step, which makes the read itself, replaces nothing either, and spends no attempt on it.
+    await expect(w.laptops.rebuild(A, guard, ['stored-home'])).resolves.toEqual({
+      outcome: 'busy',
+      detail: 'the stored home could not be read',
+    });
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('reads a refused read as unknown, and an employee with no laptop record as nothing to compare', async () => {
     const w = world();
     w.state.stopped = new CompanyError('Recovery permission or employee binding changed', 409);
-    await expect(w.laptops.storedHome(A, guard)).resolves.toBe('unknown');
+    await expect(w.laptops.storedHome(A, guard)).resolves.toEqual({ found: 'unknown', cause: 'read-refused' });
     await expect(
       w.laptops.storedHome(A, () => {
         throw new Error('The office supervisor was switched off');
       })
-    ).resolves.toBe('unknown');
+    ).resolves.toEqual({ found: 'unknown', cause: 'read-refused' });
     w.state.records.delete(A.id);
-    await expect(w.laptops.storedHome(A, guard)).resolves.toBe('unchecked');
+    await expect(w.laptops.storedHome(A, guard)).resolves.toEqual({ found: 'unchecked' });
   });
 
   it('asks once for each running laptop that the office record which filesystem its home is on', async () => {
@@ -486,9 +511,9 @@ describe('the stored home of a stopped laptop', () => {
 describe('the rebuild step and the stored home', () => {
   const guard = () => {};
   it('reads the stored home itself, last, and rebuilds when nothing is found against it', async () => {
-    for (const found of ['verified', 'not-stopped', 'unverifiable'] as const) {
+    for (const found of ['verified', 'not-stopped', 'no-verifier'] as const) {
       const w = world();
-      w.state.stopped = found;
+      w.state.stopped = { state: found };
       // Whatever it was told had been proved: the read is its own.
       await expect(w.laptops.rebuild(A, guard, found === 'verified' ? ['stored-home'] : [])).resolves.toEqual({
         outcome: 'done',
@@ -499,27 +524,36 @@ describe('the rebuild step and the stored home', () => {
   });
 
   it.each([
-    ['renumbered', 'the stored home has a new device number that nothing accepts'],
-    ['different', 'the stored home is not the directory the laptop was built on'],
+    [
+      { state: 'renumbered', reason: 'no-record-no-grant' },
+      'the stored home has a new device number that nothing accepts',
+    ],
+    [{ state: 'different' }, 'the stored home is not the directory the laptop was built on'],
+    [{ state: 'changed' }, 'the stored home no longer matches what was recorded'],
   ] as const)(
-    'replaces no laptop whose stored home is %s, by whatever path the rebuild was reached',
+    'replaces no laptop whose stored home is %j, by whatever path the rebuild was reached, and spends no attempt',
     async (found, detail) => {
       for (const proved of [[], ['stored-home'], ['laptop-held', 'agent-unreadable']] as const) {
         const w = world();
         w.state.stopped = found;
-        await expect(w.laptops.rebuild(A, guard, proved)).resolves.toEqual({ outcome: 'refused', detail });
+        // Nothing was tried, so the attempt is given back: a round's two rebuilds are not used up by a read.
+        await expect(w.laptops.rebuild(A, guard, proved)).resolves.toEqual({ outcome: 'busy', detail });
         expect(w.made('rebuild')).toEqual([]);
       }
     }
   );
 
-  it('replaces no laptop whose stored home it could not read', async () => {
+  it('replaces no laptop whose stored home it was not allowed to read', async () => {
     const w = world();
     w.state.stopped = new CompanyError('Recovery permission or employee binding changed', 409);
     await expect(w.laptops.rebuild(A, guard, ['stored-home'])).resolves.toEqual({
-      outcome: 'refused',
+      outcome: 'busy',
       detail: 'the stored home could not be read',
     });
     expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('says what the office checks with the verifier image it is configured with', () => {
+    expect(world().laptops.storedHomeCheck()).toBe('none');
   });
 });

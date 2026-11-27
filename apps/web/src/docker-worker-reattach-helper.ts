@@ -8,6 +8,7 @@ import type { DockerEmployeeInspect } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
 import type { DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
+import { classifyDockerExecFailure } from './docker-exec-failure.js';
 
 type Directory = Readonly<{ dev: string; ino: string; uid: number; gid: number; mode: number }>;
 type Issuer = () => Readonly<{ instanceId: string; key: string }>;
@@ -51,9 +52,14 @@ export type DockerStorageFilesystemObservation = z.infer<typeof StorageFilesyste
  *   employee earlier.
  * - `renumbered-granted`: a new device number that the office cannot prove, accepted under the owner's standing
  *   grant (company setting `acceptStorageRenumbering`).
- * - `renumbered`: a new device number, neither proved nor granted.
+ * - `renumbered`: a new device number; the office holds no record of this employee's storage and no grant covers it.
+ * - `renumbered-stale-record`: a new device number; the office's record names other directories, so it proves
+ *   nothing and the grant, which is for the case without a record, does not apply.
+ * - `renumbered-unverifiable`: a new device number on something the verifier cannot confirm: not ext4, or the two
+ *   directories on two filesystems.
  * - `different`: not the directories the laptop was built on (another inode, owner or mode).
- * - `unobserved`: the verifier could not report what is mounted now.
+ * - `unobserved`: the verifier could not report what is mounted now. The recorded reference is put to it
+ *   unchanged, so it confirms an unchanged home and refuses everything else.
  * The first four are confirmed by the pinned verifier before anything is accepted; the verdict only says which
  * reference it was asked to confirm.
  */
@@ -63,8 +69,40 @@ export type DockerStoredHomeVerdict =
   | 'renumbered-proved'
   | 'renumbered-granted'
   | 'renumbered'
+  | 'renumbered-stale-record'
+  | 'renumbered-unverifiable'
   | 'different'
   | 'unobserved';
+
+/**
+ * Why one run of the pinned verifier gave no answer, as a closed class. Nothing the Engine or the verifier printed
+ * is kept.
+ * - `image-missing`: the configured image is not in the Engine.
+ * - `lacks-command`: the image does not have the command that was asked for (it was built before the command).
+ * - `timed-out`: the run did not answer in time, each time it was tried.
+ * - `refused`: the verifier ran and refused with one of its own codes: what is mounted is not what it was given.
+ * - `failed`: anything else.
+ */
+export type DockerVerifierFailure = 'image-missing' | 'lacks-command' | 'timed-out' | 'refused' | 'failed';
+
+/**
+ * What the configured verifier image can do, found by one probe at office start and kept current by every later
+ * run. `full`: it reports what is mounted, so a renumbered device can be told from another directory.
+ * `compare-only`: it was built before that read and can only confirm or refuse a reference it is given.
+ * `image-missing`: the image is not in the Engine, so it can confirm nothing. `unknown`: not probed yet, or the
+ * probe did not answer.
+ */
+export type DockerVerifierCapability = 'full' | 'compare-only' | 'image-missing' | 'unknown';
+
+class VerifierRunFailed extends Error {
+  constructor(readonly failure: DockerVerifierFailure) {
+    super('The pinned verifier gave no answer');
+  }
+}
+/** One run of the verifier may take this long. It is the longest the Engine port allows. */
+const VERIFIER_RUN_MS = 30_000;
+/** A read that only timed out or failed without a refusal is tried this often before it is given up. */
+const VERIFIER_READ_TRIES = 2;
 
 /** What stands where the owner's per-request approval stood: the office's own record, and the owner's standing grant. */
 export interface DockerStorageRenumbering {
@@ -89,6 +127,39 @@ export class DockerWorkerReattachHelper {
     home: Directory; nix: Directory; confirmations: number;
     identity: Parameters<DockerStorageIdentityJournal['remember']>[0];
   }>();
+  /** Why the last read of what is mounted, and the last confirmation of a reference, gave no answer, by laptop container. */
+  readonly #failures = new Map<string, { observe?: DockerVerifierFailure; verify?: DockerVerifierFailure }>();
+  #capability: DockerVerifierCapability = 'unknown';
+
+  /** What the configured image can do, as far as this office has found out. */
+  capability(): DockerVerifierCapability {
+    return this.#capability;
+  }
+
+  /**
+   * One probe of the configured image: is it in the Engine, and does it have the read of what is mounted. It
+   * mounts nothing and reads nothing of anyone's. A probe that gives no answer leaves the capability unknown, and
+   * the first real read settles it.
+   */
+  async probe(current: () => void = () => {}): Promise<DockerVerifierCapability> {
+    try {
+      await this.#run(['observe-storage-reference', '--help'], '65534:65534', [], current, undefined, VERIFIER_READ_TRIES);
+      this.#capability = 'full';
+    } catch (error) {
+      this.#learn(error instanceof VerifierRunFailed ? error.failure : 'failed');
+    }
+    return this.#capability;
+  }
+
+  #learn(failure: DockerVerifierFailure): void {
+    if (failure === 'image-missing') this.#capability = 'image-missing';
+    if (failure === 'lacks-command') this.#capability = 'compare-only';
+  }
+
+  /** Why the reads of this laptop's stored directories gave no answer, since `forgetVerdict`. */
+  failures(row: DockerEmployeeContinuationRecord): { observe?: DockerVerifierFailure; verify?: DockerVerifierFailure } {
+    return (row.destination && this.#failures.get(row.destination.containerId)) || {};
+  }
 
   approveStorage(row: DockerEmployeeContinuationRecord, input: unknown): void {
     const approval = StorageDeviceApproval.parse(input);
@@ -111,6 +182,7 @@ export class DockerWorkerReattachHelper {
   /** Before a new read: an earlier verdict says nothing about it. */
   forgetVerdict(row: DockerEmployeeContinuationRecord): void {
     this.#verdicts.delete(row.employeeId);
+    if (row.destination) this.#failures.delete(row.destination.containerId);
   }
 
   #decided(row: DockerEmployeeContinuationRecord, verdict: DockerStoredHomeVerdict): void {
@@ -124,7 +196,10 @@ export class DockerWorkerReattachHelper {
    * The owner's approval for this laptop comes first and is used exactly as before. Without one, and when the
    * stopped laptop is given, the office reads what is mounted now and accepts a new device number by itself only
    * when both directories are otherwise unchanged (inode, owner, mode) on one ext4 filesystem, and either the
-   * filesystem is the one the office recorded for this employee earlier, or the owner's standing grant covers it.
+   * filesystem is the one the office recorded for this employee earlier, or the office holds no record of this
+   * employee's storage at all and the owner's standing grant covers it. The grant is for the case without a record
+   * only: a record that does not match what is mounted is never overridden by it. A record that names these same
+   * directories on another filesystem says that the filesystem at the path is not the employee's.
    * In every other case the recorded reference is returned unchanged, so the verifier refuses whatever differs.
    * Nothing is accepted here: the verifier then checks the returned reference, with the filesystem ID, twice.
    */
@@ -166,14 +241,19 @@ export class DockerWorkerReattachHelper {
       pend(historical.home, historical.nix);
       return { observation: historical };
     }
-    const recorded = identity && historical.home.dev === historical.nix.dev
-      ? this.renumbering?.identity.read(row.employeeId) : undefined;
-    const proved = !!recorded && recorded.filesystemId === identity!.filesystemId &&
-      isDeepStrictEqual(recorded.home, identity!.home) && isDeepStrictEqual(recorded.nix, identity!.nix);
-    const granted = !proved && !!identity && historical.home.dev === historical.nix.dev &&
-      this.renumbering?.granted(row.owner) === true;
+    const single = !!identity && historical.home.dev === historical.nix.dev;
+    const recorded = this.renumbering?.identity.read(row.employeeId);
+    const sameDirectories = !!recorded && !!identity &&
+      isDeepStrictEqual(recorded.home, identity.home) && isDeepStrictEqual(recorded.nix, identity.nix);
+    // The office recorded these very directories on another filesystem: what is mounted is not that one.
+    if (sameDirectories && recorded!.filesystemId !== identity!.filesystemId) {
+      this.#decided(row, 'different');
+      return { observation: historical };
+    }
+    const proved = single && sameDirectories;
+    const granted = single && !recorded && this.renumbering?.granted(row.owner) === true;
     if (!proved && !granted) {
-      this.#decided(row, 'renumbered');
+      this.#decided(row, !single ? 'renumbered-unverifiable' : recorded ? 'renumbered-stale-record' : 'renumbered');
       return { observation: historical };
     }
     this.#decided(row, proved ? 'renumbered-proved' : 'renumbered-granted');
@@ -210,29 +290,70 @@ export class DockerWorkerReattachHelper {
     private readonly renumbering?: DockerStorageRenumbering
   ) {}
 
-  async #verify(args: string[], user: string, mounts: string[], current: () => void, input?: string): Promise<unknown> {
+  /**
+   * One run of the pinned verifier, with why it gave no answer when it gave none (`VerifierRunFailed`). A read that
+   * timed out or failed without a refusal of the verifier's own is repeated up to `tries` times: these runs only
+   * read, and a host that has just restarted is slow. A refusal and a missing command are answers and are not
+   * repeated. Limit diagnostics to the class: subprocess details and input never leave this method.
+   */
+  async #run(
+    args: string[], user: string, mounts: string[], current: () => void, input: string | undefined, tries: number
+  ): Promise<string> {
     current();
     if (!/^sha256:[0-9a-f]{64}$/.test(this.imageId) || !/^[1-9][0-9]{0,9}:[1-9][0-9]{0,9}$/.test(user))
       return refuse();
-    const raw = await this.command.run(['image', 'inspect', '--format', '{{json .Id}}', this.imageId]);
+    const raw = await this.command.run(['image', 'inspect', '--format', '{{json .Id}}', this.imageId]).catch(() => '');
     current();
-    if (raw.trim() !== JSON.stringify(this.imageId)) return refuse();
+    if (raw.trim() !== JSON.stringify(this.imageId)) {
+      this.#capability = 'image-missing';
+      throw new VerifierRunFailed('image-missing');
+    }
+    let failure: DockerVerifierFailure = 'failed';
+    for (let attempt = 0; attempt < tries; attempt++) {
+      try {
+        const output = await this.command.run([
+          'run', '--rm', '--pull=never', '--read-only', '--network=none', '--cap-drop=ALL',
+          '--security-opt=no-new-privileges', '--memory=32m', '--memory-swap=32m', '--pids-limit=8',
+          '--log-driver=none', '--user', user, '--entrypoint', executable,
+          ...(input === undefined ? [] : ['--interactive']),
+          ...mounts, this.imageId, ...args,
+        ], input, VERIFIER_RUN_MS);
+        current();
+        return output;
+      } catch (error) {
+        current();
+        const seen = classifyDockerExecFailure(error);
+        // The verifier exits with 2 for a command line it does not know, and with 1 and its own code for a refusal.
+        failure = seen.kind === 'helper-refused' ? 'refused'
+          : seen.kind === 'timed-out' ? 'timed-out'
+            : seen.kind === 'failed' && seen.exitCode === 2 ? 'lacks-command' : 'failed';
+        if (failure === 'refused' || failure === 'lacks-command') break;
+      }
+    }
+    throw new VerifierRunFailed(failure);
+  }
+
+  async #verify(
+    args: string[], user: string, mounts: string[], current: () => void, input?: string, tries = 1
+  ): Promise<unknown> {
     let output: string;
     try {
-      output = await this.command.run([
-        'run', '--rm', '--pull=never', '--read-only', '--network=none', '--cap-drop=ALL',
-        '--security-opt=no-new-privileges', '--memory=32m', '--memory-swap=32m', '--pids-limit=8',
-        '--log-driver=none', '--user', user, '--entrypoint', executable,
-        ...(input === undefined ? [] : ['--interactive']),
-        ...mounts, this.imageId, ...args,
-      ], input, 15_000);
-    } catch {
-      // Limit diagnostics to the operation. Never surface subprocess details or input.
-      return refuse();
+      output = await this.#run(args, user, mounts, current, input, tries);
+    } catch (error) {
+      if (error instanceof VerifierRunFailed) return refuse();
+      throw error;
     }
-    current();
     if (Buffer.byteLength(output) > 2048) return refuse();
     return parseBoxedConfigurationJson(output);
+  }
+
+  /** Keeps why a read of one laptop's stored directories gave no answer, and what that says about the image. */
+  #failed(containerId: string, read: 'observe' | 'verify', error: unknown): never {
+    const failure = error instanceof VerifierRunFailed ? error.failure : 'failed';
+    this.#failures.set(containerId, { ...this.#failures.get(containerId), [read]: failure });
+    this.#learn(failure);
+    if (error instanceof VerifierRunFailed) return refuse();
+    throw error;
   }
 
   /** The two bind sources of a laptop, mounted read-only where the verifier expects them. */
@@ -251,12 +372,21 @@ export class DockerWorkerReattachHelper {
   }
 
   /** What the two bind sources of a laptop are now: each directory and the filesystem it is on. Read-only. A
-   * verifier image that predates this read refuses, like any other failed run. */
+   * verifier image that predates this read refuses, and is not asked again: `failures` says why. */
   async observe(destination: DockerEmployeeInspect, current: () => void): Promise<DockerStorageFilesystemObservation> {
     const mounts = this.#referenceMounts(destination);
-    const parsed = StorageFilesystemObservation.safeParse(
-      await this.#verify(['observe-storage-reference'], destination.Config.User, mounts, current)
-    );
+    let output: string;
+    try {
+      if (this.#capability === 'compare-only') throw new VerifierRunFailed('lacks-command');
+      output = await this.#run(
+        ['observe-storage-reference'], destination.Config.User, mounts, current, undefined, VERIFIER_READ_TRIES
+      );
+    } catch (error) {
+      return this.#failed(destination.Id, 'observe', error);
+    }
+    this.#capability = 'full';
+    if (Buffer.byteLength(output) > 2048) return refuse();
+    const parsed = StorageFilesystemObservation.safeParse(parseBoxedConfigurationJson(output));
     return parsed.success ? parsed.data : refuse();
   }
 
@@ -267,13 +397,19 @@ export class DockerWorkerReattachHelper {
     filesystemId?: string
   ): Promise<unknown> {
     const expected = (value: Directory) => [value.dev, value.ino, value.uid, value.gid, value.mode].join(':');
-    const verified = await this.#verify(
-      ['verify-storage-reference', '--home', expected(seen.home), '--nix', expected(seen.nix),
-        ...(filesystemId === undefined ? [] : ['--filesystem-id', filesystemId])],
-      destination.Config.User,
-      this.#referenceMounts(destination),
-      current
-    );
+    const mounts = this.#referenceMounts(destination);
+    let output: string;
+    try {
+      output = await this.#run(
+        ['verify-storage-reference', '--home', expected(seen.home), '--nix', expected(seen.nix),
+          ...(filesystemId === undefined ? [] : ['--filesystem-id', filesystemId])],
+        destination.Config.User, mounts, current, undefined, VERIFIER_READ_TRIES
+      );
+    } catch (error) {
+      return this.#failed(destination.Id, 'verify', error);
+    }
+    if (Buffer.byteLength(output) > 2048) return refuse();
+    const verified = parseBoxedConfigurationJson(output);
     this.#confirmed(destination.Id, seen);
     return verified;
   }

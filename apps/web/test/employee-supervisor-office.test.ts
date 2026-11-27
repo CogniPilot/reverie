@@ -84,6 +84,7 @@ function office() {
     laptops: {
       glance: () => ({ record: { phase: 'ready', version: 2, operationId: 'op' }, bound: state.bound, policyApproved: true, templateOnRecord: true }),
       flightActive: () => state.flight,
+      storedHomeCheck: () => 'none' as const,
       read: async () => undefined,
       source: async () => 'stopped',
       provider: async () => 'absent',

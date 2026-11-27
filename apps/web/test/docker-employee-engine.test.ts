@@ -708,7 +708,10 @@ describe('retained published plan source after historical source deletion', () =
           reads++;
           expect(args.slice(-2)).toEqual(['--filesystem-id','9988']);
           expect(args).toContain('7:5:1000:100:448');
-          if (scenario === 'filesystem' && reads === 2) throw Error('BOXED_STORAGE_FILESYSTEM_CHANGED');
+          // The verifier's own refusal, as the client reports it: exit 1 and its code. A refusal is an answer and
+          // is not asked for a second time.
+          if (scenario === 'filesystem' && reads === 2)
+            throw Object.assign(new Error('Command failed: docker run\nBOXED_STORAGE_FILESYSTEM_CHANGED'), { code: 1 });
           return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null,
             home: { ...f.storage.home, dev: '7' }, nix: { ...f.storage.nix, dev: '7' } });
         }
@@ -2777,6 +2780,9 @@ describe('the stored home of a stopped laptop after a host restart', () => {
    * A finished laptop that is stopped, with its storage holder stopped as well. `mounted` is what is at the two bind
    * sources now; the fake verifier reports it and confirms only a reference that names exactly it.
    */
+  /** A failed `docker run`, as Node reports it: the command line, then what the client printed. */
+  const failed = (stderr: string, code: number | undefined, killed = false) =>
+    Object.assign(new Error('Command failed: docker run …\n' + stderr), { code, killed });
   async function restarted(options: { granted?: boolean; recorded?: Identity; oldVerifier?: boolean } = {}) {
     const f = await retainedStoppedFixture();
     f.holder().State = { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 };
@@ -2794,6 +2800,11 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       observed: 0,
       /** The verifier refuses its second confirmation. */
       changeBetweenReads: false,
+      /** The configured image is not in the Engine. */
+      imageMissing: false,
+      /** How many of the next runs give no answer in time. */
+      timeouts: 0,
+      runs: 0,
     };
     const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); }, {
       granted: () => state.granted,
@@ -2808,10 +2819,25 @@ describe('the stored home of a stopped laptop after a host restart', () => {
     const original = vi.mocked(f.command.run).getMockImplementation()!;
     const text = (value: { dev: string; ino: string; uid: number; gid: number; mode: number }) =>
       [value.dev, value.ino, value.uid, value.gid, value.mode].join(':');
-    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
-      if (args[0] === 'image' && args.at(-1) === image) return JSON.stringify(image);
+    vi.mocked(f.command.run).mockImplementation(async (args, input, _timeout) => {
+      if (args[0] === 'image' && args.at(-1) === image) {
+        if (state.imageMissing) throw failed('Error response from daemon: No such image', 1);
+        return JSON.stringify(image);
+      }
+      if (args[0] === 'run') {
+        state.runs++;
+        expect(_timeout).toBe(30_000);
+        if (state.timeouts > 0) {
+          state.timeouts--;
+          throw failed('', undefined, true);
+        }
+      }
+      if (args[0] === 'run' && args.includes('--help')) {
+        if (options.oldVerifier) throw failed("error: unrecognized subcommand 'observe-storage-reference'", 2);
+        return 'Report the identity of the two fixed read-only reference mounts';
+      }
       if (args[0] === 'run' && args.includes('observe-storage-reference')) {
-        if (options.oldVerifier) throw Error('unrecognized subcommand');
+        if (options.oldVerifier) throw failed("error: unrecognized subcommand 'observe-storage-reference'", 2);
         state.observed++;
         // The two bind sources of the laptop, read-only, and nothing else.
         expect(args.filter((value) => value.startsWith('type=bind,'))).toEqual([
@@ -2826,8 +2852,9 @@ describe('the stored home of a stopped laptop after a host restart', () => {
         const id = wanted.includes('--filesystem-id') ? wanted[wanted.indexOf('--filesystem-id') + 1] : undefined;
         const { home, nix, homeFilesystem, nixFilesystem } = state.mounted;
         const filesystem = id === undefined || [homeFilesystem, nixFilesystem].every((value) => value.ext4 && value.id === id);
-        if (wanted[1] !== text(home) || wanted[3] !== text(nix) || !filesystem) throw Error('BOXED_STORAGE_REFERENCE_CHANGED');
-        if (state.changeBetweenReads && state.verified.length === 2) throw Error('BOXED_STORAGE_FILESYSTEM_CHANGED');
+        if (wanted[1] !== text(home) || wanted[3] !== text(nix) || !filesystem)
+          throw failed('BOXED_STORAGE_REFERENCE_CHANGED', 1);
+        if (state.changeBetweenReads && state.verified.length === 2) throw failed('BOXED_STORAGE_FILESYSTEM_CHANGED', 1);
         return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null, home, nix });
       }
       return original(args, input);
@@ -2836,7 +2863,10 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       state.mounted.home.dev = dev;
       state.mounted.nix.dev = dev;
     };
-    const read = () => f.engine.stoppedStorage(f.row, helper, () => {});
+    const read = async () => {
+      const seen = await f.engine.stoppedStorage(f.row, helper, () => {});
+      return seen.state === 'unconfirmed' ? `unconfirmed:${seen.cause}` : seen.state === 'renumbered' ? `renumbered:${seen.reason}` : seen.state;
+    };
     return { f, state, helper, renumber, read };
   }
   const identity = (f: Awaited<ReturnType<typeof retainedStoppedFixture>>, device: string, filesystemId = '9988'): Identity => ({
@@ -2876,21 +2906,34 @@ describe('the stored home of a stopped laptop after a host restart', () => {
   it('does not accept a new device number that it cannot prove and that no grant covers', async () => {
     const w = await restarted();
     w.renumber('7');
-    await expect(w.read()).resolves.toBe('renumbered');
+    await expect(w.read()).resolves.toBe('renumbered:no-record-no-grant');
     expect(w.helper.verdict(w.f.row)).toBe('renumbered');
     // The recorded reference was put to the verifier unchanged, and it refused it.
     expect(w.state.verified).toEqual([['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448']]);
     expect(w.state.remembered).toEqual([]);
   });
 
-  it('does not take a record of another filesystem for proof', async () => {
+  it('takes a record of these directories on another filesystem as proof against the home, grant or not', async () => {
     const seed = await restarted();
-    const w = await restarted({ recorded: identity(seed.f, '4', '1234') });
-    w.renumber('7');
-    await expect(w.read()).resolves.toBe('renumbered');
-    const moved = await restarted({ recorded: { ...identity(seed.f, '4'), home: { ino: '88', uid: 1000, gid: 100, mode: 448 } } });
-    moved.renumber('7');
-    await expect(moved.read()).resolves.toBe('renumbered');
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: identity(seed.f, '4', '1234') });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('different');
+      expect(w.state.remembered).toEqual([]);
+    }
+  });
+
+  it('lets no grant override a record that names other directories: the grant is for the case without a record', async () => {
+    const seed = await restarted();
+    const stale = { ...identity(seed.f, '4'), home: { ino: '88', uid: 1000, gid: 100, mode: 448 } };
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: stale });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('renumbered:record-names-other-directories');
+      // Nothing was proposed to the verifier but the recorded reference, and the stale record stays as it is.
+      expect(w.state.verified).toEqual([['--home', '4:5:1000:100:448', '--nix', '4:6:1000:100:448']]);
+      expect(w.state.remembered).toEqual([]);
+    }
   });
 
   it('accepts an unproved new device number under the standing grant, and proves the next one itself', async () => {
@@ -2927,41 +2970,121 @@ describe('the stored home of a stopped laptop after a host restart', () => {
     const other = await restarted({ granted: true });
     other.renumber('7');
     other.state.mounted.homeFilesystem.ext4 = false;
-    await expect(other.read()).resolves.toBe('renumbered');
+    await expect(other.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
     const split = await restarted({ granted: true });
     split.state.mounted.home.dev = '7';
     split.state.mounted.nix.dev = '8';
-    await expect(split.read()).resolves.toBe('renumbered');
+    await expect(split.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
     const two = await restarted({ granted: true });
     two.renumber('7');
     two.state.mounted.nixFilesystem.id = '1';
-    await expect(two.read()).resolves.toBe('renumbered');
+    await expect(two.read()).resolves.toBe('renumbered:not-one-ext4-filesystem');
   });
 
   it('does not accept a renumbered reference that the verifier refuses on its second read', async () => {
     const w = await restarted({ granted: true });
     w.renumber('7');
     w.state.changeBetweenReads = true;
-    await expect(w.read()).resolves.toBe('renumbered');
+    await expect(w.read()).resolves.toBe('renumbered:verifier-refused');
     expect(w.state.remembered).toEqual([]);
   });
 
-  it('with a verifier that cannot report what is mounted, verifies an unchanged device and knows nothing about a changed one', async () => {
+  it('with a verifier image that predates the read of what is mounted, confirms an unchanged home and keeps its refusal of a changed one', async () => {
     const same = await restarted({ oldVerifier: true, granted: true });
     await expect(same.read()).resolves.toBe('verified');
     expect(same.helper.verdict(same.f.row)).toBe('unobserved');
-    const changed = await restarted({ oldVerifier: true, granted: true });
-    changed.renumber('7');
-    await expect(changed.read()).resolves.toBe('unverifiable');
-    expect(changed.state.remembered).toEqual([]);
+    expect(same.helper.capability()).toBe('compare-only');
+    // The old verifier refused the recorded reference. That is an answer: the home is not rebuilt on, whether the
+    // device number changed or the directory did. It cannot say which, and no grant can be applied to it.
+    for (const change of ['device', 'directory'] as const) {
+      const changed = await restarted({ oldVerifier: true, granted: true });
+      if (change === 'device') changed.renumber('7');
+      else changed.state.mounted.home.ino = '77';
+      await expect(changed.read(), change).resolves.toBe('changed');
+      expect(changed.state.remembered).toEqual([]);
+      // Once it is known that the image lacks the read, the read is not run again.
+      const runs = changed.state.runs;
+      await expect(changed.read()).resolves.toBe('changed');
+      expect(changed.state.runs - runs).toBe(1);
+    }
   });
 
-  it('knows nothing without a verifier, and compares nothing for a laptop that runs or is not finished', async () => {
+  it('finds out at the start what the configured image can do', async () => {
+    const full = await restarted();
+    await expect(full.helper.probe()).resolves.toBe('full');
+    const old = await restarted({ oldVerifier: true });
+    expect(old.helper.capability()).toBe('unknown');
+    await expect(old.helper.probe()).resolves.toBe('compare-only');
+    const missing = await restarted();
+    missing.state.imageMissing = true;
+    await expect(missing.helper.probe()).resolves.toBe('image-missing');
+    expect(missing.state.runs).toBe(0);
+    // A probe that gives no answer says nothing about the image.
+    const slow = await restarted();
+    slow.state.timeouts = 2;
+    await expect(slow.helper.probe()).resolves.toBe('unknown');
+    // The probe mounts nothing.
+    expect(vi.mocked(old.f.command.run).mock.calls.every(([args]) => !args.some((value) => value.startsWith('type=bind,')))).toBe(true);
+  });
+
+  it('cannot tell, and says why, when the verifier gives no answer: it never passes that off as a home to rebuild on', async () => {
+    // The configured image is not in the Engine.
+    const missing = await restarted({ granted: true });
+    missing.state.imageMissing = true;
+    await expect(missing.read()).resolves.toBe('unconfirmed:verifier-image-missing');
+    expect(missing.helper.capability()).toBe('image-missing');
+    // Every run times out, as on a host that has just restarted under load. Each read is tried twice first.
+    const slow = await restarted({ granted: true });
+    slow.state.timeouts = 99;
+    await expect(slow.read()).resolves.toBe('unconfirmed:verifier-timed-out');
+    expect(slow.state.runs).toBe(4);
+    // One timeout is not the end of a read: the second try answers.
+    const once = await restarted();
+    once.state.timeouts = 1;
+    await expect(once.read()).resolves.toBe('verified');
+    // The read of what is mounted answered and the comparison then gave none.
+    const half = await restarted();
+    const original = vi.mocked(half.f.command.run).getMockImplementation()!;
+    vi.mocked(half.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'run' && args.includes('verify-storage-reference')) throw failed('', 125);
+      return original(args, input, timeout);
+    });
+    await expect(half.read()).resolves.toBe('unconfirmed:verifier-failed');
+    expect(half.state.remembered).toEqual([]);
+  });
+
+  it('cannot tell when the holder, its receipt or the laptop can no longer be read', async () => {
+    const w = await restarted({ granted: true });
+    const original = vi.mocked(w.f.command.run).getMockImplementation()!;
+    // The holder's own record of the two directories is gone.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'logs') return '';
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:receipt-unreadable');
+    expect(w.state.observed).toBe(0);
+    // The holder container is gone.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === w.f.holder().Id) throw failed('No such container', 1);
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:receipt-unreadable');
+    // The laptop container that the record names cannot be inspected.
+    vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) throw failed('No such container', 1);
+      return original(args, input, timeout);
+    });
+    await expect(w.read()).resolves.toBe('unconfirmed:laptop-unreadable');
+  });
+
+  it('has nothing to check with when no verifier is configured, and compares nothing for a laptop that runs or is not finished', async () => {
     const w = await restarted();
-    await expect(w.f.engine.stoppedStorage(w.f.row, undefined, () => {})).resolves.toBe('unverifiable');
+    await expect(w.f.engine.stoppedStorage(w.f.row, undefined, () => {})).resolves.toEqual({ state: 'no-verifier' });
     w.f.observed.State = { ...w.f.observed.State, Running: true, Status: 'running', Pid: 4321 };
     await expect(w.read()).resolves.toBe('not-stopped');
-    await expect(w.f.engine.stoppedStorage({ ...w.f.row, phase: 'resources-issued' }, w.helper, () => {})).resolves.toBe('not-stopped');
+    await expect(w.f.engine.stoppedStorage({ ...w.f.row, phase: 'resources-issued' }, w.helper, () => {})).resolves.toEqual({
+      state: 'not-stopped',
+    });
     expect(w.state.observed).toBe(0);
   });
 

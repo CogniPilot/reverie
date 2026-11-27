@@ -53,6 +53,7 @@ import {
   type SupervisorPrecondition,
   type SupervisorProviderPresence,
   type SupervisorStoredHome,
+  type SupervisorStoredHomeCause,
   SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_POLICY,
   sharedPoolCode,
@@ -83,6 +84,11 @@ export interface SupervisorActionResult {
 /** Throws once the supervisor may no longer act for this employee. Every port effect rechecks it. */
 export type SupervisorGuard = () => void;
 
+/** One read of a stopped laptop's stored home: what was found, and why where the finding has a cause. */
+export interface SupervisorStoredHomeReading {
+  readonly found: SupervisorStoredHome;
+  readonly cause?: SupervisorStoredHomeCause;
+}
 /** The step a look at the shared pool calls for. */
 export type SupervisorPoolStep = 'recover-pool' | 'finish-pool-recovery' | 'reconcile-pool';
 /** What one look at the shared pool found, and how the one step it took ended, when it took one. */
@@ -180,7 +186,14 @@ export interface EmployeeSupervisorPorts {
     step?: SupervisorPoolStep
   ): Promise<SupervisorPoolResult>;
   /** A fresh read of the stored home of this employee's stopped laptop. Absent where the office cannot read one. */
-  readStoredHome?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorStoredHome>;
+  readStoredHome?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorStoredHomeReading>;
+  /**
+   * What the office checks of a stored home with the verifier image it is configured with: `full`, `compare-only`
+   * (an unchanged home is confirmed; a changed one cannot be told apart and is never rebuilt on), `image-missing`
+   * (nothing can be confirmed, so no stopped laptop is rebuilt), `unknown` (not found out yet) or `none` (no
+   * verifier is configured, and a stopped laptop is rebuilt by its recorded path).
+   */
+  storedHomeCheck?(): 'none' | 'full' | 'compare-only' | 'image-missing' | 'unknown';
   /**
    * One effect each. A port that is absent is a step this office cannot take. `proved` is what the policy asked to
    * be proved again for this step and still stood when it was issued; a step whose effect depends on it proves it
@@ -220,6 +233,8 @@ export interface EmployeeSupervisorLimits {
   readonly poolBackoffMs?: readonly number[];
   /** How long a finding that stops a rebuild for the stored home (renumbered, different) stands before it is read again. */
   readonly storedHomeReadMs?: number;
+  /** Wait after read N of a stored home that could not tell, before read N+1. The last value repeats. */
+  readonly storedHomeRetryMs?: readonly number[];
 }
 export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   actionsPerTick: 2,
@@ -231,6 +246,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   poolDwellMs: 60_000,
   poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000],
   storedHomeReadMs: 10 * 60_000,
+  storedHomeRetryMs: [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000],
 };
 /** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
 const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
@@ -244,7 +260,7 @@ const POOL_REPAIR_NOTE =
   '/api/company/employees/:id/docker-pool/cold-preview, then POST …/docker-pool/cold-recover, or POST ' +
   '…/docker-pool/cold-resume for a recovery that did not finish)';
 /** Findings about a stored home that stop a rebuild, and the one that says nothing was read. */
-const STORED_HOME_HELD = new Set<SupervisorStoredHome>(['renumbered', 'different', 'unknown']);
+const STORED_HOME_HELD = new Set<SupervisorStoredHome>(['renumbered', 'different', 'changed', 'unknown']);
 /** A limits check that found the employee busy is asked again this soon. */
 const LIMITS_BUSY_RETRY_MS = 60_000;
 
@@ -282,6 +298,8 @@ export interface SupervisorReport {
   readonly limits?: SupervisorLimitsReport;
   /** The office's last look at the shared pool, while no terminal is attached and it is looking. */
   readonly pool?: SupervisorPoolReport;
+  /** What the office checks of a stopped laptop's stored home with the verifier image it has. */
+  readonly storedHomeCheck?: ReturnType<NonNullable<EmployeeSupervisorPorts['storedHomeCheck']>>;
 }
 
 class SupervisorStopped extends Error {
@@ -322,7 +340,10 @@ export class EmployeeSupervisor {
   #poolLastStep = 0;
   #poolFlight?: Promise<void>;
   /** The last read of a stored home that stopped a rebuild or failed. Never one that allowed it. */
-  readonly #storedHome = new Map<string, { at: number; found: SupervisorStoredHome }>();
+  readonly #storedHome = new Map<
+    string,
+    { at: number; found: SupervisorStoredHome; cause?: SupervisorStoredHomeCause; since: number; reads: number }
+  >();
   readonly #resolved: Required<EmployeeSupervisorLimits>;
   readonly #startedAt: number;
   #flight?: Promise<void>;
@@ -829,15 +850,23 @@ export class EmployeeSupervisor {
     const stored = this.#storedHome.get(employee.id);
     // The same holds for a stored home that was found renumbered or different. What the office's own look at the
     // shared pool found is given to every assessment while it is looking.
+    const retry = this.#resolved.storedHomeRetryMs;
     const storedFresh =
       stored &&
-      now - stored.at < (stored.found === 'unknown' ? this.limits.idleReadMs : this.#resolved.storedHomeReadMs);
+      now - stored.at <
+        (stored.found === 'unknown'
+          ? (retry[Math.min(stored.reads, retry.length) - 1] ?? 0)
+          : this.#resolved.storedHomeReadMs);
+    const storedSeen = (entry: NonNullable<typeof stored>) => ({
+      storedHome: entry.found,
+      storedHomeDetail: { ...(entry.cause ? { cause: entry.cause } : {}), since: entry.since, reads: entry.reads },
+    });
     const withOccupied = (seen: SupervisorObservation): SupervisorObservation => ({
       ...seen,
       laptop: {
         ...seen.laptop,
         ...(occupied && now - occupied.at < this.limits.idleReadMs ? { provider: occupied.presence } : {}),
-        ...(storedFresh ? { storedHome: stored.found } : {}),
+        ...(storedFresh ? storedSeen(stored) : {}),
         ...(this.#pool ? { pool: this.#pool.pool } : {}),
       },
     });
@@ -877,12 +906,24 @@ export class EmployeeSupervisor {
       // Nothing runs in the laptop. Before it is replaced by one bound to the same home path, that path is read,
       // and the decision is taken again with what was found. The step reads it once more itself.
       const read = this.ports.readStoredHome?.bind(this.ports);
-      const found = read
-        ? await read(employee, this.#guard(employee, 'repair')).catch(() => 'unknown' as const)
-        : ('unchecked' as const);
-      if (STORED_HOME_HELD.has(found)) this.#storedHome.set(employee.id, { at: now, found });
+      const seen: SupervisorStoredHomeReading = read
+        ? await read(employee, this.#guard(employee, 'repair')).catch(() => ({
+            found: 'unknown' as const,
+            cause: 'read-refused' as const,
+          }))
+        : { found: 'unchecked' };
+      // The same finding for the same reason, read after read, keeps the time it was first found.
+      const same = stored && stored.found === seen.found && stored.cause === seen.cause;
+      const entry = {
+        at: now,
+        found: seen.found,
+        ...(seen.cause ? { cause: seen.cause } : {}),
+        since: same ? stored.since : now,
+        reads: same ? stored.reads + 1 : 1,
+      };
+      if (STORED_HOME_HELD.has(seen.found)) this.#storedHome.set(employee.id, entry);
       else this.#storedHome.delete(employee.id);
-      observed = { ...observed, laptop: { ...observed.laptop, storedHome: found } };
+      observed = { ...observed, laptop: { ...observed.laptop, ...storedSeen(entry) } };
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       if (!due(assessment) || !assessment.next.preconditions.includes('stored-home')) {
         this.#report(employee, assessment, history, now);
@@ -1019,6 +1060,9 @@ export class EmployeeSupervisor {
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
       ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
       ...(this.#pool && assessment.condition !== 'owner-stopped' ? { pool: this.#pool } : {}),
+      ...(this.ports.storedHomeCheck && assessment.condition !== 'owner-stopped'
+        ? { storedHomeCheck: this.ports.storedHomeCheck() }
+        : {}),
     };
     this.#reports.set(employee.id, report);
     // One console line when an employee starts to need a person, and one when that ends.

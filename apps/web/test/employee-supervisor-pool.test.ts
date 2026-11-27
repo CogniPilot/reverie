@@ -17,6 +17,7 @@ import type {
   SupervisorHistory,
   SupervisorObservation,
   SupervisorStoredHome,
+  SupervisorStoredHomeCause,
 } from '../src/employee-supervisor-policy.js';
 
 const SECOND = 1000;
@@ -31,6 +32,8 @@ interface Person {
   employee: SupervisedEmployee;
   laptop: Laptop;
   storedHome: SupervisorStoredHome;
+  /** Why, where the finding has a cause. */
+  storedHomeCause?: SupervisorStoredHomeCause;
   /** A hold of a laptop that still runs, as its read names it. */
   hold?: { code: string; allowedActions: string[] };
 }
@@ -199,13 +202,15 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
     },
     readStoredHome: async (employee) => {
       state.reads.push(`${at()}:home:${employee.id}`);
-      return find(employee).storedHome;
+      const row = find(employee);
+      return { found: row.storedHome, ...(row.storedHomeCause ? { cause: row.storedHomeCause } : {}) };
     },
     keepLimits: async (employee, guard) => {
       guard();
       state.kept.push(`${at()}:${employee.id}`);
       return { outcome: 'refused', detail: 'DOCKER_CONTINUATION_POOL_UNCONFIRMED' };
     },
+    storedHomeCheck: () => 'compare-only',
     keepPool,
     actions: {
       'resend-continuation': act('resend-continuation'),
@@ -491,16 +496,65 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
     expect(w.report('a').condition).toBe('healthy');
   });
 
-  it('waits when the home could not be read, and reads again at the next pass', async () => {
-    const w = box([person('a')]);
+  it('waits when it could not tell, reads again with a growing wait, and never rebuilds by the recorded path', async () => {
+    const w = box([person('a'), person('b')]);
     w.state.people[0]!.storedHome = 'unknown';
-    await w.run(5 * MINUTE);
-    expect(w.state.acts).toEqual([]);
+    w.state.people[0]!.storedHomeCause = 'verifier-timed-out';
+    await w.run(20 * MINUTE);
+    expect(w.state.acts.filter((line) => line.endsWith(':a'))).toEqual([]);
+    expect(w.report('b').condition).toBe('healthy');
     expect(w.report('a').waitingFor).toBe("a read of the laptop's stored home directory");
     expect(w.report('a').needsHuman).toBeUndefined();
+    // Read again after 1, 2, 5 and then every 10 minutes: not every pass, and never given up.
+    const reads = () =>
+      w.state.reads.filter((line) => line.endsWith(':home:a')).map((line) => Number(line.split(':')[0]));
+    const gaps = () =>
+      reads()
+        .slice(1)
+        .map((value, index) => value - reads()[index]!);
+    expect(gaps()).toEqual([60, 120, 300]);
+    // After half an hour of that, the report says exactly what is in the way. The office still reads, and still
+    // does not rebuild.
+    await w.run(20 * MINUTE);
+    expect(w.state.acts.filter((line) => line.endsWith(':a'))).toEqual([]);
+    expect(w.report('a').needsHuman).toMatch(
+      /cannot tell whether this employee's home is still the one their laptop was built on, so it does not rebuild the laptop: the read by the recovery helper did not answer within thirty seconds, each time it was tried/
+    );
+    expect(w.report('a').needsHuman).toMatch(/\(\d+ reads in a row since /);
+    await w.run(6 * 60 * MINUTE);
+    expect(w.state.acts.filter((line) => line.endsWith(':a'))).toEqual([]);
+    expect(reads().length).toBeGreaterThan(35);
+    expect(new Set(gaps().slice(3))).toEqual(new Set([600]));
+    // Nothing of the ladder was spent on it.
+    expect(w.state.histories.get('a')?.attempts['rebuild-laptop']).toBeUndefined();
+    // The read answers: the laptop is rebuilt by the office, and nobody is asked any more.
     w.state.people[0]!.storedHome = 'verified';
-    await w.run(2 * MINUTE);
-    expect(w.state.acts.map((line) => line.split(':')[1])).toContain('rebuild-laptop');
+    delete w.state.people[0]!.storedHomeCause;
+    await w.run(15 * MINUTE);
+    expect(w.report('a').condition).toBe('healthy');
+    expect(w.report('a').needsHuman).toBeUndefined();
+  });
+
+  it('names the cause of a read that could not tell, and starts the count again when the cause changes', async () => {
+    const w = box([person('a')]);
+    w.state.people[0]!.storedHome = 'unknown';
+    w.state.people[0]!.storedHomeCause = 'verifier-image-missing';
+    await w.run(45 * MINUTE);
+    expect(w.report('a').needsHuman).toMatch(/recoveryHelperImageId\) is not in the container engine/);
+    w.state.people[0]!.storedHomeCause = 'receipt-unreadable';
+    await w.run(12 * MINUTE);
+    // A new cause is a new finding: it is waited for first.
+    expect(w.report('a').needsHuman).toBeUndefined();
+    await w.run(40 * MINUTE);
+    expect(w.report('a').needsHuman).toMatch(/the storage holder of this laptop, or the holder's own record/);
+    expect(w.state.acts).toEqual([]);
+  });
+
+  it('shows on every employee what the office checks with the verifier image it has', async () => {
+    const w = box([person('a', 'attached')]);
+    w.state.anchor = 'running';
+    await w.run(MINUTE);
+    expect(w.report('a').storedHomeCheck).toBe('compare-only');
   });
 });
 

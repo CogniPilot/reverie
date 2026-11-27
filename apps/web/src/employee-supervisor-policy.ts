@@ -87,6 +87,11 @@ export interface SupervisorPolicy {
    * problem has stood this long.
    */
   readonly blindRebuildMs: number;
+  /**
+   * A stored home the office could not read is waited for and read again. Once it has not been readable for this
+   * long without a break, the report says what is needed; the office still never rebuilds by the recorded path.
+   */
+  readonly storedHomeUnreadMs: number;
 }
 
 const SECOND = 1000;
@@ -213,6 +218,7 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
   ladderRestartMs: 6 * 60 * MINUTE,
   unrecognizedAfterMs: 30 * MINUTE,
   blindRebuildMs: 2 * 60 * MINUTE,
+  storedHomeUnreadMs: 30 * MINUTE,
 };
 
 /** The two owner switches. Both off means the supervisor only describes what it sees. */
@@ -285,9 +291,29 @@ export const SUPERVISOR_OCCUPIED_PROOFS: readonly SupervisorPrecondition[] = [
  * recorded. `verified`: the same directories (under a new device number only when the office could prove or was
  * granted that). `unchecked`: there is no stopped, finished laptop to compare, or this office has no verifier.
  * `renumbered`: unchanged directories on a device number that nothing accepts. `different`: other directories.
- * `unknown`: the read failed.
+ * `changed`: the verifier refused the recorded directories, and the office could not read whether only the device
+ * number changed. `unknown`: the office could not tell. It is never taken for `verified` or `unchecked`.
+ *
+ * Three kinds of answer follow from these and are never mixed. Confirmed the same (`verified`): the laptop is
+ * rebuilt. Confirmed not the same (`renumbered`, `different`, `changed`): it is never rebuilt on what is there.
+ * Could not tell (`unknown`): the office waits and reads again. `unchecked` is the office that is configured
+ * with no verifier at all, which rebuilds by the recorded path as it did before any check existed.
  */
-export type SupervisorStoredHome = 'verified' | 'unchecked' | 'renumbered' | 'different' | 'unknown';
+export type SupervisorStoredHome = 'verified' | 'unchecked' | 'renumbered' | 'different' | 'changed' | 'unknown';
+
+/** Why a stored home was found `renumbered`, or why the read could not tell (`unknown`). A closed set. */
+export type SupervisorStoredHomeCause =
+  | 'no-record-no-grant'
+  | 'record-names-other-directories'
+  | 'not-one-ext4-filesystem'
+  | 'verifier-refused'
+  | 'verifier-image-missing'
+  | 'verifier-lacks-command'
+  | 'verifier-timed-out'
+  | 'verifier-failed'
+  | 'receipt-unreadable'
+  | 'laptop-unreadable'
+  | 'read-refused';
 
 /** Everything the office can read about one employee, already reduced to plain values. */
 export interface SupervisorObservation {
@@ -380,6 +406,15 @@ export interface SupervisorObservation {
     readonly pool?: 'up' | 'down' | 'unknown' | 'none';
     /** A fresh read of the stopped laptop's stored directories. Only made before a rebuild is decided. */
     readonly storedHome?: SupervisorStoredHome;
+    /**
+     * With `storedHome`: why (`cause`), since when the office has found exactly this without a break (`since`),
+     * and how many reads in a row found it (`reads`).
+     */
+    readonly storedHomeDetail?: {
+      readonly cause?: SupervisorStoredHomeCause;
+      readonly since: number;
+      readonly reads: number;
+    };
     /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
     readonly rebuildPending?: boolean;
   };
@@ -1584,12 +1619,14 @@ function rebuildGate(
   if (provider === 'no-laptop' && observed.laptop.poolAlive === false && !poolUsable(observed))
     return { kind: 'wait', waitingFor: POOL_WAIT };
   // A finding that stops the rebuild is known without asking again what runs in the laptop.
-  const stored = observed.laptop.storedHome;
-  if (stored !== undefined && storedHomeGate(stored).kind !== 'ok') return storedHomeGate(stored);
+  const stored = observed.laptop.storedHome,
+    home = (found: SupervisorStoredHome | undefined) =>
+      storedHomeGate(found, observed.laptop.storedHomeDetail, now, policy);
+  if (stored !== undefined && home(stored).kind !== 'ok') return home(stored);
   if (provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
   // Only a finished laptop that is stopped has a stored home to compare with what its holder recorded.
   const finished = ['ready', 'provider-issued'].includes(observed.laptop.record?.phase ?? '');
-  const allowed: Gate = provider === 'no-laptop' && finished ? storedHomeGate(stored) : { kind: 'ok' };
+  const allowed: Gate = provider === 'no-laptop' && finished ? home(stored) : { kind: 'ok' };
   return allowed.kind === 'ok' && stoppedFromOutside(observed) ? { ...allowed, uncounted: true } : allowed;
 }
 
@@ -1617,13 +1654,69 @@ function stoppedFromOutside(observed: SupervisorObservation): boolean {
   return observed.laptop.provider === 'no-laptop' && holderStopped(observed);
 }
 
-const STORED_HOME_RENUMBERED =
-  "The filesystem this employee's home is on has a new device number since their laptop was built, and the office " +
-  'holds no earlier record of that filesystem to prove it is the same one. It reads the home again about every ' +
-  'ten minutes and rebuilds the laptop by itself once this is settled. To settle it, either set the company ' +
-  'setting acceptStorageRenumbering (PUT /api/company/settings), which accepts a new device number while both ' +
-  'recorded directories are otherwise unchanged, or approve this one laptop: POST ' +
-  '/api/company/employees/:id/docker-storage/device-approval.';
+const STORED_HOME_REREAD =
+  'The office reads the home again about every ten minutes and rebuilds the laptop by itself once ';
+const APPROVE_ONE_LAPTOP = 'approve this one laptop: POST /api/company/employees/:id/docker-storage/device-approval';
+const STORED_HOME_RENUMBERED_FACT =
+  "The filesystem this employee's home is on has a new device number since their laptop was built. Both recorded " +
+  'directories are otherwise unchanged (inode, owner, mode). ';
+/** Why a new device number is not accepted, and exactly what settles it. */
+const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
+  'no-record-no-grant':
+    STORED_HOME_RENUMBERED_FACT +
+    'The office holds no record of its own of that filesystem, and the company setting acceptStorageRenumbering is ' +
+    'off, so the laptop is not rebuilt onto it. Set acceptStorageRenumbering to true (PUT /api/company/settings) ' +
+    'and the office rebuilds the laptop at its next read, within ten minutes; or ' +
+    APPROVE_ONE_LAPTOP +
+    '.',
+  'record-names-other-directories':
+    STORED_HOME_RENUMBERED_FACT +
+    "The office's own record of this employee's storage names other directories, so it proves nothing here, and " +
+    'acceptStorageRenumbering applies only where the office holds no record. To accept this home, ' +
+    APPROVE_ONE_LAPTOP +
+    '. ' +
+    STORED_HOME_REREAD +
+    'it is approved.',
+  'not-one-ext4-filesystem':
+    STORED_HOME_RENUMBERED_FACT +
+    'They are not on one ext4 filesystem, which is the only case the verifier can confirm under a new device ' +
+    'number, so neither the office nor an approval can accept it. To accept the directories that are there: ' +
+    REBUILD_BY_HAND,
+  'verifier-refused':
+    STORED_HOME_RENUMBERED_FACT +
+    'The verifier refused the filesystem it was asked to confirm: it changed between two reads, or it is not the ' +
+    'one that was named. ' +
+    STORED_HOME_REREAD +
+    'the verifier confirms it.',
+};
+const STORED_HOME_CHANGED =
+  "The directories at this employee's home path no longer match what was recorded when their laptop was built, and " +
+  'the recovery helper image this office is configured with cannot say whether only the device number changed: it ' +
+  'was built before that read existed. The laptop is not rebuilt onto them. Configure the office with a recovery ' +
+  'helper image built from its own source (recoveryHelperImageId), or ' +
+  APPROVE_ONE_LAPTOP +
+  '. ' +
+  STORED_HOME_REREAD +
+  'the recorded directories are confirmed.';
+/** What is needed once the office has not been able to read a stored home for `storedHomeUnreadMs`, by cause. */
+const STORED_HOME_UNREAD: Readonly<Record<string, string>> = {
+  'verifier-image-missing':
+    'the recovery helper image this office is configured with (recoveryHelperImageId) is not in the container ' +
+    'engine. Load that image, or configure the office with one that is loaded',
+  'verifier-lacks-command':
+    'the recovery helper image this office is configured with was built before the read of what is mounted ' +
+    'existed, and gave no answer to the comparison either. Configure the office with a recovery helper image ' +
+    'built from its own source (recoveryHelperImageId)',
+  'verifier-timed-out':
+    'the read by the recovery helper did not answer within thirty seconds, each time it was tried. The host is ' +
+    'too busy for it, or the container engine does not start the helper',
+  'verifier-failed': 'the recovery helper ended with an error the office does not recognize',
+  'receipt-unreadable':
+    "the storage holder of this laptop, or the holder's own record of the two directories, can no longer be " +
+    'read: the holder container is gone or was changed, so there is nothing to compare the home with',
+  'laptop-unreadable': 'the laptop container that the record names cannot be inspected, so its mounts are not known',
+  'read-refused': 'the office was not allowed to make the read for this employee',
+};
 const STORED_HOME_DIFFERENT =
   "The directory at this employee's home path is not the one their laptop was built on (another inode, owner or " +
   'mode), which is what a different or missing disk at that path looks like. The office will not start them on ' +
@@ -1633,17 +1726,42 @@ const STORED_HOME_DIFFERENT =
 
 /**
  * A rebuilt laptop is bound to the home path of the laptop it replaces. Before a stopped laptop is rebuilt, the
- * office reads whether that path still holds the recorded directory. Only a positive finding stops the rebuild,
- * and it is read again later: nothing here is final.
+ * office reads whether that path still holds the recorded directory. The rebuild goes ahead on a confirmed home
+ * and in an office that has no verifier at all. A finding against the home stops it, and so does a read that
+ * could not tell. Each is read again later: nothing here is final.
  *
  * This gate is asked for the laptop a fresh read found stopped. A rebuild that reaches a stopped laptop by another
  * way (a laptop the office could not read for hours is rebuilt as one an agent may run in) meets the same read in
  * the step itself (`DockerSupervisorLaptops.rebuild`), which makes it for every stopped, finished laptop.
  */
-function storedHomeGate(stored: SupervisorStoredHome | undefined): Gate {
-  if (stored === 'renumbered') return { kind: 'human', needsHuman: STORED_HOME_RENUMBERED };
+function storedHomeGate(
+  stored: SupervisorStoredHome | undefined,
+  detail: SupervisorObservation['laptop']['storedHomeDetail'],
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
+  if (stored === 'renumbered')
+    return {
+      kind: 'human',
+      needsHuman: STORED_HOME_RENUMBERED[detail?.cause ?? ''] ?? STORED_HOME_RENUMBERED['no-record-no-grant']!,
+    };
   if (stored === 'different') return { kind: 'human', needsHuman: STORED_HOME_DIFFERENT };
-  if (stored === 'unknown') return { kind: 'wait', waitingFor: "a read of the laptop's stored home directory" };
+  if (stored === 'changed') return { kind: 'human', needsHuman: STORED_HOME_CHANGED };
+  if (stored === 'unknown') {
+    // Could not tell. It is waited for and read again, and never taken for a home that may be rebuilt on. Once
+    // that has lasted, the cause is said: the alternative would be to risk an employee's home.
+    const lasted = detail && now - detail.since >= policy.storedHomeUnreadMs;
+    if (!lasted) return { kind: 'wait', waitingFor: "a read of the laptop's stored home directory" };
+    return {
+      kind: 'human',
+      needsHuman:
+        `The office cannot tell whether this employee's home is still the one their laptop was built on, so it does ` +
+        `not rebuild the laptop: ${STORED_HOME_UNREAD[detail.cause ?? ''] ?? 'the read gave no answer'} ` +
+        `(${detail.reads} reads in a row since ${when(detail.since)}). It goes on reading, at most every ten minutes, ` +
+        'and rebuilds the laptop by itself once the read confirms the home. To rebuild onto the directory that is ' +
+        `there without that proof: ${REBUILD_BY_HAND}`,
+    };
+  }
   // Not read yet, or read and nothing found against it: the driver reads it where it has not, and the step is
   // told that it was asked for and reads it once more itself.
   return { kind: 'ok', preconditions: ['stored-home'] };

@@ -364,6 +364,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
             step?: SupervisorPoolStep
           ) => laptops.keepPool(candidates, guard, step),
           readStoredHome: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.storedHome(employee, guard),
+          storedHomeCheck: () => laptops.storedHomeCheck(),
         }
       : {}),
     actions: {
