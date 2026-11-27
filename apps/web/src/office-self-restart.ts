@@ -157,14 +157,29 @@ export class OfficeSelfRestart {
     );
   }
 
-  /** Why no restart may run yet by the record of earlier ones, or undefined. */
-  #paced(times: readonly number[], now: number): string | undefined {
+  /**
+   * The earliest time at which the record of earlier restarts allows the next one (at most two a day, an hour
+   * apart), or undefined while one may run now. The supervisor asks it before it waits for a restart: one that the
+   * limits forbid for the rest of the day is no restart to wait for.
+   */
+  nextAllowedAt(): number | undefined {
+    const now = this.deps.now(),
+      next = this.#next(this.deps.load(), now);
+    return next > now ? next : undefined;
+  }
+
+  #next(times: readonly number[], now: number): number {
     const today = times.filter((at) => now - at < DAY && at <= now);
     const last = today.at(-1);
-    const next = Math.max(
+    return Math.max(
       today.length >= this.limits.perDay ? today[today.length - this.limits.perDay]! + DAY : 0,
       last === undefined ? 0 : last + this.limits.spacingMs
     );
+  }
+
+  /** Why no restart may run yet by the record of earlier ones, or undefined. */
+  #paced(times: readonly number[], now: number): string | undefined {
+    const next = this.#next(times, now);
     return next > now
       ? `the office to restart itself: it already did and that did not settle it, so the next restart is at ${when(next)}`
       : undefined;

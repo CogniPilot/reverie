@@ -206,8 +206,12 @@ fault in every laptop:
   it cannot read: the fault is taken to be the office's own. After thirty
   minutes of that the office asks for its own restart
   ([below](#the-office-restarting-itself)). Only when a restart was tried
-  within the last six hours, or this office does not restart itself, is the
-  cause treated as one that several employees share.
+  within the last six hours, this office does not restart itself, or its
+  limits (two restarts a day, an hour apart) forbid one now, is the cause
+  treated as one that several employees share. Without the last of these, an
+  office that had restarted itself twice in a day rebuilt nothing for a pane it
+  cannot read from the seventh hour after the later restart to the end of
+  that day.
 
   “Reads none of its laptops” has one meaning. The container engine reports
   at least two laptops running, the office can attach to or read none of

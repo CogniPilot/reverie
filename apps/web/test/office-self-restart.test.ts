@@ -397,3 +397,17 @@ describe('the office never ending its process beside an operation of its own', (
     expect(o.restart.status()).toMatch(/once an operation it could not rule out has ended$/);
   });
 });
+
+describe('when the office may restart itself next', () => {
+  it('says when its limits next allow a restart, and nothing while one may run now', () => {
+    expect(office().restart.nextAllowedAt()).toBeUndefined();
+    // An hour apart: one twenty minutes ago allows the next forty minutes from now.
+    const spaced = office([100 * HOUR - 20 * MINUTE]);
+    expect(spaced.restart.nextAllowedAt()).toBe(100 * HOUR + 40 * MINUTE);
+    // Two a day: after two today, the next is a day after the first of them.
+    const twice = office([100 * HOUR - 8 * HOUR, 100 * HOUR - 7 * HOUR]);
+    expect(twice.restart.nextAllowedAt()).toBe(100 * HOUR + 16 * HOUR);
+    // Restarts more than a day ago do not count.
+    expect(office([10 * HOUR, 11 * HOUR]).restart.nextAllowedAt()).toBeUndefined();
+  });
+});

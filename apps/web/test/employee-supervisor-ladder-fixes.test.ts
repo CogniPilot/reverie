@@ -544,7 +544,7 @@ function officeOf(
   desk: (id: string) => Pick<Desk, 'session' | 'restoration' | 'reading' | 'provider'>,
   options: {
     saved?: Map<string, SupervisorHistory>;
-    officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number };
+    officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number; nextAt?: number };
     /** What a read inside each laptop finds beside the agent. Without it the office cannot make that read. */
     otherWork?: (id: string) => true | false | 'unknown';
   } = {}
@@ -630,6 +630,7 @@ function officeOf(
               return options.officeRestart!.answer;
             },
             lastAt: () => options.officeRestart!.lastAt,
+            nextAt: () => options.officeRestart!.nextAt,
           },
         }
       : {}),
@@ -1170,5 +1171,32 @@ describe('a laptop whose agent exited while other work may still run in it', () 
     for (const id of FIVE) fine.afterRebuild.set(id, back);
     await fine.run(30);
     expect(fine.rebuilt.map((row) => row.id).sort()).toEqual(FIVE);
+  });
+});
+
+describe('an office that can read none of its laptops and may not restart itself again today', () => {
+  it('does not wait for a restart the limits forbid: one laptop is rebuilt as a probe', async () => {
+    const start = 1_800_000_000_000;
+    // Two restarts today, the later one seven hours ago: the next is allowed seventeen hours from now.
+    const officeRestart = {
+      asked: [] as string[],
+      answer: 'pending' as const,
+      lastAt: start - 7 * HOUR,
+      nextAt: start + 17 * HOUR,
+    };
+    const o = officeOf(
+      ['a', 'b', 'c', 'd', 'e'],
+      () => ({
+        session: UNREADABLE,
+        restoration: VIEW_LOST,
+        reading: { state: 'held', phase: 'ready', code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: [] },
+        provider: 'running',
+      }),
+      { officeRestart }
+    );
+    await o.run(4 * 60);
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+    expect(o.rebuilt[0]!.proved).toMatch(/agent-unreadable/);
+    expect(o.rebuilt[0]!.minute).toBeLessThan(4 * 60);
   });
 });

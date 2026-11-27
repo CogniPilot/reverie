@@ -2719,6 +2719,7 @@ export class WebServer extends EventEmitter {
           officeRestart: {
             request: (reason) => officeSelfRestart.request(reason),
             lastAt: () => officeSelfRestart.lastAt(),
+            nextAt: () => officeSelfRestart.nextAllowedAt(),
           },
           laptops: dockerRuntime.supervisorLaptops({
             // While a rebuild is about to stop a laptop its agent runs in, nothing may be typed into that session and

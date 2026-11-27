@@ -194,6 +194,8 @@ export interface EmployeeSupervisorPorts {
   readonly officeRestart?: {
     request(reason: string): 'pending' | 'refused';
     lastAt(): number | undefined;
+    /** When the limits on its restarts next allow one, while they forbid one now (`nextAllowedAt`). */
+    nextAt?(): number | undefined;
   };
   /**
    * Whether the last read of the employee's plan sign-in copies found a usable one in their laptop. From memory:
@@ -1462,10 +1464,12 @@ export class EmployeeSupervisor {
     if (blind) {
       const restart = this.ports.officeRestart,
         restarted = restart?.lastAt(),
+        // A restart that the limits forbid for now (two a day) is not waited for: the probe follows instead.
         tried =
           !restart ||
           this.#restartAnswer === 'refused' ||
-          (restarted !== undefined && now - restarted < this.#resolved.officeRestartTriedMs);
+          (restarted !== undefined && now - restarted < this.#resolved.officeRestartTriedMs) ||
+          (restart.nextAt?.() ?? now) > now;
       if (!tried || now - this.#blindSince! < this.#resolved.officeBlindRestartMs)
         return {
           waitingFor: `the office to read at least one laptop again: ${OFFICE_BLIND}, so the fault is taken to be the office's own and it restarts itself before any laptop is rebuilt for a pane it cannot read`,
