@@ -111,7 +111,13 @@ interface Attached {
   absent: DockerAbsentReprovision;
   command: PackagedDockerEngineCommand;
 }
-function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
+function config(): {
+  value: z.infer<typeof DockerRuntimeConfiguration>;
+  current: () => boolean;
+  /** Changes whenever the configuration file changes on disk. A name for a state, never an authority. */
+  stamp: () => string;
+  close: () => void;
+} {
   const path = '/etc/reverie/boxed-runtime.json',
     fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   let closed = false;
@@ -161,6 +167,13 @@ function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current:
     return {
       value: { ...value, apiUrl },
       current,
+      stamp() {
+        try {
+          return stamp(fs.lstatSync(path));
+        } catch {
+          return 'unreadable';
+        }
+      },
       close() {
         if (closeState.kind === 'closed') return;
         if (closeState.kind === 'failed') throw closeState.cause;
@@ -280,6 +293,30 @@ export class DockerEmployeeRuntime {
   }
   current(): boolean {
     return this.selected.current() && this.#key.current();
+  }
+  /**
+   * For the office's own restart (office-self-restart.ts), which is what settles a runtime that is no longer
+   * current. `identityStamp` changes whenever the configuration or the key changes on disk.
+   * `restartWouldKeepIdentity` says whether a new office process would accept the configuration that is in place
+   * and read the same instance key; with another key every laptop's credential would be out of use, and that is
+   * never restarted into. Both read only, and neither makes this runtime current again.
+   */
+  identityStamp(): string {
+    return this.selected.stamp() + '|' + this.#key.stamp();
+  }
+  restartWouldKeepIdentity(): boolean {
+    try {
+      config().close();
+    } catch {
+      return false;
+    }
+    return this.#key.sameOnDisk();
+  }
+  /** One read-only Engine command for the office's own use, where no laptop is involved. */
+  engineRead(args: readonly string[]): Promise<string> {
+    const attached = this.#attached;
+    if (!attached) return Promise.reject(Error('Boxed runtime is not attached'));
+    return attached.command.run(args, undefined, 10_000);
   }
   #binding(employeeId: string): DockerWorkerIdentityBinding | undefined {
     const attached = this.#attached;
@@ -638,7 +675,9 @@ export class DockerEmployeeRuntime {
       pool: a.pool,
       limits: a.limits,
       absent: a.absent,
+      moves: () => this.#absentPlanMoves,
       sessions: a.ctx.sessions,
+      inputHeldOnRecord: (id) => a.ctx.store.getSession(id)?.terminalInputHeld === true,
       current: () => this.current() && this.#attached === a,
     });
   }

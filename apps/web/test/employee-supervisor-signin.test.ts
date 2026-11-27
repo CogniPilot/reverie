@@ -17,6 +17,7 @@ import {
   SUPERVISOR_POLICY,
   assessEmployee,
   classifyEmployee,
+  ladderRestartAt,
   recordSupervisorAttempt,
   rollSupervisorHistory,
   type SupervisorFlags,
@@ -74,14 +75,12 @@ const seenAt = (since: number): SupervisorHistory => ({
 describe('a laptop at the sign-in screen of a plan the system still holds', () => {
   it('has its sign-in put back at once, with automatic repairs switched off, and asks nobody', () => {
     const result = assessEmployee(atSignIn(), seenAt(1000), flags(), 1000);
-    expect(result).toMatchObject({ condition: 'at-sign-in-screen', code: 'sign-in-screen' });
+    expect(result).toMatchObject({ condition: 'needs-sign-in', code: 'sign-in-screen' });
     expect(result.next).toEqual({ action: 'replace-sign-in', at: 1000, preconditions: [] });
     expect(result.needsHuman).toBeUndefined();
     // It discards nothing, which is the only reason it may run without the owner's repair switch.
     expect(SUPERVISOR_POLICY.ladder['replace-sign-in'].tier).toBe('retry');
-    expect(SUPERVISOR_PATHS['at-sign-in-screen']).toEqual(['replace-sign-in', 'relaunch-provider', 'rebuild-laptop']);
-    // A plan move that waits for a sign-in keeps its own condition, and no step of this path.
-    expect(SUPERVISOR_PATHS['needs-sign-in']).toEqual(['replace-sign-in']);
+    expect(SUPERVISOR_PATHS['needs-sign-in']).toEqual(['replace-sign-in', 'relaunch-provider', 'rebuild-laptop']);
   });
 
   it('waits beside another operation without asking anybody', () => {
@@ -176,10 +175,20 @@ describe('the sign-in is in place and the agent still shows the sign-in screen',
   it('never starts an agent again in the middle of anything: the pane must be idle and silent for two minutes', () => {
     const at = (session: Partial<SupervisorObservation['session']>, now = 10 * MINUTE) =>
       assessEmployee(atSignIn({ session: { ...parkedSession, ...session } }), placed(), REPAIR, now);
-    expect(at({ turn: 'working', idleSince: undefined }).next).toMatchObject({ action: null, waitingFor: "the agent's terminal to stop changing" });
-    expect(at({ turn: 'unknown', idleSince: undefined }).next).toMatchObject({ action: null, waitingFor: "a reading of the agent's terminal" });
-    expect(at({ turn: undefined, idleSince: undefined }).next).toMatchObject({ action: null, waitingFor: "a reading of the agent's terminal" });
-    expect(at({ idleSince: undefined }).next.action).toBeNull();
+    // The waits are those of every laptop an agent may run in: one rule for "between turns", not a second one.
+    expect(at({ turn: 'working', idleSince: undefined }).next).toMatchObject({ action: null, waitingFor: "the agent's current turn to end" });
+    // A pane that shows no turn at all: a read inside the laptop is asked first, and with an agent found there the
+    // office waits the two hours of an unread pane. The screen stays what the step has to prove.
+    for (const turn of ['unknown', undefined] as const) {
+      expect(at({ turn, idleSince: undefined }).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
+      const occupied = atSignIn({ session: { ...parkedSession, turn, idleSince: undefined }, laptop: { ...atSignIn().laptop, provider: 'running' } });
+      const since = recordSupervisorAttempt(seenAt(MINUTE), 'replace-sign-in', MINUTE, 'done', 'sign-in placed');
+      expect(assessEmployee(occupied, since, REPAIR, 10 * MINUTE).next).toMatchObject({ action: null, at: MINUTE + SUPERVISOR_POLICY.blindRebuildMs });
+      expect(assessEmployee(occupied, since, REPAIR, MINUTE + SUPERVISOR_POLICY.blindRebuildMs).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['agent-parked-at-screen', 'agent-unreadable'],
+      });
+    }
     expect(at({ idleSince: 9 * MINUTE }).next).toMatchObject({ action: null, waitingFor: "the agent's terminal to stay quiet a little longer" });
     expect(at({ idleSince: 8 * MINUTE }).next.action).toBe('rebuild-laptop');
     // Work the pane says was left running is given thirty minutes from the first sight of the problem.
@@ -217,18 +226,27 @@ describe('the sign-in is in place and the agent still shows the sign-in screen',
   it('keeps the limits every rebuild keeps', () => {
     const noLayout = atSignIn({ laptop: { ...atSignIn().laptop, templateOnRecord: false } });
     expect(assessEmployee(noLayout, placed(), REPAIR, 10 * MINUTE).next.action).toBeNull();
+    // The limit per day is a pause that says when it lifts, as for every rebuild.
     const today = { ...placed(), rebuilds: [MINUTE, 2 * MINUTE] };
-    expect(assessEmployee(atSignIn(), today, REPAIR, 10 * MINUTE).next.action).toBeNull();
+    const paused = assessEmployee(atSignIn(), today, REPAIR, 10 * MINUTE);
+    expect(paused.next).toMatchObject({ action: null, at: MINUTE + 24 * 60 * MINUTE });
+    expect(paused.next.waitingFor).toMatch(/the daily limit on rebuilds of one laptop/);
+    expect(paused.needsHuman).toBeUndefined();
+    // An employee with no layout of their own is rebuilt with the owner's standing default layout.
+    const standing = atSignIn({ laptop: { ...noLayout.laptop, standing: { enabled: true, limits: true, layout: true } } });
+    expect(assessEmployee(standing, placed(), REPAIR, 10 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['agent-parked-at-screen'],
+    });
   });
 
-  it('starts over a few hours after the last step instead of stopping, and says so meanwhile', () => {
+  it('starts over six hours after the last step, by the rule of every ladder, and says when meanwhile', () => {
     let history = placed();
     for (const at of [3 * MINUTE, 20 * MINUTE]) history = recordSupervisorAttempt(history, 'rebuild-laptop', at, 'refused', 'DOCKER_REPROVISION_BUSY_ELSEWHERE');
     const spent = assessEmployee(atSignIn(), history, REPAIR, 60 * MINUTE);
-    expect(spent.next.action).toBeNull();
-    expect(spent.needsHuman).toMatch(/tries all of them again a few hours after the last one/);
-    expect(spent.needsHuman).toMatch(/Nobody has to do anything/);
-    expect(spent.needsHuman).not.toMatch(/POST|terminal/);
+    expect(spent.next).toMatchObject({ action: null, at: ladderRestartAt(history) });
+    expect(spent.next.waitingFor).toMatch(/the next round of repair steps, which starts at /);
+    expect(spent.needsHuman).toBeUndefined();
     // The counts are kept until the last step is six hours old.
     const seen = classifyEmployee(atSignIn());
     const early = rollSupervisorHistory(history, seen, 20 * MINUTE + SUPERVISOR_POLICY.ladderRestartMs - 1);
@@ -242,9 +260,6 @@ describe('the sign-in is in place and the agent still shows the sign-in screen',
       preconditions: ['agent-parked-at-screen'],
     });
     expect(SUPERVISOR_POLICY.ladderRestartMs).toBeGreaterThanOrEqual(60 * MINUTE);
-    // Only a parked start-up screen restarts this way; no other condition's counts are touched here.
-    const other = rollSupervisorHistory(history, { condition: 'viewer-lost', fingerprint: history.fingerprint }, later);
-    expect(other.attempts).toEqual(history.attempts);
   });
 });
 
@@ -254,7 +269,7 @@ describe('a plan that is signed in nowhere', () => {
 
   it('is said as soon as one attempt found no sign-in to place, and the office keeps trying', () => {
     const first = assessEmployee(atSignIn({ planSignedIn: false }), seenAt(0), REPAIR, 0);
-    expect(first).toMatchObject({ condition: 'at-sign-in-screen', code: 'plan-signed-out', next: { action: 'replace-sign-in' } });
+    expect(first).toMatchObject({ condition: 'needs-sign-in', code: 'plan-signed-out', next: { action: 'replace-sign-in' } });
     expect(first.needsHuman).toBeUndefined();
     const refused = recordSupervisorAttempt(seenAt(0), 'replace-sign-in', 0, 'refused', NOWHERE);
     const result = assessEmployee(atSignIn({ planSignedIn: false }), refused, REPAIR, 30_000);
@@ -489,7 +504,7 @@ describe('the supervisor driving it', () => {
     await supervisor.tick();
     expect(state.placed).toBe(1);
     expect(state.lines).toEqual([
-      'supervisor] Burt (burt): replace-sign-in -> done sign-in placed (at-sign-in-screen, sign-in-screen; attempt 1)',
+      'supervisor] Burt (burt): replace-sign-in -> done sign-in placed (needs-sign-in, sign-in-screen; attempt 1)',
     ].map((line) => '[' + line));
     state.now += 30_000;
     await supervisor.tick();
@@ -583,7 +598,7 @@ describe('the supervisor starting a parked agent again', () => {
     const w = driven({ signedIn: false, laptopHolds: () => holds });
     await w.run(60);
     expect(w.state.acts).toEqual(['replace-sign-in', 'replace-sign-in', 'replace-sign-in']);
-    expect(w.report()).toMatchObject({ condition: 'at-sign-in-screen', code: 'plan-signed-out' });
+    expect(w.report()).toMatchObject({ condition: 'needs-sign-in', code: 'plan-signed-out' });
     expect(w.report().needsHuman).toMatch(/Only the account holder can sign a plan in/);
     expect(w.state.lines.filter((line) => line.includes('needs a person')).length).toBeLessThanOrEqual(2);
     // The account holder signs the plan in; the reconciler puts the sign-in into the laptop.

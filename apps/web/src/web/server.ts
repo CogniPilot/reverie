@@ -117,6 +117,7 @@ import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
 import { EmployeeSupervisor } from '../employee-supervisor.js';
 import { officeSupervisorPorts } from '../employee-supervisor-office.js';
+import { OfficeSelfRestart, OfficeSelfRestartRecord, ownRestartPolicy } from '../office-self-restart.js';
 import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
 import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
 import { PlanSignInReconciler, describePlanSignInNotice, type SignInHolderPort } from '../plan-signin-reconciler.js';
@@ -538,6 +539,7 @@ export class WebServer extends EventEmitter {
   private companyWakeReady = false;
   /** Present only under the boxed laptop runtime. */
   private employeeSupervisor?: EmployeeSupervisor;
+  private officeSelfRestart?: OfficeSelfRestart;
   private planSignIn?: PlanSignInReconciler;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
@@ -2586,7 +2588,10 @@ export class WebServer extends EventEmitter {
     if (dockerRuntime) {
       // One Claude plan sign-in is held by the office and by every laptop that was given a copy of it, and each
       // copy is renewed by a different client. This keeps them the same sign-in (plan-signin-sync.ts says how).
-      // An employee whose plan is being moved is left to the move.
+      // An employee whose plan is being moved is left to the move, a held move included. The laptop holder is the
+      // employee's recorded laptop, filed under the plan they are on; a move's candidate keeps the sign-in of the
+      // plan it moves TO in a folder of its own, and the move verifies exactly the account material it reserved. A
+      // copy placed there from here would be another plan's, or one the move's own check refuses.
       this.planSignIn = new PlanSignInReconciler({
         now: Date.now,
         ready: () => this.companyWakeReady && dockerRuntime.current(),
@@ -2645,6 +2650,33 @@ export class WebServer extends EventEmitter {
       // The office recovery supervisor. Every step it takes is a call to the service method behind the owner's
       // own route for that step; what it presents instead of an owner request is documented in
       // employee-supervisor-office.ts and docker-employee-supervisor-laptops.ts.
+      // A laptop runtime that is no longer the one the office started with is settled by a new office process and
+      // by nothing else. office-self-restart.ts says when the office may end itself for it, and how often.
+      const restartRecord = new OfficeSelfRestartRecord(dataPath('office-self-restart.json'));
+      const officeSelfRestart = new OfficeSelfRestart({
+        now: Date.now,
+        started: () => this.companyWakeReady,
+        stale: () => !dockerRuntime.current(),
+        stamp: () => dockerRuntime.identityStamp(),
+        startable: () => dockerRuntime.restartWouldKeepIdentity(),
+        allowed: () => this.companyService.view(undefined).settings.supervisorAutoRepair !== false,
+        restartPolicy: () => {
+          let mounts = '';
+          try {
+            mounts = readFileSync('/proc/self/mountinfo', 'utf8');
+          } catch {
+            /* the host name alone is tried */
+          }
+          return ownRestartPolicy((args) => dockerRuntime.engineRead(args), getHostname(), mounts);
+        },
+        load: () => restartRecord.load(),
+        save: (times) => restartRecord.save(times),
+        // The process's usual graceful shutdown, as for a stop signal from outside.
+        exit: () => void process.emit('SIGTERM'),
+        log: (line) => console.log(line),
+        audit: (entry) => void appendAdminAudit(entry),
+      });
+      this.officeSelfRestart = officeSelfRestart;
       const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
       this.employeeSupervisor = new EmployeeSupervisor(
         officeSupervisorPorts({
@@ -2652,6 +2684,7 @@ export class WebServer extends EventEmitter {
           session: (id) => this.sessions.get(id),
           inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
           ready: () => this.companyWakeReady && dockerRuntime.current(),
+          notReady: () => officeSelfRestart.status(),
           laptops: dockerRuntime.supervisorLaptops(),
           restorations: () => dockerRuntime.restorationReports,
           providerHealth: (employee) => this.workerProviderHealth?.read(employee),
@@ -4926,7 +4959,10 @@ export class WebServer extends EventEmitter {
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
       // The office supervisor rides the same half-minute pass, after the crash-recovery expert has had its turn.
       // Neither promise rejects: each logs its own failure.
-      const tickRecovery = () => void tickWake().then(() => this.employeeSupervisor?.tick());
+      const tickRecovery = () =>
+        void tickWake()
+          .then(() => this.officeSelfRestart?.tick())
+          .then(() => this.employeeSupervisor?.tick());
       tickRecovery();
       this.cleanup.setInterval(tickRecovery, 30_000, { description: 'Company crash recovery' });
       // Asked often, reads once a minute; every few seconds only around the renewal of a shared sign-in.

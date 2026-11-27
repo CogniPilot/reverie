@@ -678,8 +678,7 @@ const CA_SUPERVISOR_SHORT = {
   starting: 'Starting',
   'waiting-first-run-screen': 'Starting',
   'stuck-first-run-screen': 'Stuck at start-up; restarting',
-  'at-sign-in-screen': 'At a sign-in screen; repairing',
-  'needs-sign-in': 'Needs a sign-in',
+  'needs-sign-in': 'At a sign-in screen; repairing',
   'needs-owner': 'Needs you',
   'provider-exited': 'Agent exited; repairing',
   'viewer-lost': 'Reconnecting terminal',
@@ -691,7 +690,7 @@ const CA_SUPERVISOR_SHORT = {
   'move-held-dead-end': 'Plan move stuck',
   unknown: 'Needs a look',
 };
-const CA_SUPERVISOR_SCREENS = new Set(['at-sign-in-screen', 'stuck-first-run-screen']);
+const CA_SUPERVISOR_SCREENS = new Set(['needs-sign-in', 'stuck-first-run-screen']);
 /** The supervisor's reading of an employee, when it found a problem: its sentence, what it will do and what it needs. */
 function caSupervisorCheck(employee) {
   const seen = employee?.supervisor;
@@ -707,7 +706,7 @@ function caSupervisorCheck(employee) {
       ? seen.code === 'plan-signed-out'
         ? 'Needs a sign-in'
         : CA_SUPERVISOR_SHORT[seen.condition]
-      : needs && seen.condition !== 'needs-sign-in'
+      : needs
         ? 'Needs you'
         : CA_SUPERVISOR_SHORT[seen.condition],
     code: String(seen.code || seen.condition),

@@ -325,8 +325,19 @@ export const CompanySettingsSchema = z.object({
   autoWakeEnabled: z.boolean().default(true),
   /** The office supervisor observes, retries and reconnects on its own. Absent means on. */
   supervisorEnabled: z.boolean().optional(),
-  /** The supervisor may also abandon a dead-end plan move and rebuild a laptop nothing runs in, one whose office terminal can never take input again, or one whose agent is parked on a provider start-up screen. Absent means on. */
+  /**
+   * The supervisor may also abandon a dead-end plan move, rebuild a laptop (at once when nothing runs in it,
+   * otherwise between its agent's turns or while its agent is parked on a provider start-up screen), give standing
+   * limits (below), and restart the office after its laptop configuration changed under it. Absent means on.
+   */
   supervisorAutoRepair: z.boolean().optional(),
+  /**
+   * The owner's standing defaults for a laptop. An employee who has no approved resource limits, or no laptop layout
+   * on record, is given what the owner already approved for the other employees: the most restrictive of their
+   * limits, and the layout all of their laptops share (docker-standing-defaults.ts). Nothing is given that some
+   * other employee does not already have, and no number is made up. Absent means on.
+   */
+  supervisorStandingDefaults: z.boolean().optional(),
   crashWakeEmployeeId: z.string().min(1).optional(),
   timeZone: z
     .string()

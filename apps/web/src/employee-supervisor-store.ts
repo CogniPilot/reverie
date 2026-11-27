@@ -12,6 +12,7 @@ import type { SupervisorAction, SupervisorHistory } from './employee-supervisor-
 
 const ACTIONS = [
   'resend-continuation',
+  'apply-standing-limits',
   'start-continuation',
   'continue-move',
   'reconnect-viewer',

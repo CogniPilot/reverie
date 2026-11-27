@@ -44,9 +44,11 @@ export interface PlanMoveDockerJournalStore {
     abandonment: NonNullable<PlanMoveRecord['dockerAbandonment']>, current: () => void
   ): Promise<Readonly<PlanMoveRecord>>;
   /** The owner's explicit closure of a held move. Journal DATA only: the store
-   * derives the recorded containers from the same cursor; no native effect. */
+   * derives the recorded containers from the same cursor; no native effect.
+   * `note` replaces the record's closing sentence when the office closed the
+   * move on the owner's standing rule; it is description only. */
   abandonOwner?(
-    id: string, before: Readonly<DockerPlanMoveJournalState>, at: number, current: () => void
+    id: string, before: Readonly<DockerPlanMoveJournalState>, at: number, current: () => void, note?: string
   ): Promise<Readonly<PlanMoveRecord>>;
   current(id: string, epoch: string, seedDigest: string): void;
   /** Deny-only original file currency for a completed read. Never dispatch. */

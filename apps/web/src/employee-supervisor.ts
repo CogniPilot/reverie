@@ -36,6 +36,7 @@ import {
   type SupervisorPolicy,
   type SupervisorPrecondition,
   type SupervisorProviderPresence,
+  SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_POLICY,
 } from './employee-supervisor-policy.js';
 
@@ -75,17 +76,16 @@ export interface EmployeeSupervisorPorts {
   now(): number;
   /** The office has restored its sessions and its laptop runtime is current. */
   ready(): boolean;
+  /**
+   * What the office is doing about not being ready, when it is doing something that takes a while (it restarts
+   * itself after its laptop configuration changed). Shown on every employee, because nothing is checked meanwhile.
+   */
+  notReady?(): string | undefined;
   employees(): readonly SupervisedEmployee[];
   /** The owner's two switches. */
   flags(owner: string | undefined): { readonly enabled: boolean; readonly autoRepair: boolean };
-  /**
-   * Everything that is already in memory. No Engine call and no await. `fresh` asks for the agent's start-up
-   * screen to be read from the pane now instead of from the last read: a step is never decided on a kept one.
-   */
-  glance(
-    employee: SupervisedEmployee,
-    fresh?: boolean
-  ): Omit<SupervisorObservation, 'move' | 'planSignedIn' | 'laptopSignedIn'>;
+  /** Everything that is already in memory. No Engine call and no await. */
+  glance(employee: SupervisedEmployee): Omit<SupervisorObservation, 'move' | 'planSignedIn' | 'laptopSignedIn'>;
   openMove(employee: SupervisedEmployee): Promise<SupervisorMove | undefined>;
   planSignedIn?(accountId: string): Promise<boolean | undefined>;
   /**
@@ -176,6 +176,8 @@ export interface SupervisorReport {
   readonly next?: { readonly action: SupervisorAction; readonly at: number };
   /** Why it is not doing anything right now. */
   readonly waitingFor?: string;
+  /** When that wait ends by itself, where it is known: a limit lifts, or the repair steps start again. */
+  readonly waitingUntil?: number;
   /** What a person or a managing agent has to do, when the supervisor will not. */
   readonly needsHuman?: string;
   /** The last check of the laptop's approved limits, for an employee who has a finished laptop. */
@@ -197,7 +199,6 @@ const NO_LAPTOP_READ = new Set<SupervisorCondition>([
   'move-held-retryable',
   'waiting-first-run-screen',
   'stuck-first-run-screen',
-  'at-sign-in-screen',
   'needs-sign-in',
 ]);
 
@@ -258,7 +259,8 @@ export class EmployeeSupervisor {
   }
 
   async #pass(): Promise<void> {
-    if (this.#closed || !this.ports.ready()) return;
+    if (this.#closed) return;
+    if (!this.ports.ready()) return this.#unready();
     if (this.ports.now() - this.#startedAt < this.limits.startupGraceMs) return;
     const employees = this.ports.employees();
     const known = new Set(employees.map((employee) => employee.id));
@@ -413,6 +415,20 @@ export class EmployeeSupervisor {
     };
   }
 
+  /**
+   * Nothing is read or decided while the office is not ready. When it says what it is doing about that, every
+   * report says so too, instead of showing a step from before that nobody is going to take.
+   */
+  #unready(): void {
+    const waitingFor = this.ports.notReady?.();
+    if (!waitingFor) return;
+    const checkedAt = this.ports.now();
+    for (const [id, report] of this.#reports) {
+      const { next: _next, waitingUntil: _until, ...rest } = report;
+      this.#reports.set(id, { ...rest, checkedAt, waitingFor });
+    }
+  }
+
   #forget(id: string): void {
     this.#histories.delete(id);
     this.#dirty = true;
@@ -477,16 +493,12 @@ export class EmployeeSupervisor {
     const move = await this.ports.openMove(employee);
     let observed: SupervisorObservation = { ...glance, ...(move ? { move } : {}) };
     const first = classifyEmployee(observed);
-    if (
-      first.condition === 'at-sign-in-screen' ||
-      first.condition === 'needs-sign-in' ||
-      first.code === 'move-sign-in'
-    ) {
+    if (first.condition === 'needs-sign-in' || first.code === 'move-sign-in') {
       const account = move?.toAccount ?? employee.planAccountId;
       const signedIn =
         account && this.ports.planSignedIn ? await this.ports.planSignedIn(account).catch(() => undefined) : undefined;
       if (signedIn !== undefined) observed = { ...observed, planSignedIn: signedIn };
-      const held = first.condition === 'at-sign-in-screen' ? this.ports.laptopSignedIn?.(employee) : undefined;
+      const held = first.condition === 'needs-sign-in' ? this.ports.laptopSignedIn?.(employee) : undefined;
       if (held !== undefined) observed = { ...observed, laptopSignedIn: held };
     }
     if (!glance.boxed || glance.busy || NO_LAPTOP_READ.has(first.condition) || first.code?.startsWith('move-'))
@@ -587,27 +599,22 @@ export class EmployeeSupervisor {
       else this.#occupied.delete(employee.id);
       observed = { ...observed, laptop: { ...observed.laptop, provider } };
       assessment = assessEmployee(observed, history, flags, now, this.policy);
-      if (!due(assessment) || assessment.next.preconditions.length) {
+      // A laptop the read found occupied may still be rebuilt, between its agent's turns: that is decided next.
+      if (!due(assessment) || assessment.next.preconditions.includes('no-agent-running')) {
         this.#report(employee, assessment, history, now);
         return false;
       }
     }
-    if (assessment.next.preconditions.includes('terminal-input-held')) {
-      // The office terminal is looked at once more, from memory, and the decision is taken again with it. The step
-      // proves the same again itself, immediately before it asks for the rebuild.
+    if (assessment.next.preconditions.some((name) => SUPERVISOR_OCCUPIED_PROOFS.includes(name))) {
+      // A laptop an agent may run in. The office terminal is looked at once more, from memory, and the decision is
+      // taken again with it: the step goes ahead only when exactly the same is still asked to be proved. The laptop
+      // itself was read in this pass. The step proves all of it again itself, immediately before the rebuild.
+      // A start-up screen the agent is parked on is read from the pane again by that look: a screen that showed
+      // is never taken from an earlier read.
+      const asked = assessment.next.preconditions.join();
       observed = { ...observed, session: this.ports.glance(employee).session };
       assessment = assessEmployee(observed, history, flags, now, this.policy);
-      if (!due(assessment) || !assessment.next.preconditions.includes('terminal-input-held')) {
-        this.#report(employee, assessment, history, now);
-        return false;
-      }
-    }
-    if (assessment.next.preconditions.includes('agent-parked-at-screen')) {
-      // The pane is read once more, now and not from the last read, and the decision is taken again with it. The
-      // step proves the screen and the idle pane again itself, immediately before it starts the agent again.
-      observed = { ...observed, session: this.ports.glance(employee, true).session };
-      assessment = assessEmployee(observed, history, flags, now, this.policy);
-      if (!due(assessment) || !assessment.next.preconditions.includes('agent-parked-at-screen')) {
+      if (!due(assessment) || assessment.next.preconditions.join() !== asked) {
         this.#report(employee, assessment, history, now);
         return false;
       }
@@ -722,6 +729,9 @@ export class EmployeeSupervisor {
       ...(history.lastAction ? { last: history.lastAction } : {}),
       ...(assessment.next.action ? { next: { action: assessment.next.action, at: assessment.next.at ?? now } } : {}),
       ...(waitingFor ? { waitingFor } : {}),
+      ...(!assessment.next.action && assessment.next.at !== undefined && waitingFor === assessment.next.waitingFor
+        ? { waitingUntil: assessment.next.at }
+        : {}),
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
       ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
     };

@@ -9,7 +9,12 @@
  * observation, the persisted history and the time, and runs the step through the same service methods the owner's
  * routes call. A condition, a sentence and an action name are DATA; none of them authorizes the action they name.
  *
- * Unknown input is never actionable: a code this table does not list classifies as `unknown`, which has no ladder.
+ * Unknown input is never acted on at once. A laptop code this table does not list is watched first; only when it
+ * has stood for `unrecognizedAfterMs` is the laptop treated as held, and then under every rule of a rebuild.
+ *
+ * No path ends for good. A ladder whose rungs are all used starts again `ladderRestartMs` after its last attempt
+ * (`ladderRestartAt`), and a limit says when it lifts. The office says that it will not act in one case only: the
+ * owner switched that kind of step off in the company settings.
  */
 
 /** Closed set. `needs-owner` covers every recognized state that only a person (or a granted agent) may settle. */
@@ -18,7 +23,6 @@ export type SupervisorCondition =
   | 'starting'
   | 'waiting-first-run-screen'
   | 'stuck-first-run-screen'
-  | 'at-sign-in-screen'
   | 'needs-sign-in'
   | 'needs-owner'
   | 'provider-exited'
@@ -35,6 +39,7 @@ export type SupervisorCondition =
 /** Every effect the supervisor can ask for, least destructive first. */
 export type SupervisorAction =
   | 'resend-continuation'
+  | 'apply-standing-limits'
   | 'start-continuation'
   | 'continue-move'
   | 'reconnect-viewer'
@@ -64,17 +69,24 @@ export interface SupervisorPolicy {
   readonly rebuildsPerDay: number;
   /** Continuously healthy this long ends the episode and clears its attempt counts. */
   readonly healthyResetMs: number;
-  /** A `starting` or `unknown` state older than this is reported as needing a person. */
-  readonly stalledAfterMs: number;
-  /** A laptop whose terminal input is held is rebuilt only after its agent's pane has been idle and silent this long. */
-  readonly heldInputIdleMs: number;
-  /** A turn that such a laptop's agent has not ended this long after the problem was first seen is reported. */
-  readonly heldInputTurnMs: number;
   /**
-   * An employee parked on a provider start-up screen whose steps were all tried gets them again once the last one
-   * is this old. Hours, so a screen no step clears costs a few steps a day and is never given up on.
+   * A laptop that has been starting or between states this long is treated as held, and a read that could not say
+   * what runs in a laptop for this long is treated as one that found an agent.
    */
+  readonly stalledAfterMs: number;
+  /** A laptop an agent may run in is rebuilt only after that agent's pane has been idle and silent this long. */
+  readonly heldInputIdleMs: number;
+  /** Work an agent left running after its turn is waited for until this long after the problem was first seen. */
+  readonly heldInputTurnMs: number;
+  /** A ladder whose rungs are all used starts again this long after its last attempt. */
   readonly ladderRestartMs: number;
+  /** A laptop code the office does not recognize is treated as a hold once it has stood this long. */
+  readonly unrecognizedAfterMs: number;
+  /**
+   * A laptop that has to be rebuilt while the office cannot read its agent's pane at all is rebuilt once the
+   * problem has stood this long.
+   */
+  readonly blindRebuildMs: number;
 }
 
 const SECOND = 1000;
@@ -91,24 +103,41 @@ const MINUTE = 60 * SECOND;
  *   waiting for and gives nothing up, so it is a retry: it also runs with automatic repairs switched off.
  * - Abandoning a move waits 15 minutes on the SAME error and three failed continues: a move that only needed time
  *   or one more read has finished by then, and abandoning writes the journal only (nothing is stopped or removed).
+ *   Every held move ends there, whatever stopped it: a move is never kept for the owner. A move that waits for
+ *   something outside itself is given longer first (see `SUPERVISOR_MOVE_POLICY`).
  * - A rebuild discards a laptop, so it waits longest, runs at most twice per episode and twice per day, and is
- *   never chosen while an agent may be running in that laptop (see `rebuildGate`), with one exception.
- * - The exception is a laptop whose office terminal has its input held for good (see `heldInputRebuildGate`). The
+ *   never chosen in the middle of a turn of an agent that runs in that laptop (see `rebuildGate`).
+ * - The first laptop to be rebuilt while its agent runs was one whose office terminal has its input held for good
+ *   (see `heldInputRebuildGate`). The
  *   office can never type to that agent again and no reconnect gives the terminal back, so once the agent's turn
  *   has ended, keeping it gains nothing. Such a laptop is rebuilt while its agent runs, but never in the middle of a
  *   turn: the pane must have been idle and silent for two minutes. The office terminal calls a pane idle after a few
  *   silent seconds and a look at the screen; two more minutes cover a pause between two tool calls that this look
- *   missed, while a working agent redraws its pane every second. A turn that has not ended thirty minutes after the
- *   problem was first seen is reported to a person, because by then an ordinary turn has finished; the office goes
- *   on waiting and never rebuilds in the middle of it. An agent that ended its turn with work left running (a
- *   monitor, a background shell) is given those same thirty minutes for it: a job of ordinary length finishes, and
- *   a shell that never ends does not keep the employee out of reach for good.
+ *   missed, while a working agent redraws its pane every second. A turn the office can see is waited for, however
+ *   long it lasts, and nobody is asked. An agent that ended its turn with work left running (a monitor, a
+ *   background shell) is given thirty minutes from when the problem was first seen: an ordinary turn has finished
+ *   by then, a job of ordinary length finishes, and a shell that never ends does not keep the employee out of
+ *   reach for good.
+ * - The same rule, with the same times, serves every other laptop that only a rebuild settles while an agent still
+ *   runs in it (`betweenTurnsGate`). It is rebuilt between the agent's turns and never in the middle of one.
  * - An agent parked on a provider start-up screen (a sign-in, a first-run screen the office could not answer) is in
  *   no turn at all: it never reached its composer. It is started again, by a relaunch where the office has one and
- *   otherwise by a rebuild, under the same two-minute and thirty-minute rules, read from the same office terminal
- *   and proved again by the driver and by the step (see `parkedScreenGate`). Once every step has been tried, they
- *   are all tried again six hours after the last one: often enough that a sign-in the owner renewed overnight is
- *   picked up, seldom enough that a screen nothing clears costs two rebuilds a day at most.
+ *   otherwise by a rebuild, under that same rule, and only on proof that the screen is really up (see
+ *   `parkedScreenGate`).
+ * - A pane the office cannot read at all is the hard case: after an office restart there is no terminal object for
+ *   a session whose input is held, and a process the office did not start was never attached. Waiting for a reading
+ *   that cannot come would leave the employee out of reach for good, so the laptop is rebuilt two hours after the
+ *   problem was first seen. Two hours is four times the thirty minutes an ordinary turn is given, so only an
+ *   unusually long turn can be cut short, and what such a turn loses is its unfinished step: the home directory and
+ *   the conversation saved in it are kept, and the fresh laptop continues that conversation. A read made inside the
+ *   laptop is asked first, and a laptop it shows to be empty is rebuilt without this wait.
+ * - A code the office does not recognize may be a state of a newer laptop runtime that settles by itself. It is
+ *   watched for thirty minutes, twice the time after which a recognized wait is called stalled, and only then
+ *   treated as a hold.
+ * - Limits that the owner approved for the other employees are given to an employee who has none after one minute:
+ *   the step writes a record and stops nothing.
+ * - A ladder that has used every rung starts again six hours after its last attempt. That is four rounds a day of
+ *   steps that are cheap or guarded; the rebuild keeps its own limit of two per day across rounds.
  */
 export const SUPERVISOR_POLICY: SupervisorPolicy = {
   ladder: {
@@ -118,6 +147,13 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
       dwellMs: 20 * SECOND,
       backoffMs: [30 * SECOND, 2 * MINUTE, 5 * MINUTE],
       escalateAfterMs: 2 * MINUTE,
+    },
+    'apply-standing-limits': {
+      tier: 'repair',
+      maxAttempts: 2,
+      dwellMs: MINUTE,
+      backoffMs: [5 * MINUTE],
+      escalateAfterMs: MINUTE,
     },
     'start-continuation': {
       tier: 'retry',
@@ -175,14 +211,19 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
   heldInputIdleMs: 2 * MINUTE,
   heldInputTurnMs: 30 * MINUTE,
   ladderRestartMs: 6 * 60 * MINUTE,
+  unrecognizedAfterMs: 30 * MINUTE,
+  blindRebuildMs: 2 * 60 * MINUTE,
 };
 
 /** The two owner switches. Both off means the supervisor only describes what it sees. */
 export interface SupervisorFlags {
   /** Observe, retry and reconnect. */
   readonly enabled: boolean;
-  /** Abandon a dead-end move, and rebuild a laptop nothing is running in, whose terminal input is held for good or
-   * whose agent is parked on a provider start-up screen. */
+  /**
+   * Abandon a dead-end move, rebuild a laptop (at once when nothing runs in it, otherwise between its agent's
+   * turns or while its agent is parked on a provider start-up screen), and give an employee who has no approved
+   * limits the owner's standing default.
+   */
   readonly autoRepair: boolean;
   /** The office can relaunch an exited agent inside its running laptop. */
   readonly relaunchAvailable: boolean;
@@ -206,12 +247,34 @@ export type SupervisorTurn = 'working' | 'idle' | 'unknown';
  * What a step asks to be proved again, last, before it runs.
  * - `no-agent-running`: a fresh read inside the laptop finds no agent.
  * - `terminal-input-held`: the office terminal's input is still held and its pane still shows no turn in progress.
- *   It is the only reason for which a rebuild may discard a laptop its agent runs in.
+ * - `agent-between-turns`: an agent may run in the laptop, and the office terminal still shows its pane idle: no
+ *   turn is in progress.
+ * - `agent-unreadable`: the office has no reading of the pane and `blindRebuildMs` has passed. Beside one of the
+ *   two above it lifts their demand for an idle pane; a pane that is read and shows a turn in progress still stops
+ *   the step.
+ * - `laptop-held`: the laptop's own read still says it is held or unfinished.
  * - `agent-parked-at-screen`: the office terminal still shows the agent on a provider start-up screen, proved by
  *   more than the screen's words, and its pane still shows no turn in progress. An agent there never reached its
  *   composer, so a relaunch or a rebuild discards no conversation.
+ *
+ * `terminal-input-held`, `agent-between-turns`, `agent-unreadable` and `agent-parked-at-screen` are the only
+ * reasons for which a rebuild may discard a laptop its agent runs in.
  */
-export type SupervisorPrecondition = 'no-agent-running' | 'terminal-input-held' | 'agent-parked-at-screen';
+export type SupervisorPrecondition =
+  | 'no-agent-running'
+  | 'terminal-input-held'
+  | 'agent-between-turns'
+  | 'agent-unreadable'
+  | 'laptop-held'
+  | 'agent-parked-at-screen';
+
+/** The proofs that allow a rebuild to discard the one recorded laptop while an agent may run in it. */
+export const SUPERVISOR_OCCUPIED_PROOFS: readonly SupervisorPrecondition[] = [
+  'terminal-input-held',
+  'agent-between-turns',
+  'agent-unreadable',
+  'agent-parked-at-screen',
+];
 
 /** Everything the office can read about one employee, already reduced to plain values. */
 export interface SupervisorObservation {
@@ -244,8 +307,7 @@ export interface SupervisorObservation {
       /**
        * How the office knows the screen is up: its live widget on the frame, or a launch of this office that has
        * not reached its composer. Absent when only the screen's words were read, which a conversation that quotes
-       * the screen shows as well; nothing is then restarted for it. `turn`, `idleSince` and `background` below
-       * are reported with a proved screen too.
+       * the screen shows as well; nothing is then restarted for it.
        */
       readonly proof?: 'widget' | 'launch';
     };
@@ -255,8 +317,8 @@ export interface SupervisorObservation {
      */
     readonly inputHeld?: boolean;
     /**
-     * What the office terminal shows of the agent's turn, reported with `inputHeld`: `working` while one is in
-     * progress, `idle` once it has ended, `unknown` while the office is not reading the pane. Never read as idle.
+     * What the office terminal shows of the agent's turn: `working` while one is in progress, `idle` once it has
+     * ended, `unknown` (or absent) while the office is not reading the pane. Never read as idle.
      */
     readonly turn?: SupervisorTurn;
     /** Since when this office process has seen the pane idle and silent. Reported with `turn: 'idle'`. */
@@ -288,6 +350,12 @@ export interface SupervisorObservation {
     readonly provider?: SupervisorProviderPresence;
     /** An owner-approved laptop layout is on record for this employee. */
     readonly templateOnRecord: boolean;
+    /**
+     * The owner's standing defaults (company setting `supervisorStandingDefaults`): whether they are switched on,
+     * and whether resource limits and a laptop layout that the owner approved for the other employees exist to give
+     * to an employee who has none of their own. Absent where the office has no laptops.
+     */
+    readonly standing?: { readonly enabled: boolean; readonly limits: boolean; readonly layout: boolean };
     /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
     readonly poolAlive?: boolean;
     /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
@@ -356,12 +424,22 @@ export function readSupervisedTerminal(
   heldOnRecord = false
 ): SupervisorTerminalReading {
   if (!(terminal ? terminal.terminalInputHeld === true : heldOnRecord)) return {};
-  if (!terminal || !paneWatched(terminal)) return { inputHeld: true, turn: 'unknown' };
-  if (terminal.isWorking || terminal.status === 'busy') return { inputHeld: true, turn: 'working' };
-  if (terminal.status !== 'idle') return { inputHeld: true, turn: 'unknown' };
+  return { inputHeld: true, ...readTerminalTurn(terminal) };
+}
+
+/**
+ * What one office terminal shows of its agent's turn, whether or not its input is held. It is what every rebuild of
+ * a laptop that an agent may run in is judged by: the observation carries it and the step reads it again last.
+ * No terminal object, or a pane the office is not attached to and reading, is `unknown` and never idle.
+ */
+export function readTerminalTurn(
+  terminal: SupervisedTerminal | undefined
+): Pick<SupervisorTerminalReading, 'idleSince' | 'background'> & { readonly turn: SupervisorTurn } {
+  if (!terminal || !paneWatched(terminal)) return { turn: 'unknown' };
+  if (terminal.isWorking || terminal.status === 'busy') return { turn: 'working' };
+  if (terminal.status !== 'idle') return { turn: 'unknown' };
   const idleSince = Math.max(terminal.lastActivityAt ?? 0, terminal.lastPromptTime ?? 0, terminal.paneStartedAt ?? 0);
   return {
-    inputHeld: true,
     turn: 'idle',
     ...(idleSince > 0 ? { idleSince } : {}),
     ...(terminal.watching ? { background: true } : {}),
@@ -379,19 +457,12 @@ export interface SupervisedScreenTerminal extends SupervisedTerminal {
   } | null;
 }
 
-export type SupervisorScreenReading = Pick<
-  SupervisorObservation['session'],
-  'startupScreen' | 'turn' | 'idleSince' | 'background'
->;
-
-/** Every field of the terminal, so the copy below cannot silently drop one that is added later. */
-type WholeTerminal = { readonly [Key in keyof Required<SupervisedTerminal>]: SupervisedTerminal[Key] };
+export type SupervisorScreenReading = Pick<SupervisorObservation['session'], 'startupScreen'>;
 
 /**
- * One office terminal reduced to what a parked start-up screen is judged by: the screen its pane shows, and the
- * same reading of the agent's turn that a held input gets (`readSupervisedTerminal`, asked as if the input were
- * held, so there is one rule for "idle" and not two). Like that reading, the observation is built with it and a
- * step reads it again immediately before it acts.
+ * The provider start-up screen one office terminal shows, when the office knows it by more than its words. The
+ * observation is built with it and a step reads it again immediately before it acts. What the pane shows of a turn
+ * is read beside it by `readTerminalTurn`, as for every laptop.
  *
  * Nothing is reported for a pane the office is not reading, for an agent that is working, or for a screen the
  * office knows only by its words: none of those is a parked agent.
@@ -405,27 +476,8 @@ export function readParkedScreen(terminal: SupervisedScreenTerminal | undefined)
     return {};
   }
   if (!screen || (screen.shown !== 'widget' && screen.shown !== 'launch')) return {};
-  const startupScreen = { label: screen.label, kind: screen.kind, answering: screen.answering, proof: screen.shown };
-  const held: WholeTerminal = {
-    pid: terminal.pid,
-    status: terminal.status,
-    runtimeHealth: terminal.runtimeHealth,
-    paneExit: terminal.paneExit,
-    viewerInputHeld: terminal.viewerInputHeld,
-    paneLifecycleInFlight: terminal.paneLifecycleInFlight,
-    terminalInputHeld: true,
-    isWorking: terminal.isWorking,
-    watching: terminal.watching,
-    lastActivityAt: terminal.lastActivityAt,
-    lastPromptTime: terminal.lastPromptTime,
-    paneStartedAt: terminal.paneStartedAt,
-  };
-  const { turn, idleSince, background } = readSupervisedTerminal(held);
   return {
-    startupScreen,
-    ...(turn ? { turn } : {}),
-    ...(idleSince === undefined ? {} : { idleSince }),
-    ...(background ? { background } : {}),
+    startupScreen: { label: screen.label, kind: screen.kind, answering: screen.answering, proof: screen.shown },
   };
 }
 
@@ -513,7 +565,8 @@ export interface SupervisorAssessment {
  * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop.
  * - `provider`: the laptop runs but no agent of this employee is confirmed in it.
  * - `viewer`: the agent may be fine; the office terminal is not attached.
- * - `owner`: recognized, and only the owner may settle it.
+ * - `owner`: recognized, and once left to the owner. Each now has its own way forward (`classifyOwnerCode`); a
+ *   plan move that is held by one is still not abandoned for it.
  */
 export type SupervisorCodeKind =
   | 'wait'
@@ -667,9 +720,6 @@ const LOCAL_MODEL_PREFIX = 'DOCKER_CONTINUATION_LOCAL_MODEL_';
 const OWNER_STEPS: Readonly<Record<string, string>> = {
   DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED:
     'Approve the resource limits: PUT /api/company/employees/:id/docker-policy, then continue the laptop.',
-  DOCKER_CONTINUATION_FOREIGN_PROVIDER:
-    'Look at the laptop terminal. Rebuild the laptop (POST …/docker-rebuild/preview, then /apply) once nothing in it matters.',
-  DOCKER_CONTINUATION_RUNTIME_CHANGED: 'Restart the office so it reads its configuration again.',
   DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: REPAIR_POOL_BY_HAND,
   DOCKER_CONTINUATION_POOL_UNCONFIRMED: REPAIR_POOL_BY_HAND,
   DOCKER_CONTINUATION_STORAGE_UNCONFIRMED:
@@ -700,7 +750,8 @@ function clip(text: string, limit: number): string {
 
 /**
  * Why a held plan move stopped, read from its recorded error. `unrecognized` is every text this module does not
- * know: such a move is still continued (the move's own record offers that), but it is never abandoned automatically.
+ * know: such a move is continued as often as any other (the move's own record offers that) and then abandoned.
+ * The class decides only how long the office waits before it abandons, never whether it does.
  */
 export type SupervisorMoveErrorClass =
   | 'sign-in'
@@ -734,6 +785,18 @@ export function classifyMoveError(error: string | undefined): SupervisorMoveErro
 
 const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking', 'stopping']);
 
+/**
+ * How long a held move is kept for a cause that lies outside the move, before it is abandoned like any other.
+ *
+ * Three causes are outside: the plan the employee is being moved to is not signed in at the office, an operation
+ * that only has to finish (`wait`), and something every laptop shares (`owner`: the pool, the storage, the office's
+ * own configuration). Continuing such a move again finds the same thing, and the office repairs each of them by
+ * another path, so the move is given thirty minutes from the moment the problem was first seen. That covers a
+ * sign-in the office places or refreshes itself and the recovery of the shared pool after a host restart. After it
+ * the move is abandoned: the employee is not kept out of work for a move that cannot finish.
+ */
+export const SUPERVISOR_MOVE_POLICY: { readonly outsideCauseMs: number } = { outsideCauseMs: 30 * MINUTE };
+
 // ─── Classification ───────────────────────────────────────────────────────────
 
 const classified = (
@@ -760,34 +823,112 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
     return classified('move-in-progress', `${name} is being moved to another plan.`);
   if (move.phase !== 'recovery-required') return undefined;
   const error = clip(move.error ?? 'no reason was recorded', 300),
-    fingerprint = `move:${move.id}:${error}`,
-    held = `${name}'s plan move stopped part-way: ${error}`;
+    fingerprint = `move:${move.id}:${error}`;
+  // Every held move has the same ladder: it is continued while its record offers that, and then closed. None is
+  // kept for the owner, so no class of error and no missing step ends in a sentence that asks for one.
   if (!move.docker)
-    return classified('needs-owner', held, {
-      code: 'move-held',
-      fingerprint,
-      needsHuman: 'This move belongs to the retired runtime. Resolve it: POST /api/plans/moves/:id/resolve.',
-    });
-  const kind = classifyMoveError(move.error);
-  if (kind === 'sign-in' && observed.planSignedIn !== true)
-    return classified('needs-sign-in', held, {
-      code: 'move-sign-in',
-      fingerprint,
-      needsHuman: `Sign in ${plan(observed)} at the office (Plans). The office then continues the move on its own.`,
-    });
-  if (kind === 'owner-decision')
-    return classified('needs-owner', held, {
-      code: 'move-owner-decision',
-      fingerprint,
-      needsHuman: "Answer the screen in the new session's terminal, then continue the move.",
-    });
-  if (!move.allowedActions.includes('continue-original'))
-    return classified('needs-owner', held, {
-      code: 'move-held',
-      fingerprint,
-      needsHuman: 'This move offers no continue step. Read it: POST /api/plans/moves/:id/status.',
-    });
-  return classified('move-held-retryable', held, { code: 'move-' + kind, fingerprint });
+    return classified(
+      'move-held-retryable',
+      `A plan move of ${name} from before the laptop runtime is still on record as stopped part-way: ${error}`,
+      { code: 'move-retired', fingerprint }
+    );
+  return classified('move-held-retryable', `${name}'s plan move stopped part-way: ${error}`, {
+    code: 'move-' + classifyMoveError(move.error),
+    fingerprint,
+  });
+}
+
+/** What a held laptop move waits for outside itself, in plain words; undefined when its cause is its own. */
+function moveCauseOutside(observed: SupervisorObservation): string | undefined {
+  const kind = classifyMoveError(observed.move?.error);
+  if (kind === 'sign-in' && observed.planSignedIn !== true) return "the move's new plan to be signed in at the office";
+  if (kind === 'wait') return 'the operation that holds the move to finish';
+  if (kind === 'owner') return 'the repair of what holds the move, which every laptop shares';
+  return undefined;
+}
+
+function moveCauseOverdue(history: SupervisorHistory, now: number): boolean {
+  return history.since > 0 && now - history.since >= SUPERVISOR_MOVE_POLICY.outsideCauseMs;
+}
+
+/** The wait for a cause outside the move. It ends by itself when the move is closed for it after all. */
+function outsideCauseWait(waitingFor: string, history: SupervisorHistory): Gate {
+  return history.since > 0
+    ? { kind: 'wait', waitingFor, at: history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs }
+    : { kind: 'wait', waitingFor };
+}
+
+/**
+ * A sign-in the office put into this employee's laptop is still settling: the step is running, or it ended less
+ * than its own watch time ago. A move is not closed in that window, because the continue that follows a placed
+ * sign-in is what finishes it.
+ */
+function signInBeingPlaced(history: SupervisorHistory, now: number, policy: SupervisorPolicy): boolean {
+  const last = history.lastAction;
+  if (!last || last.action !== 'replace-sign-in') return false;
+  if (last.outcome === 'issued') return true;
+  return last.outcome === 'done' && now - last.at < policy.ladder['replace-sign-in'].escalateAfterMs;
+}
+
+/**
+ * Continue: only a laptop move, and only while its record offers it. A move that waits at the sign-in screen of a
+ * plan the office does not report signed in is not continued: the continue would read the same screen and spend an
+ * attempt. It is waited for instead, for `SUPERVISOR_MOVE_POLICY.outsideCauseMs`, and continued at once when the
+ * plan becomes signed in. After that time the rung steps aside and the move is closed.
+ */
+function continueMoveGate(observed: SupervisorObservation, history: SupervisorHistory, now: number): Gate {
+  const move = observed.move;
+  if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
+  const outside = classifyMoveError(move.error) === 'sign-in' ? moveCauseOutside(observed) : undefined;
+  if (!outside) return { kind: 'ok' };
+  return moveCauseOverdue(history, now) ? { kind: 'skip' } : outsideCauseWait(outside, history);
+}
+
+/**
+ * Close the move: abandon a laptop move, or settle one of the retired runtime. Nothing about the error decides
+ * whether, only when. A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first,
+ * and no move is closed while a sign-in the office placed for it is settling. What the record offers is not asked
+ * here: the service that closes the move decides that itself and refuses in its own words, and a refusal spends
+ * one of the rung's few attempts.
+ */
+function abandonMoveGate(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
+  if (!observed.move) return { kind: 'skip' };
+  if (!observed.move.docker) return { kind: 'ok' };
+  if (signInBeingPlaced(history, now, policy))
+    return { kind: 'wait', waitingFor: 'the sign-in the office placed to take effect' };
+  const outside = moveCauseOutside(observed);
+  return outside && !moveCauseOverdue(history, now) ? outsideCauseWait(outside, history) : { kind: 'ok' };
+}
+
+const POLICY_REQUIRED = 'DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED';
+const RUNTIME_CHANGED = 'DOCKER_CONTINUATION_RUNTIME_CHANGED';
+const NO_POLICY = 'no-policy';
+const NO_LAPTOP = 'no-laptop';
+const NOT_BOXED = 'not-boxed';
+
+/**
+ * The three codes that were once left to the owner.
+ * - No approved limits: the limits step gives the employee the owner's standing default (`SUPERVISOR_LIMITS_PATH`).
+ * - Something the office did not start runs in the laptop terminal: the office cannot adopt it, so the laptop is
+ *   held until it is rebuilt, between that process's turns like any other laptop an agent runs in.
+ * - The office's laptop configuration changed under it: no laptop is at fault and no laptop step helps. The office
+ *   restarts itself (`office-self-restart.ts`); for the employee this is a wait, and it is never called stalled.
+ */
+function classifyOwnerCode(code: string, sentence: string): SupervisorClassification {
+  const fingerprint = 'code:' + code;
+  if (code === POLICY_REQUIRED) return classified('laptop-not-started', sentence, { code, fingerprint });
+  if (code === RUNTIME_CHANGED)
+    return classified('starting', `${sentence} The office restarts itself to read it again.`, { code });
+  return classified(
+    'held-needs-rebuild',
+    `${sentence} The office cannot take it over, so the laptop is rebuilt once nothing in it is in the middle of a turn.`,
+    { code, fingerprint }
+  );
 }
 
 function classifyCode(
@@ -799,12 +940,13 @@ function classifyCode(
   const name = observed.name,
     kind = supervisorCodeKind(code),
     fingerprint = 'code:' + code;
+  // Watched first, then treated as a hold that a rebuild settles: see `unrecognizedCode` and `rebuildGate`.
   if (!kind)
-    return classified('unknown', `${name}'s laptop reports ${clip(code, 96)}, which the office does not recognize.`, {
-      code,
-      fingerprint,
-      needsHuman: 'Read the laptop: GET /api/company/employees/:id/docker-policy. Rebuild it if nothing in it matters.',
-    });
+    return classified(
+      'held-needs-rebuild',
+      `${name}'s laptop reports ${clip(code, 96)}, which the office does not recognize.`,
+      { code, fingerprint }
+    );
   const sentence = codeSentence(code, name, message);
   if (kind === 'wait') return classified('starting', sentence, { code });
   if (kind === 'viewer') return classified('viewer-lost', sentence, { code, fingerprint });
@@ -814,8 +956,7 @@ function classifyCode(
       providerExit ? `${name}'s agent is not running in their laptop. ${clip(providerExit, 400)}` : sentence,
       { code, fingerprint }
     );
-  if (kind === 'owner')
-    return classified('needs-owner', sentence, { code, fingerprint, needsHuman: OWNER_STEPS[code] });
+  if (kind === 'owner') return classifyOwnerCode(code, sentence);
   if (kind === 'stopped' && observed.laptop.poolAlive !== true)
     return classified('needs-owner', `${sentence} No other laptop of this office is running either.`, {
       code,
@@ -837,6 +978,17 @@ function classifyCode(
   return classified(kind === 'retry' ? 'held-retryable' : 'held-needs-rebuild', sentence, { code, fingerprint });
 }
 
+/**
+ * The one state the office cannot leave by itself. Every laptop operation it has makes a laptop from the record of
+ * an earlier one: that record fixes where the employee's home directory is, and the employee's own office network
+ * is made by the host set-up. An employee with neither a laptop nor any record of one has nothing to build from.
+ * The office goes on reading, and starts a stopped laptop of this employee as soon as one exists.
+ */
+const NO_FIRST_LAPTOP =
+  'This employee has never had a laptop in this office, and the office has no operation that makes a first one: ' +
+  'every laptop is made from the record of an earlier one. Create the first laptop once with the host set-up; the ' +
+  'office starts it by itself as soon as it exists.';
+
 function classifyLaptop(observed: SupervisorObservation): SupervisorClassification {
   const { laptop, session, name } = observed;
   if (laptop.rebuildPending)
@@ -845,11 +997,11 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
       fingerprint: 'rebuild-pending',
     });
   if (!laptop.record) {
+    // The limits step gives them the owner's standing default; see `SUPERVISOR_LIMITS_PATH`.
     if (!laptop.policyApproved)
-      return classified('needs-owner', `${name} has no laptop and no approved resource limits.`, {
-        code: 'no-policy',
-        fingerprint: 'no-policy',
-        needsHuman: OWNER_STEPS.DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED,
+      return classified('laptop-not-started', `${name} has no laptop and no approved resource limits.`, {
+        code: NO_POLICY,
+        fingerprint: NO_POLICY,
       });
     if (laptop.source === 'stopped')
       return classified('laptop-not-started', `${name} has a fresh laptop that has not been started yet.`, {
@@ -859,11 +1011,11 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
     // An unused laptop holds nothing, so replacing it loses nothing: the rebuild rung takes it, under the same
     // switch, limits and proofs as every other rebuild. With repairs switched off the owner is told the calls.
     if (laptop.source === 'outdated') return classifyCode(observed, 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED');
-    return classified('unknown', `${name} has no laptop record, and the office found no laptop to start from.`, {
-      code: 'no-laptop',
-      fingerprint: 'no-laptop',
-      needsHuman: 'Read GET /api/company/employees/:id/docker-policy to see which laptop, if any, exists.',
-    });
+    const missing = `${name} has no laptop record, and the office found no laptop to start from.`;
+    // An earlier laptop operation of this employee is on record, and the rebuild makes a laptop from that record.
+    if (laptop.templateOnRecord)
+      return classified('held-needs-rebuild', missing, { code: NO_LAPTOP, fingerprint: NO_LAPTOP });
+    return classified('unknown', missing, { code: NO_LAPTOP, fingerprint: NO_LAPTOP, needsHuman: NO_FIRST_LAPTOP });
   }
   const seen = laptop.continuation;
   if (seen?.state === 'held' && seen.code) return classifyCode(observed, seen.code, seen.message, seen.providerExit);
@@ -914,7 +1066,7 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
     // A sign-in the office puts back and an agent it starts again ask nobody for anything. The one thing it
     // cannot do is sign a plan in that is signed in nowhere, so that alone is said, as soon as it is known.
     if (screen.kind === 'credential')
-      return classified('at-sign-in-screen', `${name} is waiting at ${screen.label}.`, {
+      return classified('needs-sign-in', `${name} is waiting at ${screen.label}.`, {
         code: observed.planSignedIn === false ? 'plan-signed-out' : 'sign-in-screen',
         fingerprint,
         ...(observed.planSignedIn === false ? { needsHuman: signedOutAtOffice(observed) } : {}),
@@ -932,11 +1084,15 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
     const { session } = observed;
     if (session.available && session.runtimeHealth !== 'dead' && session.runtimeHealth !== 'disconnected')
       return classified('healthy', `${name} is running.`);
-    return classified('unknown', `${name} is not connected. Their session is not in a laptop the supervisor manages.`, {
-      code: 'not-boxed',
-      fingerprint: 'not-boxed',
-      needsHuman: 'Wake the employee: POST /api/company/employees/:id/wake.',
-    });
+    // No laptop step applies to a session outside a laptop. The office wakes it, as the owner's Wake does.
+    return classified(
+      'viewer-lost',
+      `${name} is not connected. Their session is not in a laptop, so the office wakes it.`,
+      {
+        code: NOT_BOXED,
+        fingerprint: NOT_BOXED,
+      }
+    );
   }
   const laptop = classifyLaptop(observed);
   // What decides the repair is said first. The code and the problem's clock stay those of the lost terminal.
@@ -954,9 +1110,9 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
 function signedOutAtOffice(observed: SupervisorObservation): string {
   return (
     `${plan(observed).replace(/^t/, 'T')} is not signed in at the office. Only the account holder can sign a plan in ` +
-    '(Plans); the ' +
-    'office never types a sign-in. While this laptop still holds a sign-in that works, the office starts the agent ' +
-    'again with it. Otherwise it puts the sign-in into the laptop and starts the agent again once the plan is signed in.'
+    '(Plans); the office never types a sign-in. While this laptop still holds a sign-in that works, the office ' +
+    'starts the agent again with it. Otherwise it puts the sign-in into the laptop and starts the agent again once ' +
+    'the plan is signed in.'
   );
 }
 
@@ -975,16 +1131,18 @@ function signedOutEverywhere(observed: SupervisorObservation): string {
  * A held input beside any other condition changes nothing: that condition keeps its own path and rules.
  */
 function terminalHeldForGood(observed: SupervisorObservation, condition: SupervisorCondition): boolean {
-  return condition === 'viewer-lost' && observed.session.inputHeld === true;
+  return condition === 'viewer-lost' && observed.boxed && observed.session.inputHeld === true;
 }
 
 // ─── Ladder ───────────────────────────────────────────────────────────────────
 
-/** The rungs each base condition may climb, in order. A condition that is not listed has no automatic step. */
+/**
+ * The rungs each base condition may climb, in order. A condition that is not listed has no automatic step here;
+ * `ladderPath` adds the paths that depend on more than the condition.
+ */
 export const SUPERVISOR_PATHS: Readonly<Partial<Record<SupervisorCondition, readonly SupervisorAction[]>>> = {
   'viewer-lost': ['reconnect-viewer'],
-  'needs-sign-in': ['replace-sign-in'],
-  'at-sign-in-screen': ['replace-sign-in', 'relaunch-provider', 'rebuild-laptop'],
+  'needs-sign-in': ['replace-sign-in', 'relaunch-provider', 'rebuild-laptop'],
   'stuck-first-run-screen': ['relaunch-provider', 'rebuild-laptop'],
   'provider-exited': ['relaunch-provider', 'rebuild-laptop'],
   'held-retryable': ['resend-continuation', 'rebuild-laptop'],
@@ -999,13 +1157,35 @@ export const SUPERVISOR_PATHS: Readonly<Partial<Record<SupervisorCondition, read
  */
 export const SUPERVISOR_HELD_INPUT_PATH: readonly SupervisorAction[] = ['reconnect-viewer', 'rebuild-laptop'];
 
+/**
+ * The path of an employee who has no approved resource limits (`no-policy`, or a set-up that reports the same).
+ * One step gives them the owner's standing default; the laptop is started from the reading that follows.
+ */
+export const SUPERVISOR_LIMITS_PATH: readonly SupervisorAction[] = ['apply-standing-limits'];
+
+/**
+ * The path of a laptop that has been starting, or between two states, for `stalledAfterMs` without becoming
+ * healthy. A wait that does not end is a hold: the recorded request is sent again when the laptop offers that, and
+ * the rebuild follows under its usual rules.
+ */
+export const SUPERVISOR_STALLED_PATH: readonly SupervisorAction[] = ['resend-continuation', 'rebuild-laptop'];
+
 const DAY = 24 * 60 * MINUTE;
 
 type Gate =
   | { readonly kind: 'ok'; readonly preconditions?: readonly SupervisorPrecondition[] }
   | { readonly kind: 'skip' }
-  | { readonly kind: 'wait'; readonly waitingFor: string }
+  /** `at`: when the wait ends by itself, where that is known. */
+  | { readonly kind: 'wait'; readonly waitingFor: string; readonly at?: number }
   | { readonly kind: 'human'; readonly needsHuman: string };
+
+/** A time as a sentence names it. A sentence built with one stays the same for as long as that time holds. */
+function when(at: number): string {
+  return new Date(at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+
+/** The owner's own switch for the two standing defaults. Naming it is the only refusal the office gives here. */
+const STANDING_OFF = 'The standing defaults are switched off (company setting supervisorStandingDefaults).';
 
 const REBUILD_BY_HAND =
   'Rebuild the laptop: POST /api/company/employees/:id/docker-rebuild/preview, then /apply, then continue it.';
@@ -1015,7 +1195,29 @@ const REBUILD_RUNNING_CALLS =
   'whatever the agent is doing), then continue it.';
 const REBUILD_RUNNING_BY_HAND = 'Rebuild the laptop: ' + REBUILD_RUNNING_CALLS;
 
-/** The two limits every automatic rebuild keeps, whatever its reason. Undefined when both allow one. */
+/**
+ * The layout a rebuild uses. An employee's own is the one the owner approved for their most recent laptop
+ * operation. One who has none is given the owner's standing default: what every laptop of the office that has a
+ * layout shares (`standing.layout`). Two cases are left: the owner switched the standing defaults off, which is
+ * named, and an office in which no laptop has a layout at all, so that there is nothing approved to build with.
+ */
+function layoutGate(observed: SupervisorObservation, byHand: string): Gate | undefined {
+  const { templateOnRecord, standing } = observed.laptop;
+  if (templateOnRecord || (standing?.enabled && standing.layout)) return undefined;
+  if (standing && !standing.enabled)
+    return { kind: 'human', needsHuman: `No laptop layout is on record for this employee. ${STANDING_OFF} ${byHand}` };
+  return {
+    kind: 'human',
+    needsHuman:
+      'No owner-approved laptop layout is on record for this employee, and no other laptop of this office has one ' +
+      `the office could build with. ${byHand}`,
+  };
+}
+
+/**
+ * The two limits every automatic rebuild keeps, whatever its reason. Undefined when both allow one. The limit per
+ * day is a pause and not an end: it says when the next rebuild may run, and the ladder goes on from there.
+ */
 function rebuildLimit(
   observed: SupervisorObservation,
   history: SupervisorHistory,
@@ -1023,22 +1225,21 @@ function rebuildLimit(
   policy: SupervisorPolicy,
   byHand: string
 ): Gate | undefined {
-  if (!observed.laptop.templateOnRecord)
-    return {
-      kind: 'human',
-      needsHuman:
-        'No owner-approved laptop layout is on record for this employee, so the office cannot rebuild on its own. ' +
-        byHand,
-    };
-  if (history.rebuilds.filter((at) => now - at < DAY).length >= policy.rebuildsPerDay)
-    return {
-      kind: 'human',
-      needsHuman: `The office already rebuilt this laptop ${policy.rebuildsPerDay} times today and it did not hold. ${byHand}`,
-    };
-  return undefined;
+  const layout = layoutGate(observed, byHand);
+  if (layout) return layout;
+  const today = history.rebuilds.filter((at) => now - at < DAY);
+  if (today.length < policy.rebuildsPerDay) return undefined;
+  const at = today[today.length - policy.rebuildsPerDay]! + DAY;
+  return {
+    kind: 'wait',
+    waitingFor:
+      `the daily limit on rebuilds of one laptop (${policy.rebuildsPerDay}): the earlier ones did not hold, and ` +
+      `the next one may run at ${when(at)}`,
+    at,
+  };
 }
 
-/** What the office waits for before it rebuilds a laptop whose terminal input is held, by what the pane shows. */
+/** What the office waits for before it rebuilds a laptop an agent may run in, by what the pane shows. */
 const HELD_INPUT_WAIT: Readonly<Record<SupervisorTurn, string>> = {
   working: "the agent's current turn to end",
   idle: "the agent's terminal to stay quiet a little longer",
@@ -1047,51 +1248,89 @@ const HELD_INPUT_WAIT: Readonly<Record<SupervisorTurn, string>> = {
 
 const HELD_INPUT_BACKGROUND_WAIT = 'the work the agent left running to finish';
 
+/** A laptop code the office does not recognize is what holds this employee. */
+function unrecognizedCode(base: Pick<SupervisorClassification, 'code' | 'fingerprint'>): boolean {
+  return !!base.code && base.fingerprint === 'code:' + base.code && supervisorCodeKind(base.code) === undefined;
+}
+
+/** The laptop's own read still says it is held or unfinished. Asked to be proved again by the step. */
+function laptopHeld(observed: SupervisorObservation): readonly SupervisorPrecondition[] {
+  const seen = observed.laptop.continuation;
+  return seen && seen.state !== 'ready' ? ['laptop-held'] : [];
+}
+
 /**
- * The one exception to "never while an agent is running", and only for a lost terminal whose input is held for
- * good (`terminalHeldForGood`): the office can never type to that agent again, so once its turn has ended, keeping
- * it gains nothing, and a rebuild keeps its home directory and the conversation saved in it.
+ * The rebuild of a laptop that an agent may run in. It is the rule that was made for a terminal whose input is
+ * held for good, and it serves every laptop that only a rebuild settles: the home directory and the conversation
+ * saved in it are kept, so what a rebuild can cost is the turn in progress, and that is what is never given up.
  *
- * It is allowed only while the pane is seen idle and has been silent for `heldInputIdleMs`. A turn in progress is
- * waited for, and so is a pane the office is not reading: `unknown` is never treated as idle. When that has lasted
- * `heldInputTurnMs` since the problem was first seen, a person is told; the office still rebuilds on its own as
- * soon as the turn has ended, and never before. Work the agent left running after its turn is waited for as well,
- * but only for that long: after it the idle laptop is rebuilt with that work still running. With repairs switched off nothing is waited for on the owner's
- * behalf: the usual sentence names the switch and the calls.
+ * - The pane is seen idle and has been silent for `heldInputIdleMs`: the laptop is rebuilt (`proof`).
+ * - A turn is in progress: it is waited for, however long it takes.
+ * - The agent ended its turn with work left running: that is waited for until `heldInputTurnMs` after the problem
+ *   was first seen, and then the idle laptop is rebuilt with it.
+ * - The office is not reading the pane. `unknown` is never treated as idle. A read made inside the laptop is asked
+ *   first, and a laptop it shows to be empty is rebuilt at once. Otherwise the laptop is rebuilt `blindRebuildMs`
+ *   after the problem was first seen (`agent-unreadable`): see `SUPERVISOR_POLICY` for why that long. The wait
+ *   says when.
  *
- * What runs in the laptop is not asked here. The step proves the hold and the idle pane again itself, and confirms
- * the discard only for the one recorded laptop (`DockerSupervisorLaptops.rebuild`).
+ * The step proves the pane again itself, and confirms the discard only for the one recorded laptop
+ * (`DockerSupervisorLaptops.rebuild`).
+ */
+function betweenTurnsGate(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy,
+  proof: readonly SupervisorPrecondition[]
+): Gate {
+  const { turn = 'unknown', idleSince, background } = observed.session;
+  const overdue = history.since > 0 && now - history.since >= policy.heldInputTurnMs;
+  const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
+  if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: proof };
+  if (quiet)
+    return { kind: 'wait', waitingFor: HELD_INPUT_BACKGROUND_WAIT, at: history.since + policy.heldInputTurnMs };
+  if (turn === 'working' || (turn === 'idle' && idleSince !== undefined))
+    return { kind: 'wait', waitingFor: HELD_INPUT_WAIT[turn] };
+  // A laptop that this read shows to be empty never comes here: `rebuildGate` decides for it.
+  if (observed.laptop.provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
+  const at = history.since + policy.blindRebuildMs;
+  if (history.since > 0 && now >= at)
+    return {
+      kind: 'ok',
+      preconditions: [...proof.filter((name) => name !== 'agent-between-turns'), 'agent-unreadable'],
+    };
+  return {
+    kind: 'wait',
+    waitingFor: `${HELD_INPUT_WAIT.unknown}; if there is still none, the laptop is rebuilt at ${when(at)}`,
+    at,
+  };
+}
+
+/**
+ * A lost terminal whose input is held for good (`terminalHeldForGood`): the office can never type to that agent
+ * again, so once its turn has ended, keeping it gains nothing, and a rebuild keeps its home directory and the
+ * conversation saved in it. It was the first laptop to be rebuilt while its agent runs; the rule is
+ * `betweenTurnsGate`, with the hold as what the step proves again.
+ *
+ * What runs in the laptop is asked only while the office cannot read the pane. A laptop that this read shows to be
+ * empty has nothing to lose, and the rules of an empty laptop decide for it (`rebuildGate`).
  */
 function heldInputRebuildGate(
   observed: SupervisorObservation,
   history: SupervisorHistory,
-  flags: SupervisorFlags,
+  _flags: SupervisorFlags,
   now: number,
   policy: SupervisorPolicy
 ): Gate {
+  const { turn = 'unknown', idleSince } = observed.session,
+    provider = observed.laptop.provider;
+  const unread = turn === 'unknown' || (turn === 'idle' && idleSince === undefined);
+  if (unread && provider !== undefined && provider !== 'running' && provider !== 'unknown')
+    return rebuildGate(observed, history, now, policy);
   const limit = rebuildLimit(observed, history, now, policy, REBUILD_RUNNING_BY_HAND);
   if (limit) return limit;
-  const { turn = 'unknown', idleSince, background } = observed.session;
-  const overdue = history.since > 0 && now - history.since >= policy.heldInputTurnMs;
-  const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
-  if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: ['terminal-input-held'] };
-  if (quiet) return { kind: 'wait', waitingFor: HELD_INPUT_BACKGROUND_WAIT };
-  if (!overdue || !flags.enabled || !flags.autoRepair) return { kind: 'wait', waitingFor: HELD_INPUT_WAIT[turn] };
-  return {
-    kind: 'human',
-    needsHuman:
-      "The office rebuilds this laptop only after the agent's current turn has ended, and after " +
-      `${Math.round(policy.heldInputTurnMs / MINUTE)} minutes it still cannot see that it has. It goes on waiting ` +
-      `and rebuilds as soon as the turn ends. To rebuild now instead: ${REBUILD_RUNNING_CALLS}`,
-  };
+  return betweenTurnsGate(observed, history, now, policy, ['terminal-input-held']);
 }
-
-/** What the office waits for before it starts an agent again that is parked on a start-up screen. */
-const PARKED_SCREEN_WAIT: Readonly<Record<SupervisorTurn, string>> = {
-  working: "the agent's terminal to stop changing",
-  idle: "the agent's terminal to stay quiet a little longer",
-  unknown: "a reading of the agent's terminal",
-};
 
 /** Details of a `replace-sign-in` step that the policy reads. Written by the office's step, compared here. */
 export const SIGN_IN_NO_FOLDER = 'the laptop has no sign-in folder of this plan to read';
@@ -1134,18 +1373,16 @@ function signedInNowhere(observed: SupervisorObservation, history: SupervisorHis
  * office can do that, otherwise a rebuild, which keeps the home directory and continues the saved conversation.
  *
  * An agent on such a screen is in no turn: it has not reached its composer, so nothing of a conversation is running
- * that the step could discard. That is not assumed from the screen's name. It is allowed only when
+ * that the step could discard. That is not assumed from the screen's name. The step is taken under the rule of
+ * every laptop an agent may run in (`betweenTurnsGate`: the pane idle and silent, work left running waited for),
+ * with one more demand of its own:
  *
  * - the office knows the screen by more than its words (`proof`): the live widget on the frame, or a launch of
  *   its own that has not shown a composer since. A conversation that quotes a screen shows the same words, and
- *   nothing is restarted for words;
- * - the office terminal, by the reading a held input is judged by, shows the pane idle and silent for
- *   `heldInputIdleMs`. A pane that still changes, or one the office is not reading, is waited for;
- * - work the pane says was left running is given `heldInputTurnMs` since the problem was first seen.
+ *   nothing is restarted for words. The step proves the screen again itself (`agent-parked-at-screen`).
  *
- * The step proves the screen and the idle pane again itself, and a rebuild confirms the discard only for the one
- * recorded laptop (`DockerSupervisorLaptops.rebuild`). The rebuild keeps the limits every rebuild keeps. An
- * employee a plan move owns is left to the move.
+ * A rebuild keeps the limits every rebuild keeps, and a laptop that a read shows to be empty is left to the rules
+ * of an empty laptop, as for a held terminal input. An employee a plan move owns is left to the move.
  *
  * A sign-in screen of a plan that is signed in nowhere is not restarted: the new agent would stop at the same
  * screen. That is the one thing said to a person here, and the office goes on reading.
@@ -1160,53 +1397,58 @@ function parkedScreenGate(
 ): Gate {
   const screen = observed.session.startupScreen;
   if (!screen?.proof || !observed.boxed || observed.move) return { kind: 'skip' };
-  if (action === 'relaunch-provider' && (!flags.relaunchAvailable || observed.laptop.record?.version === 3))
-    return { kind: 'skip' };
+  const relaunch = action === 'relaunch-provider';
+  if (relaunch && (!flags.relaunchAvailable || observed.laptop.record?.version === 3)) return { kind: 'skip' };
   if (screen.kind === 'credential' && signedInNowhere(observed, history))
-    return action === 'rebuild-laptop'
-      ? { kind: 'human', needsHuman: signedOutEverywhere(observed) }
-      : { kind: 'skip' };
-  const limit =
-    action === 'rebuild-laptop' ? rebuildLimit(observed, history, now, policy, REBUILD_RUNNING_BY_HAND) : undefined;
-  if (limit) return limit;
-  const { turn = 'unknown', idleSince, background } = observed.session;
-  const overdue = history.since > 0 && now - history.since >= policy.heldInputTurnMs;
-  const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
-  if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: ['agent-parked-at-screen'] };
-  return { kind: 'wait', waitingFor: quiet ? HELD_INPUT_BACKGROUND_WAIT : PARKED_SCREEN_WAIT[turn] };
+    return relaunch ? { kind: 'skip' } : { kind: 'human', needsHuman: signedOutEverywhere(observed) };
+  if (!relaunch) {
+    const { turn = 'unknown', idleSince } = observed.session,
+      provider = observed.laptop.provider;
+    const unread = turn === 'unknown' || (turn === 'idle' && idleSince === undefined);
+    if (unread && provider !== undefined && provider !== 'running' && provider !== 'unknown')
+      return rebuildGate(observed, history, now, policy);
+    const limit = rebuildLimit(observed, history, now, policy, REBUILD_RUNNING_BY_HAND);
+    if (limit) return limit;
+  }
+  const between = betweenTurnsGate(observed, history, now, policy, ['agent-parked-at-screen']);
+  // A relaunch discards nothing but the parked agent, and only with the screen proved: it never goes ahead on a
+  // read of what runs in the laptop alone.
+  return relaunch && between.kind === 'ok' && !between.preconditions?.includes('agent-parked-at-screen')
+    ? { kind: 'wait', waitingFor: HELD_INPUT_WAIT.unknown }
+    : between;
 }
 
 /**
- * A laptop is rebuilt automatically only when nothing can be lost with it: a fresh read says no agent runs in it
- * (it exited, was never started, or the laptop is stopped or gone). `running` is the owner's decision; `unknown`
- * is never treated as absence. The one exception has its own gate (`heldInputRebuildGate`).
+ * A laptop that nothing runs in is rebuilt as soon as a fresh read says so: its agent exited, was never started, or
+ * the laptop is stopped or gone. Nothing can be lost with it.
+ *
+ * A laptop an agent runs in is rebuilt between that agent's turns (`betweenTurnsGate`), never in the middle of
+ * one. `unknown`, a read that could not say what runs there, is never treated as absence: it is asked again until
+ * the problem has stood for `stalledAfterMs`, and from then on the laptop is treated as one an agent runs in.
+ *
+ * A code the office does not recognize (`base`) is watched for `unrecognizedAfterMs` before any of this.
  */
 function rebuildGate(
   observed: SupervisorObservation,
   history: SupervisorHistory,
   now: number,
-  policy: SupervisorPolicy
+  policy: SupervisorPolicy,
+  base?: Pick<SupervisorClassification, 'code' | 'fingerprint'>
 ): Gate {
   const limit = rebuildLimit(observed, history, now, policy, REBUILD_BY_HAND);
   if (limit) return limit;
-  const provider = observed.laptop.provider;
-  if (provider === 'running')
+  const settles = history.since + policy.unrecognizedAfterMs;
+  if (base && unrecognizedCode(base) && now < settles)
     return {
-      kind: 'human',
-      needsHuman:
-        'An agent is running in a laptop of this employee, or the office cannot show that a running laptop is empty, ' +
-        'so rebuilding would discard its conversation. That needs the owner: ' +
-        'POST …/docker-rebuild/preview, then /apply with confirmDiscardRunning.',
+      kind: 'wait',
+      waitingFor: `the code to clear by itself; if it still stands, the laptop is treated as held at ${when(settles)}`,
+      at: settles,
     };
-  if (provider === 'unknown')
-    return history.since > 0 && now - history.since >= policy.stalledAfterMs
-      ? {
-          kind: 'human',
-          needsHuman:
-            'The office cannot read what is running in this laptop, so it will not rebuild it on its own. ' +
-            REBUILD_BY_HAND,
-        }
-      : { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
+  const provider = observed.laptop.provider;
+  if (provider === 'unknown' && !(history.since > 0 && now - history.since >= policy.stalledAfterMs))
+    return { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
+  if (provider === 'running' || provider === 'unknown')
+    return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', ...laptopHeld(observed)]);
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
   // looks like, and then the shared pool has to be recovered before any laptop is built.
   if (provider === 'no-laptop' && observed.laptop.poolAlive === false)
@@ -1268,10 +1510,11 @@ function gate(
   now: number,
   policy: SupervisorPolicy,
   /** `terminalHeldForGood` for this observation. */
-  heldInput = false
+  heldInput = false,
+  /** What this observation was classified as, for the rules that depend on its code. */
+  base?: Pick<SupervisorClassification, 'code' | 'fingerprint'>
 ): Gate {
-  const seen = observed.laptop.continuation,
-    move = observed.move;
+  const seen = observed.laptop.continuation;
   switch (action) {
     case 'resend-continuation': {
       // Offered by the operation itself, and never for a plan move's private record.
@@ -1283,13 +1526,30 @@ function gate(
         ? { kind: 'ok' }
         : { kind: 'skip' };
     }
+    case 'apply-standing-limits': {
+      // The owner's standing default is the most restrictive limits approved for the other employees
+      // (docker-standing-defaults.ts). The office never makes up a number: with none approved anywhere it has
+      // nothing to give, and that, like the owner's switch, is said.
+      const standing = observed.laptop.standing;
+      if (observed.laptop.policyApproved) return { kind: 'skip' };
+      if (standing?.enabled && standing.limits) return { kind: 'ok' };
+      return {
+        kind: 'human',
+        needsHuman:
+          standing && !standing.enabled
+            ? `${STANDING_OFF} ${OWNER_STEPS[POLICY_REQUIRED]}`
+            : `No employee of this office has approved resource limits, so the office has no approved value to give this one. ${OWNER_STEPS[POLICY_REQUIRED]}`,
+      };
+    }
     case 'start-continuation':
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
     case 'continue-move':
-      return move?.docker && move.allowedActions.includes('continue-original') ? { kind: 'ok' } : { kind: 'skip' };
+      return continueMoveGate(observed, history, now);
     case 'reconnect-viewer':
+      // A session outside a laptop has no laptop record to judge by: the wake itself decides.
+      if (!observed.boxed) return { kind: 'ok' };
       return observed.laptop.record &&
         ['ready', 'provider-issued'].includes(observed.laptop.record.phase) &&
         !(heldInput && reconnectAnswered(history))
@@ -1310,29 +1570,15 @@ function gate(
       // An agent on a start-up screen is started again only on proof that it is parked there.
       if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
-    case 'abandon-move': {
-      const kind = classifyMoveError(move?.error);
-      if (!move?.allowedActions.includes('abandon'))
-        return {
-          kind: 'human',
-          needsHuman: 'This move cannot be abandoned here. Read it: POST /api/plans/moves/:id/status.',
-        };
-      if (kind !== 'first-run' && kind !== 'laptop-step')
-        return {
-          kind: 'human',
-          needsHuman:
-            'Continuing the move did not help, and the office does not abandon a move for a reason it does not ' +
-            'recognize. Continue it (POST /api/plans/moves/:id/resolve) or abandon it (POST /api/plans/moves/:id/abandon).',
-        };
-      return { kind: 'ok' };
-    }
+    case 'abandon-move':
+      return abandonMoveGate(observed, history, now, policy);
     case 'rebuild-laptop':
       // A new laptop would join the same pool and be held by the same thing.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };
       if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return heldInput
         ? heldInputRebuildGate(observed, history, flags, now, policy)
-        : rebuildGate(observed, history, now, policy);
+        : rebuildGate(observed, history, now, policy, base);
   }
 }
 
@@ -1344,6 +1590,7 @@ const TIER_OFF: Readonly<Record<SupervisorTier, string>> = {
 const BY_HAND: Readonly<Record<SupervisorAction, string>> = {
   'resend-continuation':
     'Continue the laptop: POST /api/company/employees/:id/docker-continuation with its original request.',
+  'apply-standing-limits': OWNER_STEPS[POLICY_REQUIRED]!,
   'start-continuation': 'Start the laptop: GET …/docker-policy, then POST …/docker-continuation.',
   'continue-move': 'Continue the move: POST /api/plans/moves/:id/resolve with action continue-original.',
   'reconnect-viewer': 'Reconnect the terminal from the employee card, or wake the employee.',
@@ -1354,34 +1601,39 @@ const BY_HAND: Readonly<Record<SupervisorAction, string>> = {
 };
 
 /**
- * Said while every step for a start-up screen has been tried and the screen is still there. Information only: the
- * office reads the laptop on every pass, and `rollSupervisorHistory` gives all the steps back after
- * `ladderRestartMs`.
+ * When the ladder starts again: `ladderRestartMs` after the newest attempt of any rung. At that time
+ * `rollSupervisorHistory` clears the attempt counts, whatever the path and whatever stopped it, so no ladder ends
+ * for good. Undefined while no attempt is counted. The limit on rebuilds per day is kept across rounds.
  */
-const SCREEN_LADDER_SPENT =
-  'The office has tried every step it has for this screen, and the agent still shows it. It goes on reading the ' +
-  'laptop and tries all of them again a few hours after the last one. Nobody has to do anything; the screen and ' +
-  'the steps are in the audit log.';
+export function ladderRestartAt(
+  history: Pick<SupervisorHistory, 'attempts'>,
+  policy: SupervisorPolicy = SUPERVISOR_POLICY
+): number | undefined {
+  const times = Object.values(history.attempts).map((attempt) => attempt.lastAt);
+  return times.length ? Math.max(...times) + policy.ladderRestartMs : undefined;
+}
 
-const EXHAUSTED: Readonly<Partial<Record<SupervisorCondition, string>>> = {
-  'viewer-lost':
-    'The office could not reconnect the terminal on its own. The agent may still be working; reconnect from the ' +
-    'employee card, or restart the office.',
-  'provider-exited': 'The office could not bring the agent back on its own. ' + REBUILD_BY_HAND,
-  'held-retryable': 'Repeating the step and rebuilding did not help. ' + REBUILD_BY_HAND,
-  'held-needs-rebuild': 'Rebuilding did not help. ' + REBUILD_BY_HAND,
-  'laptop-not-started': 'The laptop would not start. Read GET …/docker-policy, then POST …/docker-continuation.',
-  'move-held-retryable': 'The move is still held. ' + BY_HAND['abandon-move'],
-  'at-sign-in-screen': SCREEN_LADDER_SPENT,
-  'stuck-first-run-screen': SCREEN_LADDER_SPENT,
-};
-/** Said once every step for a lost terminal whose input is held for good has been tried. */
-const HELD_INPUT_EXHAUSTED = 'The office could not rebuild the laptop on its own. ' + REBUILD_RUNNING_BY_HAND;
+/** What an employee waits for while the office terminal works through a provider's first-run screens. */
+const FIRST_RUN_WAIT = 'the office to finish answering the start-up screen';
+
+/** What an employee waits for while the office's laptop configuration is no longer the one it started with. */
+const OFFICE_RESTART_WAIT = 'the office to restart itself and read its laptop configuration again';
+
+/** The rungs one observation may climb. A condition with none has no automatic step. */
+function ladderPath(base: SupervisorClassification, heldInput: boolean, stalled: boolean): readonly SupervisorAction[] {
+  if (heldInput) return SUPERVISOR_HELD_INPUT_PATH;
+  if (base.code === NO_POLICY || base.code === POLICY_REQUIRED) return SUPERVISOR_LIMITS_PATH;
+  // The wait for the office's own restart is no laptop's fault, and a start-up screen has its own steps.
+  if (stalled && base.condition === 'starting' && base.code !== RUNTIME_CHANGED) return SUPERVISOR_STALLED_PATH;
+  return SUPERVISOR_PATHS[base.condition] ?? [];
+}
 
 /** The condition a base condition is reported as once its ladder has reached a given rung. */
 function reported(base: SupervisorCondition, rung: SupervisorAction | undefined): SupervisorCondition {
   if (base === 'move-held-retryable' && rung === 'abandon-move') return 'move-held-dead-end';
   if (base === 'held-retryable' && rung === 'rebuild-laptop') return 'held-needs-rebuild';
+  // A laptop that never finished starting is held once its ladder has reached the rebuild.
+  if (base === 'starting' && rung === 'rebuild-laptop') return 'held-needs-rebuild';
   return base;
 }
 
@@ -1403,6 +1655,9 @@ function backoff(rung: SupervisorRung, count: number): number {
  *
  * At most one action is returned. An action is returned only when its rung has attempts left, its tier is switched
  * on, nothing else is working on the employee and its own gate passes; `next.at` says when it may run.
+ *
+ * A ladder whose rungs are all used does not end. `next.at` then says when it starts again (`ladderRestartAt`), and
+ * a limit that pauses a step says when it lifts.
  */
 export function assessEmployee(
   observed: SupervisorObservation,
@@ -1412,8 +1667,16 @@ export function assessEmployee(
   policy: SupervisorPolicy = SUPERVISOR_POLICY
 ): SupervisorAssessment {
   const base = classifyEmployee(observed),
-    heldInput = terminalHeldForGood(observed, base.condition),
-    path = heldInput ? SUPERVISOR_HELD_INPUT_PATH : (SUPERVISOR_PATHS[base.condition] ?? []);
+    heldInput = terminalHeldForGood(observed, base.condition);
+  // A laptop that has been starting or between states for too long. Its ladder counts from that moment.
+  const stalledFrom =
+      (base.condition === 'starting' || base.condition === 'waiting-first-run-screen') &&
+      history.transitSince !== undefined
+        ? history.transitSince + policy.stalledAfterMs
+        : undefined,
+    stalled = stalledFrom !== undefined && now >= stalledFrom,
+    path = ladderPath(base, heldInput, stalled && observed.boxed),
+    clock = path === SUPERVISOR_STALLED_PATH ? { ...history, since: stalledFrom! } : history;
   const result = (
     next: SupervisorNextStep,
     rung?: SupervisorAction,
@@ -1434,10 +1697,10 @@ export function assessEmployee(
     preconditions: [],
   });
   if (!path.length) {
-    const stalled =
-      (base.condition === 'starting' || base.condition === 'waiting-first-run-screen') &&
-      history.transitSince !== undefined &&
-      now - history.transitSince >= policy.stalledAfterMs;
+    if (base.code === RUNTIME_CHANGED) return result(idle(OFFICE_RESTART_WAIT));
+    // A screen the office is answering has its own short clock: the scan ends within minutes, and the screen is
+    // then gone or the agent is started again (`stuck-first-run-screen`). It is never called stalled.
+    if (base.condition === 'waiting-first-run-screen') return result(idle(FIRST_RUN_WAIT));
     return result(
       idle(),
       undefined,
@@ -1455,7 +1718,7 @@ export function assessEmployee(
   for (const action of path) {
     const rung = policy.ladder[action],
       tried = history.attempts[action] ?? { count: 0, lastAt: 0 },
-      allowed = gate(action, observed, history, flags, now, policy, heldInput);
+      allowed = gate(action, observed, clock, flags, now, policy, heldInput, base);
     if (allowed.kind === 'skip') continue;
     if (tried.count >= rung.maxAttempts) {
       const settles = tried.lastAt + rung.escalateAfterMs;
@@ -1468,38 +1731,28 @@ export function assessEmployee(
       return result(idle(), action, `${TIER_OFF[!flags.enabled ? 'retry' : 'repair']} ${byHand}`);
     }
     if (observed.busy) return result(idle(BUSY[observed.busy]), action, placing(action));
-    if (allowed.kind === 'wait') return result(idle(allowed.waitingFor), action);
-    const at = Math.max(history.since + rung.dwellMs, tried.count ? tried.lastAt + backoff(rung, tried.count) : 0);
+    if (allowed.kind === 'wait') return result(idle(allowed.waitingFor, allowed.at), action);
+    const at = Math.max(clock.since + rung.dwellMs, tried.count ? tried.lastAt + backoff(rung, tried.count) : 0);
     return result({ action, at, preconditions: allowed.preconditions ?? [] }, action, placing(action));
   }
-  return result(idle(), path.at(-1), heldInput ? HELD_INPUT_EXHAUSTED : (EXHAUSTED[base.condition] ?? base.needsHuman));
+  // Every rung is used or does not apply. The ladder does not end here: it starts again, and says when.
+  const again = ladderRestartAt(history, policy);
+  return result(
+    again === undefined
+      ? idle()
+      : idle(`the next round of repair steps, which starts at ${when(again)}: this round's did not help`, again),
+    path.at(-1)
+  );
 }
 
 // ─── History ──────────────────────────────────────────────────────────────────
 
-/** Conditions whose steps are all given back once the last of them is `ladderRestartMs` old. */
-const RESTARTING_LADDERS: ReadonlySet<SupervisorCondition> = new Set(['at-sign-in-screen', 'stuck-first-run-screen']);
-
-/**
- * The attempts to carry on with. A parked start-up screen never ends in "nothing more is tried": when its steps
- * were used and the last one is `ladderRestartMs` old, the counts start again, so every step is taken again under
- * its own waits. The rebuilds of the last day are counted separately and keep their limit.
- */
-function restartedAttempts(
-  history: SupervisorHistory,
-  condition: SupervisorCondition,
-  now: number,
-  policy: SupervisorPolicy
-): SupervisorHistory['attempts'] {
-  const tried = Object.values(history.attempts);
-  const spent = tried.length > 0 && tried.every((attempt) => now - attempt.lastAt >= policy.ladderRestartMs);
-  return spent && RESTARTING_LADDERS.has(condition) ? {} : history.attempts;
-}
-
 /**
  * Carry the history across one observation. A problem keeps its `since` while its detail is unchanged, including
- * across the moments it reads as busy or starting (a retry in flight). Attempt counts end only with the episode:
- * after the employee has stayed healthy, or once the owner has stopped them.
+ * across the moments it reads as busy or starting (a retry in flight). Attempt counts end with the episode, after
+ * the employee has stayed healthy or once the owner has stopped them, and with the round: `ladderRestartMs` after
+ * the newest attempt they are cleared and the ladder starts again (`ladderRestartAt`). This is the one place that
+ * rule lives, so it holds for every path. The record of the day's rebuilds is never cleared by it.
  */
 export function rollSupervisorHistory(
   history: SupervisorHistory,
@@ -1508,7 +1761,9 @@ export function rollSupervisorHistory(
   policy: SupervisorPolicy = SUPERVISOR_POLICY
 ): SupervisorHistory {
   const rebuilds = history.rebuilds.filter((at) => now - at < DAY),
-    last = history.lastAction ? { lastAction: history.lastAction } : {};
+    last = history.lastAction ? { lastAction: history.lastAction } : {},
+    again = ladderRestartAt(history, policy),
+    attempts = again !== undefined && now >= again ? {} : history.attempts;
   if (seen.condition === 'owner-stopped') return { fingerprint: '', since: now, attempts: {}, rebuilds, ...last };
   if (seen.condition === 'healthy') {
     const healthySince = history.healthySince ?? now;
@@ -1518,12 +1773,12 @@ export function rollSupervisorHistory(
           fingerprint: history.fingerprint,
           since: history.since,
           healthySince,
-          attempts: history.attempts,
+          attempts,
           rebuilds,
           ...last,
         };
   }
-  const kept = { attempts: restartedAttempts(history, seen.condition, now, policy), rebuilds, ...last };
+  const kept = { attempts, rebuilds, ...last };
   // In transit (starting, moving): the problem being worked on, if any, keeps its clock.
   if (seen.fingerprint === '')
     return {
