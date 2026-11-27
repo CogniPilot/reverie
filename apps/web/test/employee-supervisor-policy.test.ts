@@ -2694,6 +2694,8 @@ describe('employee supervisor: after a host restart', () => {
     expect(seen).toMatchObject({ condition: 'held-needs-rebuild', code: 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED' });
     expect(seen.needsHuman).toBeUndefined();
     expect(supervisorCodeKind('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('rebuild');
+    // What a set-up answers against the stopped anchor: the same request goes on once the pool runs.
+    expect(supervisorCodeKind('DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED')).toBe('retry');
     // A held plan move that stopped on it is a laptop step: continued, then abandoned, never left for good.
     expect(classifyMoveError('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('laptop-step');
   });

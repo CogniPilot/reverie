@@ -40,6 +40,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  newSupervisorRound,
   resumeSupervisorHistory,
   rollSupervisorHistory,
   settleSupervisorAttempt,
@@ -252,6 +253,8 @@ export interface EmployeeSupervisorLimits {
   readonly storedHomeReadMs?: number;
   /** Wait after read N of a stored home that could not tell, before read N+1. The last value repeats. */
   readonly storedHomeRetryMs?: readonly number[];
+  /** The return of a stopped pool begins a new round of repair steps for everyone at most this often. */
+  readonly poolRoundMs?: number;
   /** How many employees' running laptops have their home recorded in one pass. */
   readonly homeRecordsPerTick?: number;
   /** Wait after attempt N to record a home that was not recorded, before attempt N+1. The last value repeats. */
@@ -269,6 +272,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
   storedHomeReadMs: 10 * 60_000,
   storedHomeRetryMs: [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000],
+  poolRoundMs: 10 * 60_000,
   homeRecordsPerTick: 2,
   homeRecordRetryMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
 };
@@ -364,6 +368,10 @@ export class EmployeeSupervisor {
   #poolOwner: string | undefined;
   #poolDue = 0;
   #poolLastStep = 0;
+  /** A look found the pool stopped since it was last up. */
+  #poolWasDown = false;
+  /** When the return of the pool last began a new round for everyone. */
+  #poolRoundAt = Number.NEGATIVE_INFINITY;
   #poolFlight?: Promise<void>;
   /** The last read of a stored home that stopped a rebuild or failed. Never one that allowed it. */
   readonly #storedHome = new Map<
@@ -505,6 +513,7 @@ export class EmployeeSupervisor {
     if (!inOffice.length || this.#laptopAttached(inOffice)) {
       if (this.#pool && this.#pool.pool !== 'up')
         this.ports.log('[supervisor] shared pool: a laptop is attached again');
+      if (inOffice.length) this.#poolReturned(now);
       this.#pool = undefined;
       this.#poolDue = 0;
       return;
@@ -541,6 +550,30 @@ export class EmployeeSupervisor {
     });
     await Promise.race([work, waited]);
     if (timer) clearTimeout(timer);
+  }
+
+  /**
+   * The pool runs again after a look had found it stopped. Every employee starts a new round of repair steps now
+   * instead of waiting out the rest of one whose attempts were used against the stopped pool, or before it
+   * stopped: after a host restart nobody sits out six hours. At most once per `poolRoundMs`, so that a pool
+   * that keeps stopping cannot keep the ladders going without a pause. The limit of rebuilds per day is kept.
+   */
+  #poolReturned(now: number): void {
+    if (!this.#poolWasDown) return;
+    this.#poolWasDown = false;
+    if (now - this.#poolRoundAt < this.#resolved.poolRoundMs) return;
+    this.#poolRoundAt = now;
+    let renewed = 0;
+    for (const [id, history] of this.#histories) {
+      const next = newSupervisorRound(history);
+      if (next === history) continue;
+      this.#remember(id, next);
+      renewed++;
+    }
+    if (renewed)
+      this.ports.log(
+        `[supervisor] shared pool: running again; ${renewed} employee(s) start a new round of repair steps`
+      );
   }
 
   /** The earliest time at which the step a pool report calls for is taken: after the dwell, and after the wait
@@ -584,6 +617,8 @@ export class EmployeeSupervisor {
       ? { step: result.step!, at, outcome: result.outcome!, ...(result.detail ? { detail: result.detail } : {}) }
       : before.last;
     const usable = result.pool === 'up' || result.pool === 'none';
+    if (result.pool === 'down') this.#poolWasDown = true;
+    else if (result.pool === 'up') this.#poolReturned(at);
     const base = {
       pool: result.pool,
       ...(result.step ? { step: result.step } : {}),

@@ -723,6 +723,12 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     "The office could not confirm that an earlier attempt to set {name}'s laptop limits has stopped.",
   ],
   DOCKER_EPHEMERAL_PREPARATION_REQUIRED: ['retry', "{name}'s laptop scratch space still has to be prepared."],
+  // What a laptop set-up answers when it meets the stopped anchor of the shared pool, as after a host restart. A
+  // set-up never starts a stopped anchor: the office's pool step does, and the same request then goes on.
+  DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED: [
+    'retry',
+    "The anchor of the shared pool is stopped, so {name}'s laptop set-up could not go on. The office recovers the pool first.",
+  ],
   DOCKER_CONTINUATION_EFFECT_UNCONFIRMED: [
     'retry',
     "A step of {name}'s laptop set-up did not confirm that it finished.",
@@ -2337,6 +2343,16 @@ export function issueSupervisorAttempt(
       ...(uncounted && action === 'rebuild-laptop' ? { uncounted: true as const } : {}),
     },
   };
+}
+
+/**
+ * A new round of repair steps, begun early. The shared pool is back after it was stopped: whatever was tried while
+ * it was stopped, or before the office had seen that it was, says nothing about now, so no employee waits out the
+ * rest of a round for it. Exactly what the end of a round does (`rollSupervisorHistory`): the attempt counts are
+ * cleared, and the record of the day's rebuilds is kept.
+ */
+export function newSupervisorRound(history: SupervisorHistory): SupervisorHistory {
+  return Object.keys(history.attempts).length ? { ...history, attempts: {} } : history;
 }
 
 /** Record how the last issued attempt ended. A `busy` attempt tried nothing and is given back; its time is kept. */

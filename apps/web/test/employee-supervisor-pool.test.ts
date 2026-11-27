@@ -56,7 +56,12 @@ const person = (id: string, laptop: Laptop = 'stopped', patch: Partial<Supervise
   operation: 1,
 });
 
-function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
+function box(
+  people: Person[],
+  limits: Record<string, unknown> = LIMITS,
+  /** What an earlier office process saved of each employee's repair steps. */
+  saved: ReadonlyMap<string, SupervisorHistory> = new Map()
+) {
   const state = {
     now: START,
     flags: { enabled: true, autoRepair: true },
@@ -83,7 +88,7 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
     recordHome: (() => 'recorded') as (employee: SupervisedEmployee) => 'recorded' | 'not-recorded' | 'failed',
     logs: [] as string[],
     audits: [] as SupervisorAuditEntry[],
-    histories: new Map<string, SupervisorHistory>(),
+    histories: new Map<string, SupervisorHistory>(saved),
   };
   const at = () => (state.now - START) / SECOND;
   const find = (employee: SupervisedEmployee) => state.people.find((row) => row.employee.id === employee.id)!;
@@ -631,6 +636,61 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
     w.state.anchor = 'running';
     await w.run(MINUTE);
     expect(w.report('a').storedHomeCheck).toBe('compare-only');
+  });
+});
+
+describe('EmployeeSupervisor: no round of repair steps is sat out after a host restart', () => {
+  it('begins a new round for everyone when the stopped pool runs again, whatever was used before the restart', async () => {
+    // Both rebuilds of this round were used a few minutes before the host went down.
+    const used: SupervisorHistory = {
+      fingerprint: 'held-needs-rebuild:earlier',
+      since: START - 20 * MINUTE,
+      attempts: { 'rebuild-laptop': { count: 2, lastAt: START - 5 * MINUTE } },
+      rebuilds: [],
+    };
+    const w = box([person('a'), person('b')], LIMITS, new Map([['a', used]]));
+    await w.run(30 * MINUTE);
+    expect(w.state.steps).toEqual(['90:recover-pool:done']);
+    expect(w.state.logs).toContain(
+      '[supervisor] shared pool: running again; 1 employee(s) start a new round of repair steps'
+    );
+    // Not in six hours: with everyone else.
+    expect(w.report('a').condition).toBe('healthy');
+    expect(w.report('b').condition).toBe('healthy');
+    expect(w.state.acts.filter((line) => line.endsWith(':rebuild-laptop:a'))).toHaveLength(1);
+  });
+
+  it('gives back what was spent against a stopped pool that the office could not read', async () => {
+    const w = box([person('a'), person('b')]);
+    w.state.unreadable = true;
+    // Fifteen minutes of a pool that cannot be read, and then the ladder goes on: its starts meet the stopped
+    // anchor and are refused, until the round's starts are used.
+    await w.run(3 * HOUR);
+    const refused = w.state.acts.filter((line) => line.includes(':start-continuation:')).length;
+    expect(refused).toBeGreaterThan(0);
+    expect(w.report('a').condition).not.toBe('healthy');
+    // The read comes back. The pool is seen stopped, recovered, and everyone is brought back in minutes.
+    w.state.unreadable = false;
+    await w.run(20 * MINUTE);
+    expect(w.state.steps.at(-1)).toMatch(/:recover-pool:done$/);
+    expect(w.report('a').condition).toBe('healthy');
+    expect(w.report('b').condition).toBe('healthy');
+  });
+
+  it('begins no new round at an office start that finds the pool running, and none twice within ten minutes', async () => {
+    const used: SupervisorHistory = {
+      fingerprint: 'held-needs-rebuild:earlier',
+      since: START - 20 * MINUTE,
+      attempts: { 'rebuild-laptop': { count: 2, lastAt: START - 5 * MINUTE } },
+      rebuilds: [],
+    };
+    const w = box([person('a'), person('b', 'attached')], LIMITS, new Map([['a', used]]));
+    w.state.anchor = 'running';
+    await w.run(30 * MINUTE);
+    // The pool never stopped: the round that was used stays used, as on any other day.
+    expect(w.state.logs.filter((line) => line.includes('new round'))).toEqual([]);
+    expect(w.state.acts.filter((line) => line.includes(':rebuild-laptop:a'))).toEqual([]);
+    expect(w.report('a').waitingFor).toMatch(/the next round of repair steps/);
   });
 });
 

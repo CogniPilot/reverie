@@ -401,6 +401,20 @@ with the refusal's own code, and the time of the next step. That is information
 only: the office goes on looking every minute and brings everyone back by itself
 once the cause is gone.
 
+No employee sits out the rest of a round of repair steps because of a host
+restart. A round whose steps are used normally starts again six hours after
+its newest attempt. When the pool runs again after a look had found it stopped,
+every employee starts a new round at once: what was tried before the host went
+down, or against a stopped anchor that the office could not read yet, says
+nothing about now. This happens at most once in ten minutes, the console says
+`[supervisor] shared pool: running again; N employee(s) start a new round of
+repair steps`, and the limit of rebuilds per day is kept. Besides that, no
+attempt is spent in the first place while the pool is known to be stopped,
+while it could not be read for up to fifteen minutes, or by a stored home that
+could not be confirmed. A laptop set-up that meets the stopped anchor answers
+`DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED`; the same request goes on once the
+pool runs.
+
 A recovery that fails is tried again one minute later, then after 5, 15 and 60
 minutes, then every hour for as long as the pool is down. Nothing here
 stops for good. A recovery that was issued and did not finish (the office
