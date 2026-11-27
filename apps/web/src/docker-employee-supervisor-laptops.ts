@@ -551,11 +551,13 @@ export class DockerSupervisorLaptops {
       row = this.#row(employee.id),
       read = this.deps.engine.observeOtherWork?.bind(this.deps.engine);
     if (!row?.destination || !read) return { otherWork: 'unknown', at };
+    // Which laptop the reading is of: one of another laptop says nothing of this one.
+    const of = { operationId: row.request.operationId, containerId: row.destination.containerId };
     try {
       this.#authority(employee, guard).require();
       const seen = await read(row);
       // The Engine lists the recorded laptop as not running, or not at all: nothing of the employee runs in it.
-      if (!seen) return { otherWork: false, processes: 0, at };
+      if (!seen) return { otherWork: false, processes: 0, at, ...of };
       const before = this.#cpuSeen.get(employee.id),
         containerId = row.destination.containerId;
       if (seen.cpuUsedMs === undefined) this.#cpuSeen.delete(employee.id);
@@ -574,9 +576,10 @@ export class DockerSupervisorLaptops {
         ...(seen.names.length ? { names: seen.names } : {}),
         ...(cpu ? { cpu } : {}),
         at,
+        ...of,
       };
     } catch {
-      return { otherWork: 'unknown', at };
+      return { otherWork: 'unknown', at, ...of };
     }
   }
 

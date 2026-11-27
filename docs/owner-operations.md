@@ -836,7 +836,9 @@ when the read found nothing beside the agent. When it found work, or could not
 say, the laptop is given the same four hours, with `waitingFor` “the work that
 still runs in the laptop, beside an agent that has exited, to finish”, and is
 rebuilt after that. A recorded laptop that the Engine lists as not running, or
-not at all, holds nothing, and the read says `false`.
+not at all, holds nothing, and the read says `false`. Every reading names the laptop
+operation it was made in, and one made in another laptop than the one on
+record now, as before a rebuild, says nothing of that laptop.
 
 `unknown` means the read could not be made or gave no answer: the supervisor
 may not act for the employee, or the program refused. It is never reported as

@@ -273,6 +273,9 @@ export interface SupervisorFlags {
  */
 export interface SupervisorOtherWork {
   readonly otherWork: true | false | 'unknown';
+  /** The laptop operation, and its container, that the read was made in. A reading of another laptop says nothing. */
+  readonly operationId?: string;
+  readonly containerId?: string;
   readonly processes?: number;
   readonly names?: readonly string[];
   readonly cpu?: { readonly usedMs: number; readonly overMs: number };

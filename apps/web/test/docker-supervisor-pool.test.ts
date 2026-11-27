@@ -710,15 +710,21 @@ describe('what else runs in a laptop besides its agent', () => {
   const guard = () => {};
   it('reports what the read inside the laptop found, as a fact', async () => {
     const w = world();
-    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual({ otherWork: false, processes: 0, at: 1_000_000 });
+    await expect(w.laptops.otherWork(A, guard)).resolves.toMatchObject({
+      otherWork: false,
+      processes: 0,
+      at: 1_000_000,
+    });
     w.state.work = () => ({ otherWork: true, processes: 3, names: ['cargo', 'rustc'], agent: true, cpuUsedMs: 1000 });
-    await expect(w.laptops.otherWork(B, guard)).resolves.toEqual({
+    await expect(w.laptops.otherWork(B, guard)).resolves.toMatchObject({
       otherWork: true,
       processes: 3,
       names: ['cargo', 'rustc'],
       at: 1_000_000,
     });
     expect(w.made('other-work').map(([, id]) => id)).toEqual([A.id, B.id]);
+    // Each reading says which laptop it was made in.
+    expect(await w.laptops.otherWork(A, guard)).toMatchObject({ operationId: expect.any(String) });
   });
 
   it('says what the laptop used of the CPU between two reads of the same laptop', async () => {
@@ -742,22 +748,26 @@ describe('what else runs in a laptop besides its agent', () => {
     const unknown = { otherWork: 'unknown', at: 1_000_000 };
     // The read gave no answer.
     w.state.work = () => new Error('exec failed');
-    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
+    await expect(w.laptops.otherWork(A, guard)).resolves.toMatchObject(unknown);
     // The laptop on record does not run, by the Engine's own listing: nothing of the employee runs in it, which is
     // a finding and not a failure to read. It is what a laptop shows whose only running laptops are the empty
     // candidates of abandoned plan moves, and such a laptop is rebuilt at once.
     w.state.work = () => undefined;
-    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual({ otherWork: false, processes: 0, at: 1_000_000 });
+    await expect(w.laptops.otherWork(A, guard)).resolves.toMatchObject({
+      otherWork: false,
+      processes: 0,
+      at: 1_000_000,
+    });
     // The supervisor may no longer act for this employee.
     w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true });
     await expect(
       w.laptops.otherWork(A, () => {
         throw new Error('The office supervisor was switched off');
       })
-    ).resolves.toEqual(unknown);
+    ).resolves.toMatchObject(unknown);
     // No laptop on record.
     w.state.records.delete(A.id);
-    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
+    await expect(w.laptops.otherWork(A, guard)).resolves.toMatchObject(unknown);
   });
 });
 

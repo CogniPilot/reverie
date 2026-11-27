@@ -571,6 +571,8 @@ function officeOf(
     officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number; nextAt?: number };
     /** What a read inside each laptop finds beside the agent. Without it the office cannot make that read. */
     otherWork?: (id: string) => true | false | 'unknown';
+    /** The laptop operation each such read says it was made in. */
+    otherWorkOf?: (id: string) => string;
     /** The rebuild of this employee, the how-many-th of the office, never returns. */
     hang?: (id: string, count: number) => boolean;
   } = {}
@@ -633,6 +635,7 @@ function officeOf(
           readOtherWork: async (employee: SupervisedEmployee) => ({
             otherWork: options.otherWork!(employee.id),
             at: state.now,
+            ...(options.otherWorkOf ? { operationId: options.otherWorkOf(employee.id) } : {}),
           }),
         }
       : {}),
@@ -1297,5 +1300,30 @@ describe('a step that hangs past its time', () => {
     expect(officeRestart.asked.at(-1)).toBe(
       'a step of the office has not returned for half an hour, and only a new office process ends it'
     );
+  });
+});
+
+describe('a read of other work made in a laptop other than the one on record', () => {
+  const exited = (of: string) =>
+    officeOf(
+      ['a'],
+      () => ({
+        session: { available: true, runtimeHealth: 'healthy', viewerHealth: 'connected', providerHealth: 'dead' },
+        restoration: { state: 'attached' },
+        reading: heldAt('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'),
+        provider: 'exited',
+      }),
+      { otherWork: () => true, otherWorkOf: () => of }
+    );
+
+  it('counts for the laptop it was made in, and says nothing of another one', async () => {
+    // Made in the laptop on record: the work found there is given its four hours.
+    const own = exited('op-a');
+    await own.run(60);
+    expect(own.rebuilt).toEqual([]);
+    // Made in a laptop that is not the one on record: it is no reading of this one, which is rebuilt at once.
+    const other = exited('op-replaced');
+    await other.run(15);
+    expect(other.rebuilt.map((row) => row.id)).toEqual(['a']);
   });
 });

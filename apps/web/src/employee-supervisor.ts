@@ -1302,7 +1302,7 @@ export class EmployeeSupervisor {
         ...(kept && occupied ? { provider: occupied.presence } : {}),
         // Read with the reading above. It is shown on every pass until a later read replaces it, so that the time
         // such work is given is counted from when it was first seen and not from every read anew.
-        ...this.#otherWorkSeen(employee.id, now),
+        ...this.#otherWorkSeen(employee.id, now, seen.laptop.record?.operationId),
         ...(storedFresh ? storedSeen(stored) : {}),
         ...(this.#pool ? { pool: this.#pool.pool } : {}),
         ...(this.#poolDetail() ? { poolDetail: this.#poolDetail()! } : {}),
@@ -1341,7 +1341,11 @@ export class EmployeeSupervisor {
       if (this.#keepsPresence(employee.id, provider, now))
         this.#occupied.set(employee.id, { at: now, presence: provider });
       else this.#occupied.delete(employee.id);
-      observed = { ...observed, laptop: { ...observed.laptop, provider, ...this.#otherWorkSeen(employee.id, now) } };
+      const laptop = observed.laptop;
+      observed = {
+        ...observed,
+        laptop: { ...laptop, provider, ...this.#otherWorkSeen(employee.id, now, laptop.record?.operationId) },
+      };
       this.#noteReading(employee, observed, now);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       // A laptop the read found occupied may still be rebuilt, between its agent's turns: that is decided next.
@@ -1835,11 +1839,14 @@ export class EmployeeSupervisor {
   /** The last read of other work, as the observation carries it: the fact, and everything that was read. */
   #otherWorkSeen(
     employeeId: string,
-    now: number
+    now: number,
+    operationId?: string
   ): Pick<SupervisorObservation['laptop'], 'otherWork' | 'otherWorkDetail'> {
     const work = this.#otherWork.get(employeeId);
-    // A reading that no later read has replaced for this long says nothing of the laptop as it is now.
-    return work && now - work.at < this.#resolved.otherWorkKeptMs
+    // A reading that no later read has replaced for this long says nothing of the laptop as it is now, and one
+    // made in another laptop than the one on record now (a rebuild made a new one since) says nothing at all.
+    const other = !!work?.operationId && !!operationId && work.operationId !== operationId;
+    return work && !other && now - work.at < this.#resolved.otherWorkKeptMs
       ? { otherWork: work.otherWork, otherWorkDetail: work }
       : {};
   }
