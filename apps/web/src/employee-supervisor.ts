@@ -299,6 +299,8 @@ export interface EmployeeSupervisorLimits {
   readonly homeRecordsPerTick?: number;
   /** Wait after attempt N to record a home that was not recorded, before attempt N+1. The last value repeats. */
   readonly homeRecordRetryMs?: readonly number[];
+  /** How long one pass waits for the home records it started. They go on by themselves after that. */
+  readonly homeRecordWaitMs?: number;
   /** Least time, across the office, between two rebuilds of laptops that an agent runs in or may run in. */
   readonly occupiedRebuildSpacingMs?: number;
   /** A cause that several employees share must have been shared this long before one laptop is rebuilt as a probe. */
@@ -323,6 +325,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   poolRoundMs: 10 * 60_000,
   homeRecordsPerTick: 2,
   homeRecordRetryMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
+  homeRecordWaitMs: 5_000,
   occupiedRebuildSpacingMs: 60 * 60_000,
   sharedCauseProbeMs: 30 * 60_000,
   officeBlindRestartMs: 30 * 60_000,
@@ -461,6 +464,8 @@ export class EmployeeSupervisor {
    * how often it was tried without. In memory: an office start records every running laptop again.
    */
   readonly #homeRecords = new Map<string, { operationId: string; at: number; done: boolean; tries: number }>();
+  /** The home records that a pass started and that have not all ended. */
+  #homeFlight?: Promise<void>;
   readonly #resolved: Required<EmployeeSupervisorLimits>;
   /** What holds each employee in the office, from their last report. Compared between employees. In memory. */
   readonly #causes = new Map<string, string>();
@@ -799,10 +804,15 @@ export class EmployeeSupervisor {
    * takes: a laptop that was not running may run later, and a helper that timed out may answer. Like the limits
    * check it needs the first switch only, asks nothing about attendance, attaches and starts nothing, and spends
    * no attempt of a repair step.
+   *
+   * Each record is one run of the recovery helper, which can take a minute on a host that has just restarted. So
+   * the records of a pass are made one after the other, never two helpers at once, and the pass waits for them
+   * only `homeRecordWaitMs`: they go on by themselves, and no further record is started while they do. The repair
+   * steps and the limits check, which may run a helper of its own, are never held up by this.
    */
   async #keepHomeRecords(employees: readonly SupervisedEmployee[]): Promise<void> {
     const remember = this.ports.rememberHome?.bind(this.ports);
-    if (!remember) return;
+    if (!remember || this.#homeFlight) return;
     const now = this.ports.now(),
       retry = this.#resolved.homeRecordRetryMs;
     const operation = (employee: SupervisedEmployee) => this.ports.glance(employee).laptop.record?.operationId;
@@ -815,10 +825,36 @@ export class EmployeeSupervisor {
       return !kept.done && now - kept.at >= (retry[Math.min(kept.tries, retry.length) - 1] ?? 0);
     });
     const inOffice = (row: SupervisedEmployee) => Number(row.desiredRunning === true && !row.onVacation);
-    for (const employee of due.sort((a, b) => inOffice(b) - inOffice(a)).slice(0, this.#resolved.homeRecordsPerTick)) {
+    const chosen = due.sort((a, b) => inOffice(b) - inOffice(a)).slice(0, this.#resolved.homeRecordsPerTick);
+    if (!chosen.length) return;
+    const work = this.#recordHomes(chosen, remember, operation, now)
+      .catch(() => undefined)
+      .finally(() => {
+        this.#homeFlight = undefined;
+      });
+    this.#homeFlight = work;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.#resolved.homeRecordWaitMs);
+      timer.unref?.();
+    });
+    await Promise.race([work, waited]);
+    if (timer) clearTimeout(timer);
+  }
+
+  /** The home records of one pass, one after the other. */
+  async #recordHomes(
+    chosen: readonly SupervisedEmployee[],
+    remember: NonNullable<EmployeeSupervisorPorts['rememberHome']>,
+    operation: (employee: SupervisedEmployee) => string | undefined,
+    now: number
+  ): Promise<void> {
+    for (const employee of chosen) {
       if (this.#closed) return;
-      const operationId = operation(employee)!,
-        kept = this.#homeRecords.get(employee.id),
+      // The laptop may have been replaced while an earlier record of this pass was being made.
+      const operationId = operation(employee);
+      if (!operationId) continue;
+      const kept = this.#homeRecords.get(employee.id),
         tries = kept?.operationId === operationId ? kept.tries + 1 : 1;
       const guard = this.#identityGuard(employee);
       let outcome: Awaited<ReturnType<typeof remember>> | 'busy';

@@ -97,6 +97,9 @@ function box(
     otherWork: (() => ({ otherWork: false as const, processes: 0 })) as (
       employee: SupervisedEmployee
     ) => Omit<SupervisorOtherWork, 'at'> | Error,
+    /** Every record that was started, and what holds each of them up until it resolves. */
+    homesStarted: [] as string[],
+    homeGate: undefined as Promise<void> | undefined,
     /** Every attempt to record a running laptop's home, as `<seconds since the start>:<employee>:<outcome>`. */
     homes: [] as string[],
     recordHome: (() => 'recorded') as (employee: SupervisedEmployee) => 'recorded' | 'not-recorded' | 'failed',
@@ -266,6 +269,9 @@ function box(
     storedHomeCheck: () => 'compare-only',
     rememberHome: async (employee, guard) => {
       guard();
+      state.homesStarted.push(`${at()}:${employee.id}`);
+      // A helper that takes its time on a host that has just restarted.
+      await state.homeGate;
       const outcome = running(find(employee)) ? state.recordHome(employee) : 'not-running';
       state.homes.push(`${at()}:${employee.id}:${outcome}`);
       return outcome;
@@ -973,6 +979,35 @@ describe('EmployeeSupervisor: the record of each running laptop’s home', () =>
     await w.run(30 * MINUTE);
     expect(w.report('b').condition).toBe('healthy');
     expect(recorded(w).filter((line) => line.includes(':b:'))).toHaveLength(2);
+  });
+
+  it('holds no pass up for a helper that is slow, and runs one helper at a time', async () => {
+    const w = box([person('a', 'attached'), person('b', 'attached'), person('c', 'attached'), person('d')], {
+      ...LIMITS,
+      homeRecordWaitMs: 5,
+    });
+    w.state.anchor = 'running';
+    let open!: () => void;
+    w.state.homeGate = new Promise<void>((resolve) => (open = resolve));
+    const began = Date.now();
+    await w.run(10 * MINUTE);
+    // Twenty passes, none of which waited for the helper longer than the few milliseconds it is given.
+    expect(Date.now() - began).toBeLessThan(2000);
+    // One record was started and is still being made; no second helper was started beside it.
+    expect(w.state.homesStarted).toEqual(['30:a']);
+    expect(w.state.homes).toEqual([]);
+    // Meanwhile the repair steps and the limits check went on: the stopped laptop was rebuilt and started.
+    expect(w.report('d').condition).toBe('healthy');
+    expect(w.state.kept.length).toBeGreaterThan(0);
+    // The helper answers: its record is kept, and the rest follow at the usual pace.
+    open();
+    w.state.homeGate = undefined;
+    await w.run(3 * MINUTE);
+    expect(
+      recorded(w)
+        .map((line) => line.split(':')[1])
+        .sort()
+    ).toEqual(['a', 'b', 'c', 'd']);
   });
 
   it('records nothing while the supervisor is switched off', async () => {
