@@ -91,8 +91,9 @@ ten healthy minutes):
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
 | Wake (attach a provider that already runs) | the terminal is not connected | 6; once when the terminal's input is also held for good and the wake was refused |
+| Put the plan's sign-in back into the laptop | the agent shows the provider's sign-in screen | 3, spaced 1 to 5 min; once when the laptop then holds a usable sign-in, or has no sign-in folder of the plan |
 | Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
-| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns | 2, and 2 per day |
+| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns; or the agent is parked on a provider start-up screen | 2, and 2 per day |
 
 A laptop record can offer `continue` for a step it has not issued while the
 request is refused before that step, for example a set-up that was made for a
@@ -126,10 +127,11 @@ kept and the fresh laptop is started as after any rebuild. With
 calls, including `confirmDiscardRunning`. A terminal that is not connected but
 still takes input is only woken, never rebuilt.
 
-It never answers a sign-in or an owner's decision screen, never approves limits
+It never types into a sign-in screen (what it does about one is described
+[below](#provider-start-up-screens)), never approves limits
 or a laptop layout, never returns anyone to the office, and never rebuilds
-while it cannot read the laptop or, with that one exception, while an agent
-runs in the laptop. A rebuild
+while it cannot read the laptop or, with the exceptions named here, while an
+agent runs in the laptop. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
 employee with none on record is rebuilt by hand once. A stopped or missing
 laptop is rebuilt only while another laptop of the box runs; when none does,
@@ -159,10 +161,128 @@ and an audit entry `supervisor_keep_limits` are written when limits were put
 back, and once when a check starts to be refused.
 
 Two company settings switch it (`PUT /api/company/settings`, owner only; absent
-means on): `supervisorEnabled` (observe, continue, wake) and
-`supervisorAutoRepair` (abandon and rebuild). Its pacing state is
+means on): `supervisorEnabled` (observe, continue, wake, put a sign-in back)
+and `supervisorAutoRepair` (abandon and rebuild). Its pacing state is
 `employee-supervisor.json` in the office data directory; deleting it only
 restarts the waits.
+
+### Provider start-up screens
+
+An agent CLI can show screens before its composer: a theme chooser, security
+notes, a workspace-trust question, a permissions warning, a question about an
+API key, a sign-in screen. No employee is left on one of them for the owner.
+
+- **Screens with one answer** are answered by the office terminal itself while
+  the agent starts: the theme chooser, the security notes, the workspace-trust
+  question and the Bypass Permissions warning. One key is sent per read of the
+  screen, Enter only once the selection mark is on the accepted option, at
+  most six keys per screen.
+- **A decision has a standing answer**, the one that spends no money, buys or
+  enables no usage credits and widens no access. Claude's "Do you want to use
+  this API key?" is answered "No (recommended)": a key found in the
+  environment would be billed for every request. It is answered under the same
+  key rules. No setting exists for it, because the other answer is not safe.
+- **A sign-in screen is never typed into.** The office never types a
+  credential, a code or a password, and never presses a key on a screen it has
+  not positively identified. What it does instead is below.
+
+The supervisor reads each attached employee's screen once a minute, and on
+every pass while it shows a start-up screen. Three conditions cover them:
+
+- `waiting-first-run-screen`: the office terminal is still answering the
+  screen. Nothing else is done.
+- `at-sign-in-screen`: the agent shows the provider's sign-in screen. The
+  office first asks the plan sign-in reconciler to read every copy of that
+  plan's sign-in now and to put a usable one into the laptop
+  (`replace-sign-in`; it discards nothing, so it also runs with
+  `supervisorAutoRepair` off). A client reads its sign-in when it starts, so
+  once the laptop holds a usable sign-in and the screen is still there, the
+  placement is not repeated and the agent is started again. The same holds
+  when the laptop has no sign-in folder of the plan (a seat folder for another
+  plan, a provider whose sign-in the reconciler does not carry): only a new
+  laptop gets one, and a rebuild places the office's copy in it.
+- `stuck-first-run-screen`: a first-run screen the office terminal could not
+  answer (its six keys were spent, the layout is one it cannot read), or a
+  start-up screen it does not know at all. The agent is started again.
+
+Starting the agent again is a relaunch inside the laptop where an office has
+that step, and otherwise a rebuild of the laptop, which keeps the home
+directory and continues the saved conversation. Under the boxed laptop runtime
+the launch of an agent is made once per laptop and is never repeated, so here
+it is the rebuild: three minutes after the screen was first seen, at most
+twice per episode and twice per day, under `supervisorAutoRepair`.
+
+An agent on a start-up screen has not reached its composer, so it is in no
+turn and a rebuild discards no conversation. That is not taken from the
+screen's name. The rebuild is requested only when all of this holds:
+
+- The office knows the screen by more than its words. Either the frame shows
+  the screen's own live widget (the selection mark on one of that screen's
+  options, or its prompt as the last thing on the screen), or the office
+  launched that pane itself and has not seen its composer since, and the frame
+  shows no composer now. A conversation that quotes a screen shows the same
+  words, so a screen known only by its words is never acted on: it is not even
+  reported as a start-up screen.
+- The office terminal shows the pane idle and silent for two minutes, by the
+  same reading that decides a rebuild for a held terminal input. A pane that
+  still changes, or one the office is not reading, is waited for. Work the
+  pane says was left running is given thirty minutes from the first sight of
+  the screen.
+- The screen and the idle pane are read again from the pane immediately before
+  the step is issued, and once more by the step itself before the rebuild is
+  requested. The running laptop is discarded only when it is the one recorded
+  laptop of that employee.
+- No plan move is open for the employee. A move keeps its own recovery.
+
+When every step has been tried and the screen is still there, the office does
+not stop. It goes on reading the laptop, `needsHuman` says that all steps are
+tried again a few hours after the last one, and six hours after the last step
+the attempt counts start again (the limit of two rebuilds per day stays).
+A screen the office does not answer is written to the office log once per
+launch as its shape: its last sixteen rows with links, addresses, paths, keys
+and every long run of letters and digits removed, so that a table row can be
+written for it (`[Session] … is parked at …`).
+
+**A plan that is signed in nowhere** is the one thing the office cannot repair:
+only the account holder can sign a plan in, on the Plans page. Everything
+short of that is done:
+
+- It rarely arises. Each copy of a Claude plan sign-in (the office's and every
+  laptop's) is renewed by its own client, and the reconciler carries a renewed
+  copy to every other holder within a minute, in both directions (seconds
+  around the moment a shared sign-in is renewed). A copy the provider refused
+  is never placed again. A rebuild places the office's current copy in the new
+  laptop.
+- It is known early. When two reads in a row found every holder of a plan
+  without a usable sign-in, one line is posted in the office room: the plan,
+  the employees who run on it, and that only the account holder can sign it
+  in. An agent that is running goes on until its next request. One more line
+  follows when a sign-in is held again. The notice state is kept in memory, so
+  an office restart repeats the line once for a plan that is still signed out.
+- The employee is not rebuilt for it: a new laptop would stop at the same
+  screen. The card reads "Needs a sign-in" and `needsHuman` says so. As soon
+  as the plan is signed in, the reconciler puts the sign-in into every laptop
+  and the supervisor starts the parked agents again, with nothing else to do.
+- An office that is merely signed out itself is not that case: while the
+  laptop still holds a sign-in that works, the agent is started again with it.
+
+The office does not renew a sign-in itself and does not move an employee to
+another plan by itself; see the gaps below.
+
+Current gaps: the reconciler carries Claude plan sign-ins only. A Codex laptop
+at its sign-in screen is repaired by the rebuild, which places the office's
+copy of `auth.json`, but its copies are not kept in step between rebuilds.
+The office holds a sign-in's refresh token inside its copy and never uses it:
+renewal is done by a provider client (a laptop's agent at its next request),
+not by the office. An employee whose plan is signed in nowhere is not moved to
+another plan automatically: a plan move launches a paid session on the
+destination plan and is admitted only for the owner's own request, and the
+supervisor can continue a held move but never choose a plan. The per-model
+limit fallback (`modelLimitFallback`) changes the model within the same plan
+and does not help a plan that is signed out. After an office restart the
+office has no record that it launched a pane, so a screen it can only know by
+its words is recognised again at that laptop's next launch; a sign-in screen
+is recognised at once, by its widget.
 
 ## Employee disk budget
 
