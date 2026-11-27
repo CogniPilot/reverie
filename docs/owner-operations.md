@@ -389,7 +389,12 @@ is running normally, one who is stopped or out of the office, and one who is
 waiting for any repair, such as a lost terminal, a start-up screen or a
 handoff that is still owed. The check itself finds out whether the laptop is
 finished and running and whether another operation on it is in flight. Only
-while a step of a plan move is running is the laptop left to the move. The
+while a step of a plan move is running is the laptop left to the move. An
+employee who was once moved to another plan has a laptop record that the move
+made, and it stays that kind of record for good. Such a laptop gets the same
+check as any other once no plan move of the employee is open; while one is
+open, or while the office cannot tell, it is left to the move
+(`DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED` as the check's detail). The
 check needs
 `supervisorEnabled` only. It writes only values the owner already approved,
 attaches no terminal, reads and starts no agent, changes no attendance and

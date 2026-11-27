@@ -598,6 +598,18 @@ describe('a running laptop after a reload of the service manager', () => {
     await expect(f.controller.read(f.row())).resolves.toEqual(policy);
   });
 
+  it('repairs the leaf of a laptop that a plan move made, like any other', async () => {
+    // The record of an employee who was once moved to another plan stays a plan-move record for good.
+    for (const gone of [false, true]) {
+      const { f, commands } = await reloaded(gone);
+      const moved = () => ({ ...f.row(), version: 3 }) as ReturnType<typeof f.row>;
+      await expect(f.controller.repairLeaf(moved(), f.current)).resolves.toBe('restored');
+      expect(commands().at(-1)).toBe('restore-high');
+      await expect(f.controller.read(moved())).resolves.toEqual(policy);
+      await expect(f.controller.repairLeaf(moved(), f.current)).resolves.toBe('unchanged');
+    }
+  });
+
   it('waits for the shared pool: a leaf is not written while the pool is unconfirmed', async () => {
     const { f } = await runningLaptop();
     f.reloadServiceManager();

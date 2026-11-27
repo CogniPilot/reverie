@@ -523,6 +523,13 @@ export class DockerEmployeeRuntime {
       store,
       engine,
       busy: (employeeId): boolean => service.flightActive(employeeId) || absent.flightActive(employeeId),
+      // Bound later, by the server's composition. Until then the office cannot say, and a plan move's record is
+      // left alone.
+      openMoves: async (employeeId, owner) => {
+        const moves = this.#absentPlanMoves;
+        if (!moves) throw Error('The plan moves are not bound yet');
+        return moves.openMoves(employeeId, owner);
+      },
     });
     const absent: DockerAbsentReprovision = new DockerAbsentReprovision(
       company,
