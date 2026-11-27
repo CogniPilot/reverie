@@ -1162,20 +1162,22 @@ describe('employee supervisor: a terminal the office can never type into again',
     expect(SUPERVISOR_POLICY.heldInputIdleMs).toBe(2 * MINUTE);
   });
 
-  it('gives work the agent left running thirty minutes to finish, then rebuilds with it still running', () => {
-    // The turn ended long ago, and the pane says a monitor or a background shell is still going.
-    const left = (now: number) => assessEmployee(heldInput({ background: true }), refusedOnce(), ON, now);
+  it('gives work the agent left running four hours from when it was first seen, then rebuilds with it still running', () => {
+    // The turn ended long ago, and the pane says a monitor or a background shell is still going: first seen at
+    // minute five.
+    const left = (now: number) =>
+      assessEmployee(heldInput({ background: true }), { ...refusedOnce(), backgroundSince: at(5) }, ON, now);
     expect(left(at(10)).next).toEqual({
       action: null,
-      at: at(30),
+      at: at(245),
       waitingFor: 'the work the agent left running to finish',
       preconditions: [],
     });
     expect(left(at(10)).needsHuman).toBeUndefined();
-    expect(left(at(30) - 1).next.action).toBeNull();
+    expect(left(at(245) - 1).next.action).toBeNull();
     // A shell that never ends does not keep the employee out of reach for good.
-    expect(left(at(30)).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
-    expect(left(at(30)).needsHuman).toBeUndefined();
+    expect(left(at(245)).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
+    expect(left(at(245)).needsHuman).toBeUndefined();
     // The work finished before that: the ordinary rule applies at once.
     expect(assessEmployee(heldInput(), refusedOnce(), ON, at(10)).next.action).toBe('rebuild-laptop');
   });
@@ -2424,12 +2426,18 @@ describe('employee supervisor: no path ends for good', () => {
       expect(SUPERVISOR_OCCUPIED_PROOFS.some((proof) => idle(HOUR - 2 * MINUTE).preconditions.includes(proof))).toBe(true);
     });
 
-    it.each(reasons)('%s: work left running is given thirty minutes from when the problem was first seen', (_title, seen, history) => {
+    it.each(reasons)('%s: work left running is given four hours from when the office first saw it', (_title, seen, history) => {
+      // First seen an hour into the problem. The problem's own clock plays no part.
+      const first = T + HOUR;
       const left = (now: number) =>
-        assessEmployee(withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true }), history, ON, now).next;
-      const from = history.since > 0 ? history.since : history.transitSince! + 15 * MINUTE;
-      expect(left(from + 30 * MINUTE - 1)).toMatchObject({ action: null });
-      expect(left(from + 31 * MINUTE).action).toBe('rebuild-laptop');
+        assessEmployee(
+          withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true }),
+          { ...history, backgroundSince: first },
+          ON,
+          now
+        ).next;
+      expect(left(first + 4 * HOUR - 1)).toMatchObject({ action: null, at: first + 4 * HOUR });
+      expect(left(first + 4 * HOUR).action).toBe('rebuild-laptop');
     });
 
     it('reads what a pane shows of the turn whether or not the terminal’s input is held', () => {
@@ -2655,10 +2663,7 @@ describe('employee supervisor: no path ends for good', () => {
         const unknown = withLaptop(failed, { provider: 'unknown' }, { turn: 'idle', idleSince: 0 });
         const savedUnknown = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, unknown, T, T + 5 * HOUR));
         expect(until(savedUnknown, unknown, up, rebuilds)).toBe(15 * MINUTE);
-        // Work the agent left running: thirty minutes.
-        const left = withLaptop(failed, { provider: 'running' }, { turn: 'idle', idleSince: 0, background: true });
-        const savedLeft = resumeSupervisorHistory(watch(EMPTY_SUPERVISOR_HISTORY, left, T, T + 5 * HOUR));
-        expect(until(savedLeft, left, up, rebuilds)).toBe(30 * MINUTE);
+        // Work the agent left running has a clock of its own: employee-supervisor-ladder-fixes.test.ts.
       });
     });
   });

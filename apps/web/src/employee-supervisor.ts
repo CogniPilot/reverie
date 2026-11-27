@@ -41,6 +41,7 @@ import {
   classifyEmployee,
   issueSupervisorAttempt,
   resumeSupervisorHistory,
+  sightEmployee,
   rollSupervisorHistory,
   settleSupervisorAttempt,
   type SupervisorAction,
@@ -842,14 +843,14 @@ export class EmployeeSupervisor {
       },
     });
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
-    let history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
+    let history = rollSupervisorHistory(previous, sightEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
     this.#remember(employee.id, history);
     const due = (step: SupervisorAssessment) => step.next.action !== null && (step.next.at ?? 0) <= now;
     if (due(assessment) && seat && this.#reused) {
       // A step is never decided on a reading that was kept from an earlier pass.
       observed = withOccupied(await this.#observe(employee, flags.enabled, true));
-      history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
+      history = rollSupervisorHistory(previous, sightEmployee(observed), now, this.policy);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       this.#remember(employee.id, history);
     }

@@ -5,11 +5,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_SUPERVISOR_HISTORY,
+  SUPERVISOR_POLICY,
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
   resumeSupervisorHistory,
   rollSupervisorHistory,
+  sightEmployee,
   supervisorCodeKind,
   type SupervisorAction,
   type SupervisorFlags,
@@ -300,5 +302,101 @@ describe('a laptop that reports a code while an agent runs in it', () => {
     });
     expect(classifyEmployee(nameless).condition).toBe('held-needs-rebuild');
     expect(until(EMPTY_SUPERVISOR_HISTORY, nameless, T, rebuilds)).toBe(30 * MINUTE);
+  });
+});
+
+describe('work an agent left running when its turn ended', () => {
+  const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
+  /** An agent runs in the held laptop; its pane is idle and silent since long ago. */
+  const idle = (background: boolean, seen = failed) =>
+    withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0, ...(background ? { background: true } : {}) });
+  /** Roll what the driver rolls: the classification and what the idle pane says of work left running. */
+  const rollOn = (history: SupervisorHistory, seen: SupervisorObservation, from: number, to: number) => {
+    for (let now = from; now < to; now += 30_000) history = rollSupervisorHistory(history, sightEmployee(seen), now);
+    return history;
+  };
+  const dueAfter = (history: SupervisorHistory, seen: SupervisorObservation, from: number) => {
+    for (let now = from; now < from + 12 * HOUR; now += 30_000) {
+      history = rollSupervisorHistory(history, sightEmployee(seen), now);
+      if (rebuilds(assessEmployee(seen, history, ON, now), now)) return now - from;
+    }
+    return undefined;
+  };
+
+  it('is given four hours from when the office first saw it, however long the problem has stood', () => {
+    // The laptop was held for three hours with nothing left running; then the pane shows a job.
+    const before = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(false), T, T + 3 * MINUTE);
+    expect(dueAfter(before, idle(false), T + 3 * MINUTE)).toBe(0);
+    const held3h = rollOn(EMPTY_SUPERVISOR_HISTORY, withLaptop(idle(false), {}, { turn: 'working' }), T, T + 3 * HOUR);
+    const first = rollSupervisorHistory(held3h, sightEmployee(idle(true)), T + 3 * HOUR);
+    expect(first.backgroundSince).toBe(T + 3 * HOUR);
+    expect(assessEmployee(idle(true), first, ON, T + 3 * HOUR).next).toEqual({
+      action: null,
+      at: T + 7 * HOUR,
+      waitingFor: 'the work the agent left running to finish',
+      preconditions: [],
+    });
+    expect(dueAfter(held3h, idle(true), T + 3 * HOUR)).toBe(4 * HOUR);
+    expect(SUPERVISOR_POLICY.backgroundGraceMs).toBe(4 * HOUR);
+  });
+
+  it('has a grace of its own beside a code the office does not know, which is watched for thirty minutes too', () => {
+    // Before, both waits ran from the same moment, so a job left running got no grace at all.
+    const odd = held('DOCKER_SOMETHING_NOBODY_LISTED');
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, idle(true, odd), T)).toBe(4 * HOUR);
+  });
+
+  it('is rebuilt over at once when the pane shows the work has finished', () => {
+    const waiting = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(true), T, T + HOUR);
+    expect(waiting.backgroundSince).toBe(T);
+    const finished = rollSupervisorHistory(waiting, sightEmployee(idle(false)), T + HOUR);
+    expect(finished.backgroundSince).toBeUndefined();
+    expect(dueAfter(waiting, idle(false), T + HOUR)).toBe(0);
+  });
+
+  it('keeps its clock while a turn runs or the pane cannot be read, and starts a new one for new work', () => {
+    let history = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(true), T, T + HOUR);
+    history = rollOn(history, withLaptop(idle(false), {}, { turn: 'working' }), T + HOUR, T + 2 * HOUR);
+    expect(history.backgroundSince).toBe(T);
+    history = rollOn(history, withLaptop(failed, { provider: 'running' }), T + 2 * HOUR, T + 2 * HOUR + MINUTE);
+    expect(history.backgroundSince).toBe(T);
+    // A shell that never ends does not keep the laptop for good: four hours from its first sighting.
+    expect(dueAfter(history, idle(true), T + 2 * HOUR + MINUTE)).toBe(2 * HOUR - MINUTE);
+    // The work finished, and later the agent left other work running: that has its own four hours.
+    history = rollOn(rollOn(history, idle(false), T + 3 * HOUR, T + 3 * HOUR + MINUTE), failed, T + 3 * HOUR + MINUTE, T + 5 * HOUR);
+    expect(rollSupervisorHistory(history, sightEmployee(idle(true)), T + 5 * HOUR).backgroundSince).toBe(T + 5 * HOUR);
+  });
+
+  it('is watched anew after an office start', () => {
+    const saved = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(true), T, T + 5 * HOUR);
+    expect(resumeSupervisorHistory(saved).backgroundSince).toBeUndefined();
+    expect(dueAfter(resumeSupervisorHistory(saved), idle(true), T + 6 * HOUR)).toBe(4 * HOUR);
+  });
+
+  it('gets the same four hours behind a terminal whose input is held', () => {
+    const heldInput = observed({
+      session: { inputHeld: true, turn: 'idle', idleSince: 0, background: true },
+      laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }, provider: 'running' },
+    });
+    const refused: SupervisorHistory = {
+      ...since(T, classifyEmployee(heldInput).fingerprint, { attempts: tried('reconnect-viewer', 1, T + 45_000) }),
+      lastAction: { action: 'reconnect-viewer', at: T + 45_000, outcome: 'refused' },
+    };
+    expect(dueAfter(refused, heldInput, T + MINUTE)).toBe(4 * HOUR);
+  });
+
+  it('is not what an agent parked on a start-up screen is kept for: that keeps its thirty minutes', () => {
+    const parked = observed({
+      session: {
+        turn: 'idle',
+        idleSince: 0,
+        background: true,
+        startupScreen: { label: 'a chooser', kind: 'first-run', answering: false, proof: 'widget' },
+      },
+      laptop: { continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] }, provider: 'running' },
+    } as Patch);
+    const after = dueAfter(EMPTY_SUPERVISOR_HISTORY, parked, T)!;
+    expect(after).toBeGreaterThanOrEqual(30 * MINUTE);
+    expect(after).toBeLessThan(HOUR);
   });
 });

@@ -76,8 +76,16 @@ export interface SupervisorPolicy {
   readonly stalledAfterMs: number;
   /** A laptop an agent may run in is rebuilt only after that agent's pane has been idle and silent this long. */
   readonly heldInputIdleMs: number;
-  /** Work an agent left running after its turn is waited for until this long after the problem was first seen. */
+  /**
+   * An agent parked on a start-up screen is started again this long after work was first seen left running in its
+   * pane. Such an agent has no conversation that could have started any.
+   */
   readonly heldInputTurnMs: number;
+  /**
+   * Work an agent left running after its turn (a monitor, a background shell) is waited for until this long after
+   * the office first saw it, before the laptop is rebuilt with it still running.
+   */
+  readonly backgroundGraceMs: number;
   /** A ladder whose rungs are all used starts again this long after its last attempt. */
   readonly ladderRestartMs: number;
   /** A laptop code the office does not recognize is treated as a hold once it has stood this long. */
@@ -115,9 +123,13 @@ const MINUTE = 60 * SECOND;
  *   silent seconds and a look at the screen; two more minutes cover a pause between two tool calls that this look
  *   missed, while a working agent redraws its pane every second. A turn the office can see is waited for, however
  *   long it lasts, and nobody is asked. An agent that ended its turn with work left running (a monitor, a
- *   background shell) is given thirty minutes from when the problem was first seen: an ordinary turn has finished
- *   by then, a job of ordinary length finishes, and a shell that never ends does not keep the employee out of
- *   reach for good.
+ *   background shell) is given four hours from when the office first saw that work: the jobs agents leave running
+ *   on this machine are builds and test runs of one to three hours, their output lands in the home directory a
+ *   rebuild keeps, and the laptops this rule serves either go on working meanwhile or cannot be reached with or
+ *   without the wait. A shell that never ends does not keep a laptop for good. The clock is the work's own: it
+ *   does not start with the problem, so a job that began late is not cut short for a problem that began early.
+ *   An agent parked on a start-up screen has no conversation that could have started any work, and keeps the
+ *   thirty minutes this wait used to be.
  * - The same rule, with the same times, serves every other laptop that only a rebuild settles while an agent still
  *   runs in it (`betweenTurnsGate`). It is rebuilt between the agent's turns and never in the middle of one.
  * - An agent parked on a provider start-up screen (a sign-in, a first-run screen the office could not answer) is in
@@ -213,6 +225,7 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
   ladderRestartMs: 6 * 60 * MINUTE,
   unrecognizedAfterMs: 30 * MINUTE,
   blindRebuildMs: 2 * 60 * MINUTE,
+  backgroundGraceMs: 4 * 60 * MINUTE,
 };
 
 /** The two owner switches. Both off means the supervisor only describes what it sees. */
@@ -532,6 +545,12 @@ export interface SupervisorHistory {
    * (`watchedSince`): time in which the office saw something else, or was not running, does not count.
    */
   readonly watchSince?: number;
+  /**
+   * Since when an idle pane of this employee has shown work that its agent left running, in this office process.
+   * It is kept while a turn runs or the pane cannot be read, and ends when an idle pane shows none: the grace such
+   * work is given counts from here and from nothing else (`backgroundGraceMs`).
+   */
+  readonly backgroundSince?: number;
   readonly attempts: Readonly<Partial<Record<SupervisorAction, SupervisorAttempt>>>;
   /** Times of this employee's automatic rebuilds within the last day. */
   readonly rebuilds: readonly number[];
@@ -1201,6 +1220,17 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
   });
 }
 
+/**
+ * What one observation is rolled into the history as: its classification, and what an idle pane says of work the
+ * agent left running. Only an idle pane says anything about that, so every other reading leaves it out.
+ */
+export function sightEmployee(
+  observed: SupervisorObservation
+): SupervisorClassification & { readonly background?: boolean } {
+  const { turn, background } = observed.session;
+  return { ...classifyEmployee(observed), ...(turn === 'idle' ? { background: background === true } : {}) };
+}
+
 /** One observation, one condition. Reads no history and no clock. */
 export function classifyEmployee(observed: SupervisorObservation): SupervisorClassification {
   const name = observed.name;
@@ -1461,8 +1491,8 @@ function laptopHeld(observed: SupervisorObservation): readonly SupervisorPrecond
  *
  * - The pane is seen idle and has been silent for `heldInputIdleMs`: the laptop is rebuilt (`proof`).
  * - A turn is in progress: it is waited for, however long it takes.
- * - The agent ended its turn with work left running: that is waited for until `heldInputTurnMs` after the problem
- *   was first seen, and then the idle laptop is rebuilt with it.
+ * - The agent ended its turn with work left running: that is waited for until `backgroundGraceMs` after the office
+ *   first saw it (`backgroundSince`), and then the idle laptop is rebuilt with it.
  * - The office is not reading the pane. `unknown` is never treated as idle. A read made inside the laptop is asked
  *   first, and a laptop it shows to be empty is rebuilt at once. Otherwise the laptop is rebuilt `blindRebuildMs`
  *   after the problem was first seen (`agent-unreadable`): see `SUPERVISOR_POLICY` for why that long. The wait
@@ -1480,10 +1510,19 @@ function betweenTurnsGate(
 ): Gate {
   const { turn = 'unknown', idleSince, background } = observed.session;
   const watched = watchedSince(history);
-  const overdue = watched > 0 && now - watched >= policy.heldInputTurnMs;
+  // Work left running has a clock of its own, from when it was first seen. An agent parked on a start-up screen
+  // has no conversation that could have started any, so what its pane shows is given the short wait only.
+  const grace = proof.includes('agent-parked-at-screen') ? policy.heldInputTurnMs : policy.backgroundGraceMs,
+    leftSince = history.backgroundSince,
+    overdue = leftSince !== undefined && now - leftSince >= grace;
   const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
   if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: proof };
-  if (quiet) return { kind: 'wait', waitingFor: HELD_INPUT_BACKGROUND_WAIT, at: watched + policy.heldInputTurnMs };
+  if (quiet)
+    return {
+      kind: 'wait',
+      waitingFor: HELD_INPUT_BACKGROUND_WAIT,
+      ...(leftSince === undefined ? {} : { at: leftSince + grace }),
+    };
   if (turn === 'working' || (turn === 'idle' && idleSince !== undefined))
     return { kind: 'wait', waitingFor: HELD_INPUT_WAIT[turn] };
   // A laptop that this read shows to be empty never comes here: `rebuildGate` decides for it.
@@ -2054,7 +2093,11 @@ export function assessEmployee(
  */
 export function rollSupervisorHistory(
   history: SupervisorHistory,
-  seen: Pick<SupervisorClassification, 'condition' | 'fingerprint'> & { readonly code?: string },
+  seen: Pick<SupervisorClassification, 'condition' | 'fingerprint'> & {
+    readonly code?: string;
+    /** What an idle pane said of work left running; absent when no idle pane was read. See `sightEmployee`. */
+    readonly background?: boolean;
+  },
   now: number,
   policy: SupervisorPolicy = SUPERVISOR_POLICY
 ): SupervisorHistory {
@@ -2076,7 +2119,15 @@ export function rollSupervisorHistory(
           ...last,
         };
   }
-  const kept = { attempts, rebuilds, ...last };
+  // Work left running keeps its first sighting while nothing says it has finished: a turn in progress and a pane
+  // that is not read say nothing either way. An idle pane that shows none ends it.
+  const leftSince =
+    seen.background === true
+      ? (history.backgroundSince ?? now)
+      : seen.background === false
+        ? undefined
+        : history.backgroundSince;
+  const kept = { attempts, rebuilds, ...last, ...(leftSince === undefined ? {} : { backgroundSince: leftSince }) };
   // In transit (starting, moving): the problem being worked on, if any, keeps its clock.
   if (seen.fingerprint === '') {
     const transitOf = transitKey(seen),
@@ -2109,7 +2160,7 @@ function transitKey(seen: { readonly condition: SupervisorCondition; readonly co
 /**
  * Since when this office process has watched the current problem without a break. Every wait that ends in a laptop
  * being discarded is measured from here: the thirty minutes of an unrecognized code, the fifteen of a laptop that
- * cannot be read, the thirty for work left running and the two hours of a pane that cannot be read. A history that
+ * cannot be read and the two hours of a pane that cannot be read. Work left running has its own (`backgroundSince`). A history that
  * was never rolled has no such clock, and then the problem's own start is all there is.
  */
 function watchedSince(history: SupervisorHistory): number {
@@ -2137,6 +2188,7 @@ export function resumeSupervisorHistory(
     transitOf: _transitOf,
     watchSince: _watchSince,
     healthySince: _healthySince,
+    backgroundSince: _backgroundSince,
     ...kept
   } = history;
   return continueGivenBack(settleInterrupted(kept), policy);
