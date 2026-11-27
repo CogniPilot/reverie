@@ -236,9 +236,19 @@ What this does not cover, stated plainly:
 
 - An employee with no owner-approved laptop layout on record is still rebuilt
   by hand once; the supervisor names the calls.
+- The limit of two automatic rebuilds of one laptop per day counts these
+  rebuilds too. After a third host restart within a day the laptop waits until
+  the oldest of them is a day old.
+- A pool that cannot be read (its status is refused for a reason other than a
+  stopped anchor) is never recovered cold. Rebuilds wait, the look is repeated
+  every minute, and `supervisor.pool.detail` carries the code. A fresh laptop
+  that already exists is still started, as it was before.
 - When no laptop record, current or retired by a rebuild, names the pool, the
   stopped anchor cannot be recovered by anyone. That is an office that never
   finished a laptop, where the first set-up creates the pool.
+- Employees whose approved limits name different pool policies cannot share
+  one pool; the recovery is refused for all of them until the owner approves
+  one policy.
 - This is source and component coverage. A restart of a real host has not been
   qualified with it.
 

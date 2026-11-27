@@ -1384,7 +1384,7 @@ describe('employee supervisor: after a host restart', () => {
     expect(assess({ provider: 'no-laptop', pool: 'up', record: unfinished }).next.preconditions).toEqual([]);
   });
 
-  it('starts a fresh laptop only once the pool is up, and as before where the office is not looking at the pool', () => {
+  it('starts no fresh laptop while the pool is known to be down, and as before where the office is not looking', () => {
     const fresh = (laptop: Partial<SupervisorObservation['laptop']>) =>
       assessEmployee(
         observed({
@@ -1400,8 +1400,12 @@ describe('employee supervisor: after a host restart', () => {
     // No laptop record names a pool, as in an office that never finished a laptop: the set-up creates it.
     expect(fresh({ pool: 'none' }).next.action).toBe('start-continuation');
     expect(fresh({ pool: 'down', poolAlive: true }).next.action).toBe('start-continuation');
-    for (const pool of ['down', 'unknown'] as const)
-      expect(fresh({ pool }).next).toMatchObject({ action: null, waitingFor: expect.stringMatching(/the shared pool/) });
+    expect(fresh({ pool: 'down' }).next).toMatchObject({
+      action: null,
+      waitingFor: expect.stringMatching(/the shared pool/),
+    });
+    // A pool the office could not read holds no start: the set-up finds out, as it did before the office looked.
+    expect(fresh({ pool: 'unknown' }).next.action).toBe('start-continuation');
   });
 
   it('keeps its switch: with repairs off the rebuild is named and nothing is waited for on the owner\'s behalf', () => {

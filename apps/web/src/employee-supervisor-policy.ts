@@ -1153,8 +1153,10 @@ function gate(
         : { kind: 'skip' };
     }
     case 'start-continuation':
-      // A fresh laptop cannot be set up while the pool's anchor is stopped. Only the office's own look says so.
-      if (observed.laptop.pool !== undefined && !poolUsable(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+      // A fresh laptop cannot be set up while the pool's anchor is stopped or a recovery of it is open. Only a
+      // look that found exactly that holds the start: a pool the office could not read is tried, as it always was.
+      if (observed.laptop.pool === 'down' && observed.laptop.poolAlive !== true)
+        return { kind: 'wait', waitingFor: POOL_WAIT };
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
