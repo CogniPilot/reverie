@@ -1200,3 +1200,59 @@ describe('limits put back without stopping a laptop', () => {
     expect(repairResources).not.toHaveBeenCalled();
   });
 });
+
+describe('an office restart in the middle of a set-up step', () => {
+  /** Each effect of a set-up, by the mock that carries it out. */
+  const effects = (f: ReturnType<typeof fixture>) =>
+    ({
+      preparePool: f.engine.preparePool,
+      createDestination: f.engine.createDestination,
+      start: f.engine.start,
+      configureResources: f.engine.configureResources,
+      provisionIdentity: f.engine.provisionIdentity,
+      launch: f.provider.launch,
+    }) as Record<string, ReturnType<typeof vi.fn>>;
+
+  it.each(['preparePool', 'createDestination', 'start', 'configureResources', 'provisionIdentity', 'launch'])(
+    'leaves a record that the next office continues after %s, without repeating a launch',
+    async (step) => {
+      const f = fixture();
+      const effect = effects(f)[step]!;
+      const original = effect.getMockImplementation()!;
+      // The office stops for good while this effect is in flight: it never returns.
+      effect.mockImplementationOnce(async (...args: unknown[]) => {
+        await (original as (...values: unknown[]) => Promise<void>)(...args);
+        await new Promise(() => {});
+      });
+      void f.service.begin(eid, f.request, f.authority).catch(() => undefined);
+      for (let tries = 0; tries < 200 && effect.mock.calls.length === 0; tries++)
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      expect(effect).toHaveBeenCalledOnce();
+      expect(f.service.flightSince(eid)).toEqual(expect.any(Number));
+      // A new office process reads the record and goes on from it.
+      const next = f.make();
+      const result = await next.begin(eid, f.request, f.authority);
+      expect(result).toMatchObject({ state: 'ready', phase: 'ready' });
+      expect(f.provider.launch).toHaveBeenCalledOnce();
+      expect(effect).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('never launches again a provider whose launch was cut off before it was seen running', async () => {
+    const f = fixture();
+    // The launch is on record as issued, and the office stops before the provider shows.
+    f.provider.launch.mockImplementationOnce(async () => {
+      await new Promise(() => {});
+    });
+    void f.service.begin(eid, f.request, f.authority).catch(() => undefined);
+    for (let tries = 0; tries < 200 && f.provider.launch.mock.calls.length === 0; tries++)
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    const next = f.make();
+    expect(await next.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'provider-issued',
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+  });
+});

@@ -415,16 +415,18 @@ describe('when the office may restart itself next', () => {
 });
 
 describe('a laptop operation that has not returned, as a restart weighs it', () => {
-  it('waits for a set-up step always, and for a rebuild or a limits repair only until it is overdue', () => {
+  it('waits for a set-up step, a rebuild or a limits repair only until it is overdue', () => {
     const now = 100 * HOUR;
     expect(OVERDUE_OPERATION_MS).toBe(30 * MINUTE);
-    expect(operationHoldsRestart({ setUp: false }, now)).toBe(false);
-    expect(operationHoldsRestart({ setUp: true }, now)).toBe(true);
-    expect(operationHoldsRestart({ setUp: false, rebuildSince: now - 29 * MINUTE }, now)).toBe(true);
+    expect(operationHoldsRestart({}, now)).toBe(false);
+    expect(operationHoldsRestart({ setUpSince: now - 29 * MINUTE }, now)).toBe(true);
+    // A set-up step that has not returned in thirty minutes hangs as well; its phases on record recover a restart.
+    expect(operationHoldsRestart({ setUpSince: now - 30 * MINUTE }, now)).toBe(false);
+    expect(operationHoldsRestart({ rebuildSince: now - 29 * MINUTE }, now)).toBe(true);
     // A rebuild that has not returned in thirty minutes hangs; its journal recovers a restart in the middle of it.
-    expect(operationHoldsRestart({ setUp: false, rebuildSince: now - 30 * MINUTE }, now)).toBe(false);
-    expect(operationHoldsRestart({ setUp: false, limitsSince: now - 10 * MINUTE }, now)).toBe(true);
-    expect(operationHoldsRestart({ setUp: false, limitsSince: now - 31 * MINUTE }, now)).toBe(false);
-    expect(operationHoldsRestart({ setUp: true, rebuildSince: now - 5 * HOUR }, now)).toBe(true);
+    expect(operationHoldsRestart({ rebuildSince: now - 30 * MINUTE }, now)).toBe(false);
+    expect(operationHoldsRestart({ limitsSince: now - 10 * MINUTE }, now)).toBe(true);
+    expect(operationHoldsRestart({ limitsSince: now - 31 * MINUTE }, now)).toBe(false);
+    expect(operationHoldsRestart({ setUpSince: now - MINUTE, rebuildSince: now - 5 * HOUR }, now)).toBe(true);
   });
 });

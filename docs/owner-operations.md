@@ -420,7 +420,11 @@ was first made, and lapses when it is not repeated):
   (a rebuild resumes from its journal entry, or, cut off before it retired the
   laptop record, is repeated from a fresh preview; a limits repair resumes its
   open attempt), and the restart is what ends one that hangs. A laptop set-up
-  step is always waited for. While a step of the supervisor that was taken as
+  step is bounded the same way: each step writes its `…-issued` phase to the
+  laptop record before its effect, and the next office observes the effect
+  instead of repeating it; the provider launch is never repeated, and a
+  record left at `provider-issued` waits for the provider to be seen running,
+  or is replaced by a rebuild. While a step of the supervisor that was taken as
   interrupted has still not returned, the office itself asks for this
   restart on every pass (“a step of the office has not returned for half an
   hour, and only a new office process ends it”), since nothing else ends it.

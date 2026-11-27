@@ -300,6 +300,8 @@ export function dockerContinuationFailureCauses(cause: unknown): DockerContinuat
 }
 export class DockerEmployeeContinuation {
   readonly #flights = new Map<string, string>();
+  /** When each set-up step or repair in flight began. */
+  readonly #flightsSince = new Map<string, number>();
   readonly #causes = new Map<string, unknown>();
   readonly #exits = new Map<string, DockerProviderExit>();
   constructor(
@@ -313,11 +315,16 @@ export class DockerEmployeeContinuation {
      * in flight (`DockerAbsentReprovision.flightActive`). Between the stop of the old laptop and the retirement of
      * its record, a set-up step would act on a record whose laptop is being discarded. Denial DATA only.
      */
-    private readonly otherOperation: (employeeId: string) => boolean = () => false
+    private readonly otherOperation: (employeeId: string) => boolean = () => false,
+    private readonly now: () => number = Date.now
   ) {}
   /** Denial DATA for other owners of the same employee; never an admission. */
   flightActive(employeeId: string): boolean {
     return this.#flights.has(employeeId);
+  }
+  /** When the set-up step or repair of this employee that is in flight began, while one is. Denial DATA. */
+  flightSince(employeeId: string): number | undefined {
+    return this.#flightsSince.get(employeeId);
   }
   #require(
     subject: DockerContinuationSubject,
@@ -680,6 +687,7 @@ export class DockerEmployeeContinuation {
     else if (subject.onVacation || subject.desiredRunning === false) refuse('DOCKER_CONTINUATION_OFFICE_REQUIRED');
     if (this.#flights.has(employeeId) || this.otherOperation(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
     this.#flights.set(employeeId, request.operationId);
+    this.#flightsSince.set(employeeId, this.now());
     try {
       let row = this.store.record(employeeId);
       if (row) {
@@ -732,6 +740,7 @@ export class DockerEmployeeContinuation {
       return await this.#advance(subject, row, authority, current, 'advance');
     } finally {
       this.#flights.delete(employeeId);
+      this.#flightsSince.delete(employeeId);
     }
   }
   /** Re-applies the already approved limits of one published laptop in place
@@ -781,10 +790,12 @@ export class DockerEmployeeContinuation {
     }
     if (this.otherOperation(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
     this.#flights.set(employeeId, operationId);
+    this.#flightsSince.set(employeeId, this.now());
     try {
       return await this.#advance(subject, row, authority, current, mode);
     } finally {
       this.#flights.delete(employeeId);
+      this.#flightsSince.delete(employeeId);
     }
   }
   #refresh(row: DockerEmployeeContinuationRecord, current: () => void): DockerEmployeeContinuationRecord {

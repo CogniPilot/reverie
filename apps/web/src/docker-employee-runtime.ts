@@ -326,11 +326,12 @@ export class DockerEmployeeRuntime {
   /** The laptop operations of this employee that are in flight, as a restart of the office weighs them. */
   laptopOperations(employeeId: string): LaptopOperationsInFlight {
     const a = this.#attached;
-    if (!a) return { setUp: false };
-    const rebuildSince = a.absent.flightSince(employeeId),
+    if (!a) return {};
+    const setUpSince = a.service.flightSince(employeeId),
+      rebuildSince = a.absent.flightSince(employeeId),
       limitsSince = a.limits.flightSince(employeeId);
     return {
-      setUp: a.service.flightActive(employeeId),
+      ...(setUpSince === undefined ? {} : { setUpSince }),
       ...(rebuildSince === undefined ? {} : { rebuildSince }),
       ...(limitsSince === undefined ? {} : { limitsSince }),
     };

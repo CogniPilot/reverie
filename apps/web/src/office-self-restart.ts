@@ -50,15 +50,16 @@ export const OFFICE_SELF_RESTART_LIMITS: OfficeSelfRestartLimits = {
 };
 
 /**
- * How long a journaled laptop operation (a rebuild, a repair of a laptop's limits) holds off a restart of the
- * office. The supervisor gives up its own wait for a step after the same time (`SUPERVISOR_LIMITS.stepDeadlineMs`).
+ * How long a journaled laptop operation (a set-up step, a rebuild, a repair of a laptop's limits) holds off a
+ * restart of the office. The supervisor gives up its own wait for a step after the same time
+ * (`SUPERVISOR_LIMITS.stepDeadlineMs`).
  */
 export const OVERDUE_OPERATION_MS = 30 * MINUTE;
 
-/** The laptop operations of one employee that this office has in flight, and when the journaled ones began. */
+/** The laptop operations of one employee that this office has in flight, and when each began. */
 export interface LaptopOperationsInFlight {
-  /** A step of a laptop set-up. Always waited for. */
-  readonly setUp: boolean;
+  /** When the step of a laptop set-up, or the set-up service's repair, in flight began. */
+  readonly setUpSince?: number;
   /** When the rebuild or reprovision in flight began. */
   readonly rebuildSince?: number;
   /** When the repair of the laptop's limits in flight began. */
@@ -66,14 +67,22 @@ export interface LaptopOperationsInFlight {
 }
 
 /**
- * Whether a restart of the office now would cut off a laptop operation it must wait for. A set-up step is always
- * waited for. A rebuild and a limits repair are waited for until `OVERDUE_OPERATION_MS` after they began, and not
- * after that: both are journaled so that a restart in the middle is recovered. A rebuild retires the laptop record
- * in one canonical write and resumes from its journal entry at the next look (`DockerAbsentReprovision`); one cut
- * off before that write finds the laptop it discarded gone, and the next rebuild repeats from a fresh preview,
- * because each of its steps only removes or advances. A limits repair resumes its open attempt as itself
- * (`DockerResourceRepairJournal`). One that has not returned after that long hangs, and the restart is what ends
- * it; without this a rebuild that never returned would keep the office from ever restarting itself.
+ * Whether a restart of the office now would cut off a laptop operation it must wait for. Each is waited for until
+ * `OVERDUE_OPERATION_MS` after it began, and not after that: all three are journaled so that a restart in the
+ * middle is recovered, and one that has not returned after that long hangs, so the restart is what ends it.
+ *
+ * - A set-up step (`DockerEmployeeContinuation`) writes its `…-issued` phase to the laptop record before its
+ *   effect, and the next office reads that phase back and observes the effect instead of repeating it: the
+ *   attendance, the pool, the container, its start, its limits, its identity. A helper recorded as created and never
+ *   started is issued again; nothing that may have run is. The provider launch is the one effect that is never
+ *   repeated: `provider-issued` is on record before it, and from then on the record only waits for the provider
+ *   to be seen running (`DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED` while it is not), and the supervisor replaces
+ *   such a laptop by a rebuild under its own rules. So no step leaves a record that the next office could neither
+ *   continue nor rebuild, and none is waited for longer than the others.
+ * - A rebuild retires the laptop record in one canonical write and resumes from its journal entry at the next look
+ *   (`DockerAbsentReprovision`); one cut off before that write finds the laptop it discarded gone, and the next
+ *   rebuild repeats from a fresh preview, because each of its steps only removes or advances.
+ * - A limits repair resumes its open attempt as itself (`DockerResourceRepairJournal`).
  */
 export function operationHoldsRestart(
   flights: LaptopOperationsInFlight,
@@ -81,7 +90,7 @@ export function operationHoldsRestart(
   overdueMs = OVERDUE_OPERATION_MS
 ): boolean {
   const young = (since: number | undefined) => since !== undefined && now - since < overdueMs;
-  return flights.setUp || young(flights.rebuildSince) || young(flights.limitsSince);
+  return young(flights.setUpSince) || young(flights.rebuildSince) || young(flights.limitsSince);
 }
 
 /** A request of the supervisor that was not repeated for this long no longer stands. It asks every half minute. */
