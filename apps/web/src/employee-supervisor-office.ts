@@ -356,6 +356,9 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     readSource: async (employee, guard) => (laptops ? laptops.source(employee, guard) : 'unknown'),
     readProvider: async (employee, guard) => (laptops ? laptops.provider(employee, guard) : 'unknown'),
     ...(laptops
+      ? { readOtherWork: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.otherWork(employee, guard) }
+      : {}),
+    ...(laptops
       ? {
           keepLimits: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.keepLimits(employee, guard),
           keepPool: (

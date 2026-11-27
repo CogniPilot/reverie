@@ -55,6 +55,12 @@ function world() {
     resume: undefined as ((id: string) => Status | Error) | undefined,
     stopped: { state: 'verified' } as DockerStoppedStorage | Error,
     remembered: [] as string[],
+    /** What the read inside a running laptop finds, and the time. */
+    work: (() => ({ otherWork: false, processes: 0, names: [], agent: true, cpuUsedMs: 1000 })) as () =>
+      | { otherWork: boolean; processes: number; names: string[]; agent: boolean; cpuUsedMs?: number }
+      | undefined
+      | Error,
+    clock: 1_000_000,
     /** The layout each stored-home read was given, for a laptop whose container is gone. */
     layouts: [] as unknown[],
     /** What the configured verifier image can do, and what one attempt to record a home answers. */
@@ -123,7 +129,14 @@ function world() {
           : undefined,
       policy: () => ({}),
     },
-    engine: { observeDestination: async () => null },
+    engine: {
+      observeDestination: async () => null,
+      observeOtherWork: async (row: { employeeId: string }) => {
+        state.calls.push(['other-work', row.employeeId]);
+        return give(state.work());
+      },
+    },
+    now: () => state.clock,
     service: { flightActive: () => false },
     pool: {
       coldHeld: () => state.held,
@@ -682,6 +695,59 @@ describe('the stored home of a stopped laptop', () => {
       w.state.capability = capability;
       await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('recorded');
     }
+  });
+});
+
+describe('what else runs in a laptop besides its agent', () => {
+  const guard = () => {};
+  it('reports what the read inside the laptop found, as a fact', async () => {
+    const w = world();
+    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual({ otherWork: false, processes: 0, at: 1_000_000 });
+    w.state.work = () => ({ otherWork: true, processes: 3, names: ['cargo', 'rustc'], agent: true, cpuUsedMs: 1000 });
+    await expect(w.laptops.otherWork(B, guard)).resolves.toEqual({
+      otherWork: true,
+      processes: 3,
+      names: ['cargo', 'rustc'],
+      at: 1_000_000,
+    });
+    expect(w.made('other-work').map(([, id]) => id)).toEqual([A.id, B.id]);
+  });
+
+  it('says what the laptop used of the CPU between two reads of the same laptop', async () => {
+    const w = world();
+    await w.laptops.otherWork(A, guard);
+    w.state.clock += 120_000;
+    w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true, cpuUsedMs: 61_000 });
+    // A minute of CPU time over two minutes.
+    await expect(w.laptops.otherWork(A, guard)).resolves.toMatchObject({ cpu: { usedMs: 60_000, overMs: 120_000 } });
+    // A counter that went back is another laptop's: nothing is said of it.
+    w.state.clock += 60_000;
+    w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true, cpuUsedMs: 5 });
+    expect((await w.laptops.otherWork(A, guard)).cpu).toBeUndefined();
+    // No figure where the laptop could not read one.
+    w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true });
+    expect((await w.laptops.otherWork(A, guard)).cpu).toBeUndefined();
+  });
+
+  it('reports unknown as unknown, never as none', async () => {
+    const w = world();
+    const unknown = { otherWork: 'unknown', at: 1_000_000 };
+    // The read gave no answer.
+    w.state.work = () => new Error('exec failed');
+    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
+    // The laptop on record does not run.
+    w.state.work = () => undefined;
+    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
+    // The supervisor may no longer act for this employee.
+    w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true });
+    await expect(
+      w.laptops.otherWork(A, () => {
+        throw new Error('The office supervisor was switched off');
+      })
+    ).resolves.toEqual(unknown);
+    // No laptop on record.
+    w.state.records.delete(A.id);
+    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
   });
 });
 

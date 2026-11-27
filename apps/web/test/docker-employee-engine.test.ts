@@ -3099,6 +3099,62 @@ describe('the stored home of a stopped laptop after a host restart', () => {
     await expect(w.read()).resolves.toBe('unconfirmed:laptop-unreadable');
   });
 
+  describe('what else runs in a laptop besides its agent', () => {
+    const answer = (patch: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        version: 1, purpose: 'reverie-laptop-other-work-v1', agent: true, others: 0, names: [], cpuUsec: '5250999',
+        ...patch,
+      }) + '\n';
+    const laptop = async (output: () => string) => {
+      const w = await restarted();
+      w.f.observed.State = { ...w.f.observed.State, Running: true, Status: 'running', Pid: 4321 };
+      const asked: string[][] = [];
+      const before = vi.mocked(w.f.command.run).getMockImplementation()!;
+      vi.mocked(w.f.command.run).mockImplementation(async (args, input, timeout) => {
+        if (args[0] !== 'exec' || !args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) return before(args, input, timeout);
+        asked.push([...args]);
+        return output();
+      });
+      return { ...w, asked };
+    };
+
+    it('asks the fixed in-laptop program, read-only, and reports what it counted as a plain fact', async () => {
+      const w = await laptop(() => answer({ others: 2, names: ['cargo', 'rustc'] }));
+      await expect(w.f.engine.observeOtherWork(w.f.row)).resolves.toEqual({
+        otherWork: true, processes: 2, names: ['cargo', 'rustc'], agent: true, cpuUsedMs: 5250,
+      });
+      // One exec into the recorded laptop: the program the office passes on every call, in its `work` mode.
+      expect(w.asked).toHaveLength(1);
+      const args = w.asked[0]!;
+      expect(args[0]).toBe('exec');
+      expect(args).toContain(w.f.row.destination!.containerId);
+      expect(args.slice(args.indexOf('--') + 1).filter((value) => !value.startsWith('--runtime-namespace'))).toEqual([
+        'work', w.f.row.request.sessionId, w.f.row.request.operationId, expect.stringMatching(/^(none|generation)$/),
+      ]);
+      expect(w.f.command.create).not.toHaveBeenCalled();
+    });
+
+    it('reports none when the program counted none, and no CPU figure where the laptop could not read one', async () => {
+      const w = await laptop(() => answer({ cpuUsec: null, agent: false }));
+      await expect(w.f.engine.observeOtherWork(w.f.row)).resolves.toEqual({
+        otherWork: false, processes: 0, names: [], agent: false,
+      });
+    });
+
+    it('has nothing to read in a laptop that does not run, and never guesses from an answer it cannot read', async () => {
+      const stopped = await restarted();
+      await expect(stopped.f.engine.observeOtherWork(stopped.f.row)).resolves.toBeUndefined();
+      for (const output of ['', 'ABSENT\n', '{"others":0}\n', answer({ others: -1 }), answer({ extra: true }), answer({ names: ['x'.repeat(2000)] })]) {
+        const w = await laptop(() => output);
+        await expect(w.f.engine.observeOtherWork(w.f.row), output.slice(0, 20)).rejects.toThrow();
+      }
+      const failed = await laptop(() => {
+        throw Error('exec failed');
+      });
+      await expect(failed.f.engine.observeOtherWork(failed.f.row)).rejects.toThrow('exec failed');
+    });
+  });
+
   describe('a laptop container that no longer exists', () => {
     // Where a rebuild would bind the two directories from, and the user it would run as.
     const layout = { home: '/synthetic/home', nix: '/synthetic/nix', user: '1000:100' };

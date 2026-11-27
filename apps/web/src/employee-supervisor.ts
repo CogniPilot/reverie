@@ -85,6 +85,24 @@ export interface SupervisorActionResult {
 /** Throws once the supervisor may no longer act for this employee. Every port effect rechecks it. */
 export type SupervisorGuard = () => void;
 
+/**
+ * A plain fact about an employee's running laptop, read inside it: whether anything of the employee runs there
+ * besides the agent and the laptop's own fixed processes (a job that was started detached, a tmux server of
+ * their own). A rebuild would end it. `unknown`: the read could not be made or gave no answer, which is never
+ * `false`. With `true`: how many such processes, and the names of up to five. `cpu`: what the whole laptop used
+ * of the CPU between this read and the one before it, when there was one. `at`: when it was read.
+ *
+ * The driver puts it on the observation as `laptop.otherWork` (the three-valued fact) and
+ * `laptop.otherWorkDetail` (all of this), and on the report as `otherWork`. No rule of the policy reads it yet.
+ */
+export interface SupervisorOtherWork {
+  readonly otherWork: true | false | 'unknown';
+  readonly processes?: number;
+  readonly names?: readonly string[];
+  readonly cpu?: { readonly usedMs: number; readonly overMs: number };
+  readonly at: number;
+}
+
 /** One read of a stopped laptop's stored home: what was found, and why where the finding has a cause. */
 export interface SupervisorStoredHomeReading {
   readonly found: SupervisorStoredHome;
@@ -178,6 +196,8 @@ export interface EmployeeSupervisorPorts {
   ): Promise<'stopped' | 'running' | 'absent' | 'outdated' | 'unknown'>;
   /** Fresh positive read of what runs in the employee's laptops. */
   readProvider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence>;
+  /** Read inside the employee's running laptop. See `SupervisorOtherWork`. Absent where the office cannot. */
+  readOtherWork?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorOtherWork>;
   /**
    * Put the approved limits of this employee's finished, running laptop back in place, wherever the employee is.
    * `done` with `unchanged`, `restored` or `not-running`; undefined when the employee has no finished laptop.
@@ -330,6 +350,8 @@ export interface SupervisorReport {
   readonly pool?: SupervisorPoolReport;
   /** What the office checks of a stopped laptop's stored home with the verifier image it has. */
   readonly storedHomeCheck?: ReturnType<NonNullable<EmployeeSupervisorPorts['storedHomeCheck']>>;
+  /** The last read of other work in the employee's running laptop. See `SupervisorOtherWork`. */
+  readonly otherWork?: SupervisorOtherWork;
 }
 
 class SupervisorStopped extends Error {
@@ -361,6 +383,8 @@ export class EmployeeSupervisor {
   #reused = false;
   /** The last read that found a laptop occupied or unreadable. Never one that found it empty. */
   readonly #occupied = new Map<string, { at: number; presence: 'running' | 'unknown' }>();
+  /** The last read of other work in each employee's running laptop, made with the read of what runs there. */
+  readonly #otherWork = new Map<string, SupervisorOtherWork>();
   /** The last limits check of each employee, and when the next one is due. In memory: a restart checks again. */
   readonly #limits = new Map<string, SupervisorLimitsReport>();
   readonly #limitsDue = new Map<string, number>();
@@ -448,6 +472,7 @@ export class EmployeeSupervisor {
         this.#announced.delete(id);
         this.#readings.delete(id);
         this.#occupied.delete(id);
+        this.#otherWork.delete(id);
         this.#storedHome.delete(id);
       }
     for (const id of [...this.#limitsDue.keys()])
@@ -1012,16 +1037,19 @@ export class EmployeeSupervisor {
       storedHome: entry.found,
       storedHomeDetail: { ...(entry.cause ? { cause: entry.cause } : {}), since: entry.since, reads: entry.reads },
     });
-    const withOccupied = (seen: SupervisorObservation): SupervisorObservation => ({
-      ...seen,
-      laptop: {
+    const withOccupied = (seen: SupervisorObservation): SupervisorObservation => {
+      const kept = occupied && now - occupied.at < this.limits.idleReadMs;
+      const laptop = {
         ...seen.laptop,
-        ...(occupied && now - occupied.at < this.limits.idleReadMs ? { provider: occupied.presence } : {}),
+        ...(kept ? { provider: occupied.presence } : {}),
+        // Read with the reading above, and kept exactly as long.
+        ...(kept ? this.#otherWorkSeen(employee.id) : {}),
         ...(storedFresh ? storedSeen(stored) : {}),
         ...(this.#pool ? { pool: this.#pool.pool } : {}),
         ...(this.#poolDetail() ? { poolDetail: this.#poolDetail()! } : {}),
-      },
-    });
+      };
+      return { ...seen, laptop };
+    };
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
     let history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
@@ -1046,7 +1074,9 @@ export class EmployeeSupervisor {
       if (provider === 'running' || provider === 'unknown')
         this.#occupied.set(employee.id, { at: now, presence: provider });
       else this.#occupied.delete(employee.id);
-      observed = { ...observed, laptop: { ...observed.laptop, provider } };
+      await this.#readOtherWork(employee, provider, now);
+      const laptop = { ...observed.laptop, provider, ...this.#otherWorkSeen(employee.id) };
+      observed = { ...observed, laptop };
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       // A laptop the read found occupied may still be rebuilt, between its agent's turns: that is decided next.
       if (!due(assessment) || assessment.next.preconditions.includes('no-agent-running')) {
@@ -1186,6 +1216,29 @@ export class EmployeeSupervisor {
     void work.then(() => this.#persist()).catch(() => {});
   }
 
+  /**
+   * With a read that found a laptop of the employee running: whether anything else of theirs runs in it. A plain
+   * fact, kept for the observation and the report. A laptop that does not run has no reading.
+   */
+  async #readOtherWork(employee: SupervisedEmployee, provider: SupervisorProviderPresence, now: number): Promise<void> {
+    const read = this.ports.readOtherWork?.bind(this.ports);
+    if (provider !== 'running' || !read) {
+      this.#otherWork.delete(employee.id);
+      return;
+    }
+    const unknown = { otherWork: 'unknown' as const, at: now };
+    this.#otherWork.set(employee.id, await read(employee, this.#guard(employee, 'retry')).catch(() => unknown));
+  }
+
+  /** The last read of other work, as the observation carries it: the fact, and everything that was read. */
+  #otherWorkSeen(employeeId: string): {
+    readonly otherWork?: SupervisorOtherWork['otherWork'];
+    readonly otherWorkDetail?: SupervisorOtherWork;
+  } {
+    const work = this.#otherWork.get(employeeId);
+    return work ? { otherWork: work.otherWork, otherWorkDetail: work } : {};
+  }
+
   #report(
     employee: SupervisedEmployee,
     assessment: SupervisorAssessment,
@@ -1215,6 +1268,7 @@ export class EmployeeSupervisor {
       ...(this.ports.storedHomeCheck && assessment.condition !== 'owner-stopped'
         ? { storedHomeCheck: this.ports.storedHomeCheck() }
         : {}),
+      ...(this.#otherWork.has(employee.id) ? { otherWork: this.#otherWork.get(employee.id)! } : {}),
     };
     this.#reports.set(employee.id, report);
     // One console line when an employee starts to need a person, and one when that ends.

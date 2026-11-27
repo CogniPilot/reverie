@@ -2,7 +2,7 @@
  * The office-level step of the supervisor: the pool every laptop shares, after a host restart, and the stored home
  * of a stopped laptop before it is rebuilt. Everything here runs against a fake box behind the supervisor's ports.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EmployeeSupervisor,
   type EmployeeSupervisorPorts,
@@ -10,6 +10,7 @@ import {
   type SupervisorActionResult,
   type SupervisorAuditEntry,
   type SupervisorLaptopReading,
+  type SupervisorOtherWork,
   type SupervisorPoolResult,
 } from '../src/employee-supervisor.js';
 import type {
@@ -19,6 +20,13 @@ import type {
   SupervisorStoredHome,
   SupervisorStoredHomeCause,
 } from '../src/employee-supervisor-policy.js';
+import { assessEmployee } from '../src/employee-supervisor-policy.js';
+
+// The policy itself, with one function watched: what the driver shows it.
+vi.mock('../src/employee-supervisor-policy.js', async (original) => {
+  const real = await original<typeof import('../src/employee-supervisor-policy.js')>();
+  return { ...real, assessEmployee: vi.fn(real.assessEmployee) };
+});
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -85,6 +93,10 @@ function box(
     acts: [] as string[],
     reads: [] as string[],
     kept: [] as string[],
+    /** What the read inside a running laptop finds of work that is not the agent. */
+    otherWork: (() => ({ otherWork: false as const, processes: 0 })) as (
+      employee: SupervisedEmployee
+    ) => Omit<SupervisorOtherWork, 'at'> | Error,
     /** Every attempt to record a running laptop's home, as `<seconds since the start>:<employee>:<outcome>`. */
     homes: [] as string[],
     recordHome: (() => 'recorded') as (employee: SupervisedEmployee) => 'recorded' | 'not-recorded' | 'failed',
@@ -233,6 +245,13 @@ function box(
     readProvider: async (employee) => {
       state.reads.push(`${at()}:provider:${employee.id}`);
       return running(find(employee)) ? 'running' : 'no-laptop';
+    },
+    readOtherWork: async (employee, guard) => {
+      guard();
+      state.reads.push(`${at()}:work:${employee.id}`);
+      const seen = state.otherWork(employee);
+      if (seen instanceof Error) throw seen;
+      return { ...seen, at: state.now };
     },
     readStoredHome: async (employee) => {
       state.reads.push(`${at()}:home:${employee.id}`);
@@ -655,6 +674,67 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
     w.state.anchor = 'running';
     await w.run(MINUTE);
     expect(w.report('a').storedHomeCheck).toBe('compare-only');
+  });
+});
+
+describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () => {
+  /** What the policy was shown of one employee's laptop, each time it was asked. */
+  const shown = (id: string) =>
+    vi
+      .mocked(assessEmployee)
+      .mock.calls.map(([observed]) => observed)
+      .filter((observed) => observed.employeeId === id)
+      .map((observed) => observed.laptop as SupervisorObservation['laptop'] & Record<string, unknown>);
+
+  it('reads it with the read of what runs in the laptop, and shows it to the policy and in the report', async () => {
+    vi.mocked(assessEmployee).mockClear();
+    // A laptop that runs with no terminal, in an office whose pool is up: the ladder reaches the read.
+    const w = box([person('a', 'running-detached'), person('b', 'attached')]);
+    w.state.anchor = 'running';
+    w.state.otherWork = () => ({
+      otherWork: true,
+      processes: 2,
+      names: ['cargo', 'rustc'],
+      cpu: { usedMs: 60_000, overMs: 120_000 },
+    });
+    await w.run(HOUR);
+    const provider = w.state.reads.filter((line) => line.endsWith(':provider:a')),
+      work = w.state.reads.filter((line) => line.endsWith(':work:a'));
+    // Once for every read that found the laptop running, at the same moment, and for nobody else.
+    expect(provider.length).toBeGreaterThan(0);
+    expect(work.map((line) => line.split(':')[0])).toEqual(provider.map((line) => line.split(':')[0]));
+    expect(w.state.reads.filter((line) => line.endsWith(':work:b'))).toEqual([]);
+    // The plain fact, and everything that was read, on the observation the policy decides with.
+    const facts = shown('a').filter((laptop) => laptop.otherWork !== undefined);
+    expect(facts.length).toBeGreaterThan(0);
+    expect(facts.at(-1)).toMatchObject({
+      provider: 'running',
+      otherWork: true,
+      otherWorkDetail: {
+        otherWork: true,
+        processes: 2,
+        names: ['cargo', 'rustc'],
+        cpu: { usedMs: 60_000, overMs: 120_000 },
+      },
+    });
+    expect(w.report('a').otherWork).toMatchObject({ otherWork: true, processes: 2, names: ['cargo', 'rustc'] });
+    expect(w.report('b').otherWork).toBeUndefined();
+  });
+
+  it('shows unknown as unknown when the read gives no answer, and reads nothing in a laptop that does not run', async () => {
+    vi.mocked(assessEmployee).mockClear();
+    const w = box([person('a', 'running-detached'), person('b', 'attached')]);
+    w.state.anchor = 'running';
+    w.state.otherWork = () => new Error('exec failed');
+    await w.run(HOUR);
+    expect(w.report('a').otherWork).toMatchObject({ otherWork: 'unknown' });
+    expect(shown('a').some((laptop) => laptop.otherWork === 'unknown')).toBe(true);
+    expect(shown('a').some((laptop) => laptop.otherWork === false)).toBe(false);
+    // Every laptop is stopped: nothing can run in one, and no read is made inside it.
+    const stopped = box([person('c'), person('d')]);
+    await stopped.run(30 * MINUTE);
+    expect(stopped.state.reads.filter((line) => line.includes(':work:'))).toEqual([]);
+    expect(stopped.report('c').otherWork).toBeUndefined();
   });
 });
 

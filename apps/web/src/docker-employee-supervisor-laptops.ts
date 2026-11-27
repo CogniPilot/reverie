@@ -77,7 +77,7 @@
  * a laptop that runs has no stopped storage to compare and is not held up by it.
  */
 import { randomUUID } from 'node:crypto';
-import type { DockerStoppedStorage, DockerStoredHomeLayout } from './docker-employee-engine.js';
+import type { DockerLaptopOtherWork, DockerStoppedStorage, DockerStoredHomeLayout } from './docker-employee-engine.js';
 import { reprovisionStorage } from './docker-absent-reprovision-source.js';
 import type { DockerVerifierCapability } from './docker-worker-reattach-helper.js';
 import { ZodError } from 'zod';
@@ -106,6 +106,7 @@ import type {
   SupervisorActionResult,
   SupervisorGuard,
   SupervisorLaptopReading,
+  SupervisorOtherWork,
   SupervisorPoolGuard,
   SupervisorPoolResult,
   SupervisorPoolStep,
@@ -138,7 +139,11 @@ export interface DockerSupervisorLaptopDeps {
   };
   readonly engine: {
     observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
+    /** See `DockerEmployeeEngine.observeOtherWork`. Absent where the office cannot read inside a laptop. */
+    observeOtherWork?(row: DockerEmployeeContinuationRecord): Promise<DockerLaptopOtherWork | undefined>;
   };
+  /** The clock for what is read over time. The wall clock when absent. */
+  readonly now?: () => number;
   readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'repair' | 'flightActive'>;
   /** The shared pool's status, in-place repair, observation record and cold recovery, as the owner's routes call them. */
   readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'> &
@@ -289,6 +294,9 @@ export class DockerSupervisorLaptops {
       })
     );
   }
+
+  /** What each employee's laptop had used of the CPU when it was last read, to say what it used since. */
+  readonly #cpuSeen = new Map<string, { containerId: string; at: number; usedMs: number }>();
 
   /**
    * The laptop layout a rebuild would use: the one the owner approved for this employee's most recent laptop
@@ -443,6 +451,49 @@ export class DockerSupervisorLaptops {
     const row = this.#row(employee.id);
     if (!row?.destination || running.length !== 1 || running[0] !== row.destination.containerId) return 'running';
     return this.#destinationPresence(row);
+  }
+
+  /**
+   * Whether anything of the employee runs in their recorded laptop besides the agent and the laptop's own fixed
+   * processes: a job that was started detached, a tmux server of their own. A rebuild would end it without a
+   * word, and nothing else the office reads shows it. This is a plain fact for the policy and for the report; no
+   * step is decided here. `unknown`: the laptop on record does not run, the office cannot read inside it, or the
+   * read gave no answer. It is never reported as `false` then.
+   *
+   * `cpu` is what the whole laptop used of the CPU between this read and the one before it of the same laptop,
+   * from the laptop's own cgroup: how busy it has been, whoever was busy. Absent on a first read.
+   */
+  async otherWork(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorOtherWork> {
+    const at = (this.deps.now ?? Date.now)(),
+      row = this.#row(employee.id),
+      read = this.deps.engine.observeOtherWork?.bind(this.deps.engine);
+    if (!row?.destination || !read) return { otherWork: 'unknown', at };
+    try {
+      this.#authority(employee, guard).require();
+      const seen = await read(row);
+      if (!seen) return { otherWork: 'unknown', at };
+      const before = this.#cpuSeen.get(employee.id),
+        containerId = row.destination.containerId;
+      if (seen.cpuUsedMs === undefined) this.#cpuSeen.delete(employee.id);
+      else this.#cpuSeen.set(employee.id, { containerId, at, usedMs: seen.cpuUsedMs });
+      const cpu =
+        before &&
+        seen.cpuUsedMs !== undefined &&
+        before.containerId === containerId &&
+        at > before.at &&
+        seen.cpuUsedMs >= before.usedMs
+          ? { usedMs: seen.cpuUsedMs - before.usedMs, overMs: at - before.at }
+          : undefined;
+      return {
+        otherWork: seen.otherWork,
+        processes: seen.processes,
+        ...(seen.names.length ? { names: seen.names } : {}),
+        ...(cpu ? { cpu } : {}),
+        at,
+      };
+    } catch {
+      return { otherWork: 'unknown', at };
+    }
   }
 
   /**

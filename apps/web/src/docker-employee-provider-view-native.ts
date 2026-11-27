@@ -80,7 +80,7 @@ const tmuxProgram = ${JSON.stringify(DOCKER_PROVIDER_VIEW_TMUX)};
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 function refuse() { throw Error('Existing Docker provider view unavailable'); }
 if (!uuid.test(sid || '') || !uuid.test(operation || '') ||
-    !['presence', 'observe', 'attach'].includes(mode) ||
+    !['presence', 'observe', 'attach', 'work'].includes(mode) ||
     !['none', 'generation'].includes(hookKind) ||
     argv.length !== (mode === 'attach' ? 8 : 4)) refuse();
 for (const path of ['/', '/opt', '/opt/reverie-worker-tools', '/opt/reverie-worker-tools/bin']) {
@@ -125,6 +125,93 @@ function selected() {
   const hook = /^REVERIE_HOOK_GENERATION=([A-Za-z0-9_.:-]{1,256})\n$/.exec(generation || '');
   if (!hook) refuse();
   return { paneId: match[1], panePid: Number(match[2]), hooks: { kind: 'generation', generation: hook[1] } };
+}
+// Whether anything of the laptop's user runs that is neither the agent nor part of the laptop itself. A laptop
+// runs these and nothing else by itself:
+//   - PID 1, the laptop's init: an idle reaper that starts nothing;
+//   - the tmux server of the laptop's own provider socket;
+//   - the agent: the process of the provider session's pane and everything that descends from it;
+//   - the fixed image's model relay, which is started with the agent in its pane;
+//   - whatever an Engine exec started from outside: this read, the office's other reads and a terminal viewer's
+//     tmux client. Inside the laptop's process namespace the first process of such a tree has parent 0, and
+//     nothing that runs inside a laptop can make one: a job that leaves its parent is given to PID 1.
+// Every other live process of the laptop's user is other work: a job started with nohup, setsid or disown that
+// outlived its shell, a tmux server of the employee's own, or another window or session on the provider's
+// server. Only what is there in two looks a quarter of a second apart is counted, by PID and start time.
+if (mode === 'work') {
+  const uid = process.getuid();
+  const ask = (args) => {
+    const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, 'display-message', '-p', ...args],
+      { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+    if (result.error || result.signal) refuse();
+    return result.status === 0 ? result.stdout : undefined;
+  };
+  // No server, or no provider session on it: there is no agent, and what else runs is still counted.
+  const served = /^([1-9][0-9]{0,9})\n$/.exec(ask(['#{pid}']) || '');
+  const shown = served ? /^([1-9][0-9]{0,9}) ([01])\n$/.exec(ask(['-t', target + ':', '#{pane_pid} #{pane_dead}']) || '') : null;
+  const serverPid = served ? Number(served[1]) : undefined;
+  const agentPid = shown && shown[2] === '0' ? Number(shown[1]) : undefined;
+  function table() {
+    const rows = new Map();
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^[1-9][0-9]{0,9}$/.test(name)) continue;
+      try {
+        const owner = fs.statSync('/proc/' + name).uid;
+        const raw = fs.readFileSync('/proc/' + name + '/stat', 'utf8');
+        const open = raw.indexOf('('), end = raw.lastIndexOf(') ');
+        const fields = raw.slice(end + 2).trim().split(/\s+/);
+        if (open < 0 || end < open || !/^[0-9]{1,10}$/.test(fields[1] || '') ||
+            !/^[1-9][0-9]{0,19}$/.test(fields[19] || '')) refuse();
+        let program = '';
+        try { program = fs.readlinkSync('/proc/' + name + '/exe'); } catch (error) { program = ''; }
+        rows.set(Number(name), { parent: Number(fields[1]), state: fields[0], born: fields[19],
+          name: raw.slice(open + 1, end), owner, program });
+      } catch (error) {
+        // It ended between the listing and the read.
+        if (!error || (error.code !== 'ENOENT' && error.code !== 'ESRCH')) throw error;
+      }
+    }
+    return rows;
+  }
+  function others(rows) {
+    const found = new Map();
+    for (const [pid, row] of rows) {
+      if (row.owner !== uid || ['Z', 'X', 'x'].includes(row.state)) continue;
+      if (pid === 1 || pid === serverPid || row.program === '/bin/reverie-model-relay') continue;
+      let at = pid, top = pid, agent = false, whole = false;
+      for (let steps = 0; steps < 256; steps++) {
+        if (at === agentPid) agent = true;
+        const entry = rows.get(at);
+        if (!entry) break;
+        top = at;
+        if (entry.parent === 0) { whole = true; break; }
+        at = entry.parent;
+      }
+      if (agent || (whole && top !== 1)) continue;
+      found.set(pid + ':' + row.born, row.name);
+    }
+    return found;
+  }
+  const first = others(table());
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  const second = others(table());
+  const names = [];
+  let count = 0;
+  for (const [key, name] of second) {
+    if (!first.has(key)) continue;
+    count++;
+    const plain = name.replace(/[^A-Za-z0-9._+-]/g, '?').slice(0, 16);
+    if (names.length < 5 && !names.includes(plain)) names.push(plain);
+  }
+  // What the whole laptop has used of the CPU so far, from its own cgroup, where the laptop can read it.
+  let cpuUsec = null;
+  try {
+    const used = /^usage_usec ([0-9]{1,20})$/m.exec(fs.readFileSync('/sys/fs/cgroup/cpu.stat', 'utf8'));
+    if (used) cpuUsec = used[1];
+  } catch (error) { cpuUsec = null; }
+  process.stdout.write(JSON.stringify({ version: 1, purpose: 'reverie-laptop-other-work-v1',
+    agent: agentPid !== undefined, others: count, names, cpuUsec }) + '\n');
+  process.exit(0);
 }
 if (mode === 'presence') {
   try {

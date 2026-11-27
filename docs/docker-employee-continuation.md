@@ -194,6 +194,14 @@ record of the employee's storage. See
 [owner operations](owner-operations.md#the-stored-home-of-a-stopped-laptop) for
 what the supervisor does with each finding.
 
+`observeOtherWork` reads, inside a finished, running laptop, whether processes
+of the laptop's user exist outside the agent's pane tree and the laptop's fixed
+processes (PID 1, the provider's tmux server, the model relay, and trees an
+Engine exec started from outside, whose first process has parent 0). It runs
+the fixed in-laptop program in its `work` mode, changes nothing, and throws
+when the answer cannot be read; a laptop that does not run has nothing to
+read. See [owner operations](owner-operations.md#other-work-in-a-running-laptop).
+
 For a finished laptop whose container the Engine positively reports absent,
 the stored-home read takes the HOME and Nix paths from the laptop record and
 the layout of the employee's last operation, has the verifier report what is

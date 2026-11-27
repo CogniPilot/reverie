@@ -596,6 +596,62 @@ or the renumbering is accepted. What remains for the owner is a real change of
 disk: mounting the right filesystem, or deciding that the directory that is
 there now is the employee's home (rebuild by hand).
 
+### Other work in a running laptop
+
+A rebuild discards the laptop container, and with it everything that runs in
+it. The office could see the agent and nothing else: a build that an employee
+started with `nohup`, `setsid` or in a tmux session of their own was invisible
+and would have been ended without a word. With every read of what runs in a
+laptop, when that read finds the laptop running, the office now also reads
+whether anything of the employee runs there besides the agent.
+
+The read is made inside the laptop by the same fixed program the office passes
+on every call, as the laptop's user, from `/proc`. A laptop runs these and
+nothing else by itself:
+
+- PID 1, the laptop's init (`reverie-worker-init`): an idle reaper that starts
+  nothing;
+- the tmux server of the laptop's own provider socket;
+- the agent: the process of the provider session's pane and everything that
+  descends from it;
+- the image's model relay (`/bin/reverie-model-relay`), which is started with
+  the agent in its pane;
+- whatever a container engine exec started from outside: this read, the
+  office's other reads, a terminal viewer's tmux client. Inside the laptop the
+  first process of such a tree has parent 0, and nothing that runs in a laptop
+  can make one, because a job that leaves its parent is given to PID 1.
+
+Every other live process of the laptop's user is other work: a job that
+outlived its shell, a tmux server of the employee's own with what runs in it,
+another window or session on the provider's server. Zombies and processes of
+other users are not counted, and only what is there in two looks a quarter of a
+second apart, by PID and start time. Work that the agent itself started and
+still holds is part of the agent's tree and is not reported here.
+
+It is a plain fact, and no rule acts on it yet:
+
+- on the observation the policy decides with: `laptop.otherWork` (`true`,
+  `false` or `'unknown'`) and `laptop.otherWorkDetail`;
+- on each employee in `GET /api/company`: `supervisor.otherWork`, which is
+  `{ otherWork, processes?, names?, cpu?, at }`. `processes` is how many,
+  `names` the process names of up to five, `at` when it was read.
+
+`unknown` means the read could not be made or gave no answer: the laptop on
+record does not run, the supervisor may not act for the employee, or the
+program refused. It is never reported as `false`.
+
+`cpu` is `{ usedMs, overMs }`: the CPU time the whole laptop used between this
+read and the one before it of the same laptop, from `usage_usec` in the
+laptop's own `cpu.stat`. It says how busy the laptop has been, whoever was
+busy, and is absent on a first read and where the laptop cannot read its
+cgroup. The office's own limits check reads the pool's `cpu.stat` through a
+helper container, which is one more container per read; the laptop reads its
+own file in the read it already makes.
+
+Nothing has to be rebuilt for this but the office: the in-laptop program is
+part of the office and is passed on each call, so laptops that already run
+answer it.
+
 ### A plan move that stopped part-way
 
 A plan move that stops part-way is `recovery-required` and keeps its error. The

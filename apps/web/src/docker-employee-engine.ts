@@ -91,6 +91,31 @@ function exitedProvider(output: string): DockerProviderExit | undefined {
   }
 }
 const providerViewOrigin = Symbol('original Engine-observed Docker provider view');
+/** What the read inside a laptop reports of work that is neither the agent nor part of the laptop itself. */
+const laptopOtherWork = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-laptop-other-work-v1'),
+    agent: z.boolean(),
+    others: z.number().int().nonnegative().max(4194304),
+    names: z.array(z.string().regex(/^[A-Za-z0-9._+?-]{1,16}$/)).max(5),
+    cpuUsec: z.string().regex(/^[0-9]{1,20}$/).nullable(),
+  })
+  .strict();
+/**
+ * Whether processes of the laptop's user run outside the agent's own process tree and the laptop's fixed service
+ * processes (the in-laptop program says exactly which those are), how many, the names of up to five, and what
+ * the whole laptop has used of the CPU so far (`cpuUsedMs`, from its own cgroup; absent where the laptop cannot
+ * read it). A plain fact: nothing is decided here.
+ */
+export interface DockerLaptopOtherWork {
+  readonly otherWork: boolean;
+  readonly processes: number;
+  readonly names: readonly string[];
+  /** Whether the agent's own pane process was found. */
+  readonly agent: boolean;
+  readonly cpuUsedMs?: number;
+}
 const providerPane = z
   .object({
     paneId: z.string().regex(/^%[0-9]{1,10}$/),
@@ -896,6 +921,42 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       const failure = verdict === undefined ? undefined : (failed.verify ?? failed.observe);
       return { state: 'unconfirmed', cause: failure ? VERIFIER_CAUSES[failure] : 'receipt-unreadable' };
     }
+  }
+  /**
+   * Reads, inside the finished laptop this record names, whether anything of the laptop's user runs besides the
+   * agent and the laptop's own fixed processes. Read-only. Undefined when the laptop does not run, so that
+   * nothing can run in it. Anything that cannot be read throws: the caller reports that as unknown.
+   */
+  async observeOtherWork(row: DockerEmployeeContinuationRecord): Promise<DockerLaptopOtherWork | undefined> {
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
+      refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    const raw = await this.#destination(row, () => {}, true);
+    if (!raw?.State.Running) return undefined;
+    const output = await this.command.run([
+      'exec',
+      ...DOCKER_PROVIDER_VIEW_ENV,
+      raw.Id,
+      '/opt/reverie-worker-client/bin/node',
+      '--input-type=commonjs',
+      '-e',
+      DOCKER_PROVIDER_VIEW_PROGRAM,
+      '--',
+      ...dockerProviderRuntimeArguments(row.version === 3 ? row.planReplacement.runtimeNamespace : undefined),
+      'work',
+      row.request.sessionId,
+      row.request.operationId,
+      this.providerHooks(row).kind,
+    ]);
+    if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    const seen = laptopOtherWork.parse(JSON.parse(output));
+    const used = seen.cpuUsec === null ? undefined : Math.floor(Number(seen.cpuUsec) / 1000);
+    return {
+      otherWork: seen.others > 0,
+      processes: seen.others,
+      names: seen.names,
+      agent: seen.agent,
+      ...(used !== undefined && Number.isSafeInteger(used) ? { cpuUsedMs: used } : {}),
+    };
   }
   /** Whether the Engine lists no container of exactly this ID, in any state. A census that fails says nothing. */
   async #positivelyAbsent(containerId: string): Promise<boolean> {
