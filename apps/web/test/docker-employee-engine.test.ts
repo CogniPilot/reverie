@@ -3202,19 +3202,53 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       expect(w.state.remembered).toEqual([]);
     });
 
-    it('is accepted under the grant without a record when the home belongs to the laptop’s user, and proved from then on', async () => {
+    it('is accepted under the grant without a record when the home is what the laptop ran with, and recorded as granted, not proved', async () => {
       const w = await gone({ granted: true });
       await expect(w.read(layout)).resolves.toBe('verified');
       expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
-      expect(w.state.remembered).toEqual([identity(w.f, '4')]);
+      expect(w.state.remembered).toEqual([{ ...identity(w.f, '4'), basis: 'grant' }]);
+      // The record stands for the grant and proves nothing by itself: with the grant withdrawn it accepts nothing.
+      w.state.recorded = { ...identity(w.f, '4'), basis: 'grant' } as never;
       w.state.granted = false;
+      await expect(w.read(layout)).resolves.toBe('renumbered:absent-no-record-no-grant');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-no-record');
+      w.state.granted = true;
       await expect(w.read(layout)).resolves.toBe('verified');
-      expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+      // Other directories at the path contradict it, and the grant does not override that.
+      w.state.mounted.home.ino = '77';
+      await expect(w.read(layout)).resolves.toBe('different');
       // What a missing disk leaves at the path belongs to root: the grant does not accept that.
       const missing = await gone({ granted: true });
       missing.state.mounted.home = { ...missing.state.mounted.home, uid: 0, gid: 0, mode: 493 };
       await expect(missing.read(layout)).resolves.toBe('different');
       expect(missing.state.remembered).toEqual([]);
+    });
+
+    it('accepts under the grant only what the laptop ran with: one filesystem, two real directories, its user and group', async () => {
+      const split = await gone({ granted: true });
+      split.state.mounted.nixFilesystem = { ext4: true, id: '4242' };
+      await expect(split.read(layout)).resolves.toBe('different');
+      const group = await gone({ granted: true });
+      group.state.mounted.home = { ...group.state.mounted.home, gid: 0 };
+      await expect(group.read(layout)).resolves.toBe('different');
+      const emptyNix = await gone({ granted: true });
+      emptyNix.state.mounted.nix = { ...emptyNix.state.mounted.nix, ino: '0' };
+      await expect(emptyNix.read(layout)).resolves.toBe('different');
+      for (const w of [split, group, emptyNix]) expect(w.state.remembered).toEqual([]);
+    });
+
+    it('does not take a record the grant accepted for a proof of a new device number either', async () => {
+      const seed = await restarted();
+      const w = await restarted({ recorded: { ...identity(seed.f, '4'), basis: 'grant' } as never });
+      w.renumber('7');
+      // Without the grant it is what no record is.
+      await expect(w.read()).resolves.toBe('renumbered:no-record-no-grant');
+      // Under the grant it is accepted again, as granted; a record a running laptop gives would prove it.
+      const granted = await restarted({ granted: true, recorded: { ...identity(seed.f, '4'), basis: 'grant' } as never });
+      granted.renumber('7');
+      await expect(granted.read()).resolves.toBe('verified');
+      expect(granted.helper.verdict(granted.f.row)).toBe('renumbered-granted');
     });
 
     it('lets neither the grant nor anything else stand in for a record that cannot be trusted', async () => {

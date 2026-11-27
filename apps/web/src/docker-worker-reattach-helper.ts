@@ -133,6 +133,33 @@ const oneFilesystem = (seen: DockerStorageFilesystemObservation) =>
   seen.home.dev === seen.nix.dev && seen.homeFilesystem.ext4 && seen.nixFilesystem.ext4 &&
   seen.homeFilesystem.id === seen.nixFilesystem.id && seen.homeFilesystem.id !== '0';
 
+/** What the verdict of a stored home with no container is called, by what was decided. */
+const ABSENT_VERDICTS = {
+  proved: 'absent-proved',
+  granted: 'absent-granted',
+  different: 'different',
+  'no-record': 'absent-no-record',
+} as const;
+
+/**
+ * What the owner's standing grant accepts at an employee's home path when the office holds no record of it: a
+ * directory that is what the laptop record says the laptop ran with, as far as the record says anything. The home
+ * and the Nix directory are both real directories (a disk that is missing leaves an empty mount point, inode 0, or
+ * one that belongs to root), on one and the same ext4 filesystem, and the home belongs to the laptop's user and
+ * group (`user` of the layout, `uid:gid`). The record holds no mode of either directory and no other path of the
+ * employee on a filesystem the office could compare, so nothing more can be asked.
+ */
+function grantable(seen: DockerStorageFilesystemObservation, user: string): boolean {
+  const [uid, gid] = user.split(':');
+  return (
+    oneFilesystem(seen) &&
+    seen.home.ino !== '0' &&
+    seen.nix.ino !== '0' &&
+    String(seen.home.uid) === uid &&
+    (gid === undefined || String(seen.home.gid) === gid)
+  );
+}
+
 export class DockerWorkerReattachHelper {
   readonly #approvals = new Map<string, StorageApproval>();
   /** The last verdict for each employee's laptop operation. DATA for reports. */
@@ -270,10 +297,15 @@ export class DockerWorkerReattachHelper {
       this.#decided(row, 'different');
       return { observation: historical };
     }
-    const proved = single && sameDirectories;
-    const granted = single && !recorded && this.renumbering?.granted(row.owner) === true;
+    // A record that the owner's grant accepted proves nothing by itself: it stands for the grant, and holds only
+    // while the grant does.
+    const independent = !!recorded && recorded.basis !== 'grant';
+    const proved = single && sameDirectories && independent;
+    const granted =
+      single && (!recorded || (!independent && sameDirectories)) && this.renumbering?.granted(row.owner) === true;
     if (!proved && !granted) {
-      this.#decided(row, !single ? 'renumbered-unverifiable' : recorded ? 'renumbered-stale-record' : 'renumbered');
+      const stale = independent || (!!recorded && !sameDirectories);
+      this.#decided(row, !single ? 'renumbered-unverifiable' : stale ? 'renumbered-stale-record' : 'renumbered');
       return { observation: historical };
     }
     this.#decided(row, proved ? 'renumbered-proved' : 'renumbered-granted');
@@ -290,10 +322,12 @@ export class DockerWorkerReattachHelper {
    * - `proved`: the record names exactly these directories (inode, owner, mode) on exactly this ext4 filesystem.
    * - `different`: the record names other directories or another filesystem; or, with no record, the directory
    *   at the home path does not belong to the laptop's user.
-   * - `granted`: the office holds no record of this employee, the owner's standing grant is set, and the
-   *   directory at the employee's own home path belongs to the laptop's user. That is all that can be known
-   *   without a record, and the grant is the owner's word for exactly the case without one. The filesystem is
-   *   recorded, so the next time is proved.
+   * - `granted`: the office holds no record of this employee, the owner's standing grant is set, and what is at
+   *   the two paths is what the laptop record says the laptop ran with (`grantable`). That is all that can be known
+   *   without a record, and the grant is the owner's word for exactly the case without one. What was accepted is
+   *   recorded as accepted under the grant (`basis: grant`), never as a proof: a later read of the same directories
+   *   is granted again while the grant is on, one of other directories is `different`, and only a record a running
+   *   laptop gives replaces it.
    * - `no-record`: no record, and no grant. Nothing proves the directory, and it is not accepted.
    * - `record-unreadable`: the record cannot be trusted. That is neither a record nor the absence of one.
    * - `unobserved`: the verifier gave no answer; `failures` says why. Nothing is known.
@@ -324,30 +358,31 @@ export class DockerWorkerReattachHelper {
       employeeId: row.employeeId, home: withoutDevice(seen.home), nix: withoutDevice(seen.nix),
       device: seen.home.dev, filesystemId: seen.homeFilesystem.id,
     };
+    const granted = this.renumbering?.granted(row.owner) === true;
     if (held) {
       const same = oneFilesystem(seen) && seen.home.ino !== '0' && seen.nix.ino !== '0' &&
         isDeepStrictEqual(held.home, identity.home) && isDeepStrictEqual(held.nix, identity.nix) &&
         held.filesystemId === identity.filesystemId;
-      this.#decided(row, same ? 'absent-proved' : 'different');
-      return same ? 'proved' : 'different';
+      // A record the grant accepted is the grant's word, never a proof: it holds while the grant does. What
+      // contradicts it is refused all the same; only a record a running laptop gives replaces it.
+      const verdict = !same ? 'different' : held.basis !== 'grant' ? 'proved' : granted ? 'granted' : 'no-record';
+      this.#decided(row, ABSENT_VERDICTS[verdict]);
+      return verdict;
     }
-    if (this.renumbering?.granted(row.owner) !== true) {
+    if (!granted) {
       this.#decided(row, 'absent-no-record');
       return 'no-record';
     }
-    // A disk that is missing leaves the mount point, which belongs to root, at the path.
-    if (seen.home.ino === '0' || String(seen.home.uid) !== layout.user.split(':')[0]) {
+    if (!grantable(seen, layout.user)) {
       this.#decided(row, 'different');
       return 'different';
     }
     this.#decided(row, 'absent-granted');
-    // A record that cannot be written loses a later proof and nothing else.
-    if (oneFilesystem(seen)) {
-      try {
-        this.renumbering.identity.remember(identity);
-      } catch {
-        /* the next read under the grant records it */
-      }
+    // A record that cannot be written loses the next read's shortcut and nothing else.
+    try {
+      this.renumbering!.identity.remember({ ...identity, basis: 'grant' });
+    } catch {
+      /* the next read under the grant records it */
     }
     return 'granted';
   }
