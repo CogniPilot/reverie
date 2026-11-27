@@ -1977,6 +1977,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const seen = await this.#probe(anchor, worker);
     current();
     if (!seen.worker) refuse('DOCKER_RESOURCE_WORKER_READBACK');
+    await this.#memoryFits(worker.id, row.policy.memoryMaxBytes);
+    current();
     // No other writer of this laptop's leaf is left unterminated.
     await this.#workerLeafWriters(seen.worker.id, current);
     const imageId = await this.#leafWriterImage(current);
@@ -1988,6 +1990,25 @@ export class DockerContainedResources implements DockerContainedResourceControll
       current,
       { id: attempt.id, journal: attempt.journal, imageId }
     );
+  }
+  /**
+   * A repair writes the laptop's approved `memory.max` into a laptop that is running, with an agent at work in it.
+   * A limit below what the laptop uses at that moment would make the kernel reclaim at once and, failing that,
+   * kill a process of the laptop for memory. So the laptop's own `memory.current` is read first, inside it, and the
+   * repair refuses, writing nothing and opening no attempt, while that is above the limit, or cannot be read. The
+   * next look asks again; the laptop goes on under the shared pool's limit meanwhile.
+   */
+  async #memoryFits(workerId: string, memoryMaxBytes: number): Promise<void> {
+    let raw: string;
+    try {
+      raw = await this.command.run(['exec', workerId, '/bin/cat', '/sys/fs/cgroup/memory.current']);
+    } catch {
+      return refuse('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
+    }
+    const value = raw.trim();
+    if (!/^(0|[1-9][0-9]{0,19})$/.test(value) || !Number.isSafeInteger(Number(value)))
+      refuse('DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD');
+    if (Number(value) > memoryMaxBytes) refuse('DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE');
   }
   /** Once a repair's writer is acknowledged and read back, every earlier
    * repair writer of the same target that is recorded finished is superseded:

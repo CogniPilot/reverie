@@ -186,6 +186,8 @@ export function fixture(
     )?.[0] ?? [...containers.keys()][0]!;
   let beforeRun: ((args: readonly string[]) => void | Promise<void>) | undefined;
   let pauseLog: { entered: () => void; wait: Promise<void> } | undefined;
+  /** What the laptop's own cgroup shows of memory in use, as a read inside it answers. */
+  let memoryCurrent: string | Error = '1048576';
   let pauseCreate: { entered: () => void; wait: Promise<void> } | undefined;
   const command: DockerEngineCommand = {
     async create(name, config, guard) {
@@ -412,6 +414,10 @@ export function fixture(
         }
         return logs.get(args[2]!)!;
       }
+      if (args[0] === 'exec' && args[2] === '/bin/cat' && args[3] === '/sys/fs/cgroup/memory.current') {
+        if (memoryCurrent instanceof Error) throw memoryCurrent;
+        return memoryCurrent + '\n';
+      }
       if (args[0] === 'exec' && args[2] === '/bin/cat')
         return '1 (worker) S ' + [...Array(18).fill('0'), '20', '0'].join(' ') + '\n';
       if (args[0] === 'exec') return JSON.stringify(observation(args[1]!, args.includes('probe-worker')));
@@ -434,6 +440,10 @@ export function fixture(
   const controller = new DockerContainedResources(command, journal, configuration, revisions);
   return {
     controller,
+    /** What a read of the laptop's memory.current answers from now on. */
+    setMemoryCurrent: (value: string | Error) => {
+      memoryCurrent = value;
+    },
     withRevisions: (next: DockerResourceRevisionStore) =>
       new DockerContainedResources(command, journal, configuration, next),
     mutateRevisionHelper: (change: (raw: Record<string, unknown>) => void) => {

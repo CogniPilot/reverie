@@ -1585,6 +1585,16 @@ owner and to an agent with a current `recoverEmployees` grant:
    that was refused only for its limits reads `ready` again and the office
    terminal is attached to it; nothing in the laptop is restarted.
 
+   The writer sets the laptop's hard memory limit as well. Before it is
+   issued, the office reads the laptop's own `memory.current` inside the
+   laptop. While that is above the approved hard limit, or cannot be read,
+   nothing is written and no attempt is opened: the repair answers
+   `DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE` or
+   `DOCKER_RESOURCE_REPAIR_MEMORY_UNREAD`, and the supervisor's limits check
+   asks again about every ten minutes. A limit below what a working agent
+   uses would make the kernel reclaim at once or kill a process of the laptop
+   for memory; the laptop stays under the shared pool's limit meanwhile.
+
    For an employee who is stopped or out of the office the same route answers
    `{ operationId, limits }` with `unchanged` or `restored` and reads nothing
    else: a laptop set-up is never continued for such an employee, but a laptop
