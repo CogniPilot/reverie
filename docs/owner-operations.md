@@ -132,9 +132,9 @@ minutes, and both are read again immediately before the rebuild is requested.
 The running laptop is discarded only when it is the one recorded laptop of that
 employee. While a turn is in progress, or while the office is not reading the
 pane, it waits and asks nobody. An agent that ended its
-turn with work left running (a monitor, a background shell) is given thirty
-minutes from when the problem was first seen, and is then rebuilt with that
-work still running. The
+turn with work left running (a monitor, a background shell) is given four
+hours from when the office first saw that work, and is then rebuilt with it
+still running. The
 home directory is
 kept and the fresh laptop is started as after any rebuild. With
 `supervisorAutoRepair` off it wakes once and then names that switch and the
@@ -142,17 +142,43 @@ calls, including `confirmDiscardRunning`. A terminal that is not connected but
 still takes input is only woken, never rebuilt.
 
 The same rule serves every other laptop that only a rebuild settles while an
-agent runs in it, for example one whose limits helper failed for good or one
-that reports `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did
-not start runs in its terminal, which the office cannot take over). Such a
-laptop is rebuilt between the agent's turns and never in the middle of one:
+agent runs in it. Such a laptop is rebuilt between the agent's turns and never
+in the middle of one, and only for what the laptop itself reports:
+
+- The laptop's own read, made in that pass, must say that it is held or
+  unfinished. A read that says ready wins over the office's older reports of
+  the laptop (its last attempt to attach a terminal, a health reading): what
+  is wrong then is the terminal, and the step is the wake.
+- A laptop whose agent the office can reach (its pane is attached and read) is
+  rebuilt only for a cause a rebuild is known to settle: a code the table lists
+  as such, for example a limits helper that failed for good,
+  `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did not start
+  runs in its terminal), or a code the table does not list that the laptop's
+  own read has reported for thirty minutes. For any other hold (a step to send
+  again, a read that never succeeds, a set-up that stopped) such a laptop is
+  kept, and the steps that discard nothing go on in their rounds.
+- A laptop whose agent the office cannot reach at all is rebuilt for any hold,
+  after the two hours described below.
 
 - A turn the office terminal shows in progress is waited for, however long it
   lasts.
-- An idle pane must have been silent for two minutes. The step reads the pane
-  again itself immediately before the rebuild, and where the reason is a held
-  laptop it reads the laptop again too; a laptop that has finished meanwhile is
-  kept.
+- An idle pane must have been silent for two minutes. The step asks the same
+  of the pane itself, and where the reason is a held laptop it reads the laptop
+  again too; a laptop that has finished meanwhile is kept. From that look until
+  the rebuild has returned, the session's input is held and chat for it stays
+  queued, to be delivered to the new laptop. The rebuild then makes its own
+  checks and prepares the sign-in folder, and immediately before it stops the
+  laptop the pane is looked at once more: a turn that started, or a pane that
+  printed, since the proof stops the rebuild with nothing stopped.
+- Work the agent left running when its turn ended is given four hours from
+  when the office first saw it. That clock is the work's own: it is kept while
+  a turn runs, ends when an idle pane shows no such work, and starts again at
+  an office start. Only work the agent's pane announces is seen. A job started
+  under `nohup` or in a detached tmux is not: nothing the office reads from a
+  laptop today says that other processes are working in it.
+- A laptop is called empty only on a finding. When the tmux socket file of a
+  laptop is missing, the read inside the laptop answers "nothing runs" only
+  when no tmux process of the laptop user is alive; otherwise it does not know.
 - A read that cannot say what runs in the laptop is never taken for an empty
   laptop. It is asked again for fifteen minutes; after that the laptop is
   treated as one an agent runs in.
@@ -169,12 +195,43 @@ laptop is rebuilt between the agent's turns and never in the middle of one:
   second running laptop, or a running laptop that is not the recorded one, is
   refused.
 
+Across the office, the rebuild of a laptop an agent runs in is braked, because
+one fault of the office or of something all laptops share looks like the same
+fault in every laptop:
+
+- At most one such rebuild an hour, across all employees and across office
+  restarts. `waitingFor` reads “the limit of one rebuild an hour, across the
+  office, …” with the time.
+- While the office reads none of its laptops, no laptop is rebuilt for a pane
+  it cannot read: the fault is taken to be the office's own. After thirty
+  minutes of that the office asks for its own restart
+  ([below](#the-office-restarting-itself)). Only when a restart was tried
+  within the last six hours, or this office does not restart itself, is the
+  cause treated as one that several employees share.
+- A cause that more than one employee in the office shares is rebuilt for
+  nobody at first. Once it has been shared for thirty minutes, one laptop is
+  rebuilt as a probe, and no other laptop is touched until that one is healthy.
+  Then the next follows, an hour later at the earliest. A probe that does not
+  come back healthy leaves every other laptop as it is.
+
+The worst case is therefore one working agent's turn lost per hour across the
+office, and for one laptop two a day.
+
 A laptop code the office does not recognize is not acted on at once: it may be
 a state of a newer laptop runtime that settles by itself. The recorded request
 is sent again when the laptop offers that. When the code still stands after
-thirty minutes the laptop is treated as held, under every rule above. A laptop
-that has been starting, or between two states, for fifteen minutes without
-becoming healthy is treated the same way from that moment.
+thirty minutes the laptop is treated as held, under every rule above. A code
+that only the office's attach report carries, beside a laptop whose own read
+says ready, is reported and watched and is never a reason for a rebuild. A
+laptop that has been starting, or between two states, for fifteen minutes
+without becoming healthy is treated as held from that moment: it is rebuilt at
+once when nothing runs in it, kept while the office can reach its agent, and
+rebuilt after two hours when it cannot. A hold reported with no code at all is
+watched for thirty minutes like a code the office does not know.
+
+A step that an office restart interrupted is settled as failed at the next
+office start, so nothing waits for its outcome. An interrupted rebuild counts
+against the limit per day, because it may have been carried out.
 
 The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
@@ -184,8 +241,8 @@ neither held back by this limit nor counted against it
 ([after a host restart](#after-a-host-restart)).
 
 Every wait above that ends in a laptop being rebuilt (fifteen minutes of
-starting or of an unreadable laptop, thirty minutes of an unrecognized code or
-of work left running, two hours without a reading of the pane) counts only an
+starting or of an unreadable laptop, thirty minutes of an unrecognized code,
+two hours without a reading of the pane) counts only an
 unbroken run of that same state as this office process saw it. A start that
 follows a plan move, a start-up screen or the wait for the office's own restart
 begins its own fifteen minutes, and a state that cleared and came back is
@@ -222,12 +279,20 @@ every one of them has:
   soft memory, swap, tasks, CPU weight) and the processors all of them may use.
   They are saved through the store method behind the docker-policy route; the
   setting and the derived values are read again inside that save.
-- Layout: all laptops that have a layout on record must run as the same user
-  and keep scratch space under the same root. The drives are the ones every one
-  of them has, read-only where any has it read-only. The choice among several
-  office networks and a sign-in folder outside the home belong to one employee
-  and are never copied. The layout is used for a rebuild and is recorded with
-  that rebuild, as an owner's layout is.
+- Layout: read from the employee's own last laptop wherever its container can
+  be read (one read-only inspect): the user it ran as, the drives it had and
+  whether it could write on them, its office network, and the folder of its
+  plan sign-in when that is kept outside its home. What the other laptops share
+  fills in only what the own laptop cannot say: the scratch root of a laptop
+  from before that layout, and everything for an employee whose laptop is
+  gone. For that all of them must run as the same user and keep scratch space
+  under the same root, and the drives are the ones every one of them has,
+  read-only. The office network and the sign-in folder are never taken from
+  another employee. An employee whose plan needs a sign-in folder and whose
+  laptop cannot be read gets no layout: the rebuild step refuses and says why,
+  because a laptop built without the folder would stop at the sign-in screen.
+  The layout is used for a rebuild and is recorded with that rebuild, as an
+  owner's layout is.
 
 The office makes up no number and no path. Where the others disagree on the
 pool, the user or the scratch root, or no other employee has anything
@@ -251,8 +316,13 @@ laptop route answers `DOCKER_CONTINUATION_RUNTIME_CHANGED`, the supervisor
 stops its passes, and nothing reads them again in place. A new office process
 does. The office therefore ends its own process, by its ordinary graceful
 shutdown, so that Docker starts it again; laptops keep running and are
-attached again as after any office restart. It does so only when all of this
-holds:
+attached again as after any office restart. It does the same when the
+supervisor finds that the office reads none of its laptops for thirty minutes
+although something holds an employee, and asks for it on every pass: a fault
+that every laptop shows at once is taken to be the office's own. It does so
+only when all of this holds (the second and the first apply to a changed
+configuration; a request of the supervisor counts its ten minutes from when it
+was first made, and lapses when it is not repeated):
 
 - the change has stood, with nothing about it changing, for ten minutes;
 - a new process would accept the configuration that is in place and would read
