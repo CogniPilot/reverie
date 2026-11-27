@@ -1633,6 +1633,10 @@ export class EmployeeSupervisor {
     if (assessment.next.action !== 'rebuild-laptop' || observed.laptop.provider !== 'exited') return undefined;
     const cause = causeOf(assessment),
       inOffice = this.#inOffice();
+    // Whether others share the cause is known only once everyone in the office has been looked at, as after an
+    // office start: until then no laptop is rebuilt for an exited agent, so the first pass cannot rebuild two.
+    if (inOffice.some((row) => row.id !== employee.id && !this.#reports.has(row.id)))
+      return { waitingFor: 'the office to look at everyone once, to see whether other agents exited as well' };
     if (!cause || !inOffice.some((row) => row.id !== employee.id && this.#causes.get(row.id) === cause))
       return undefined;
     const since = this.#sharedSince.get(cause) ?? now,
@@ -1641,15 +1645,29 @@ export class EmployeeSupervisor {
         probe && probe.at >= since && probe.id !== employee.id
           ? inOffice.find((row) => row.id === probe.id)
           : undefined;
-    if (other && this.#reports.get(other.id)?.condition !== 'healthy')
+    if (other && !this.#settled(other.id, now))
       return {
         waitingFor:
-          `the laptop of ${other.name} to come back healthy: its agent exited as this employee's did, it was ` +
-          'rebuilt first, and no other laptop is rebuilt for the same cause before that',
+          `the laptop of ${other.name} to come back healthy and stay so for ten minutes: its agent exited as this ` +
+          "employee's did, it was rebuilt first, and no other laptop is rebuilt for the same cause before that",
       };
-    // This laptop is the probe now. A step that finds the employee busy tries nothing, and it stays the probe.
+    // This laptop is the probe now. A step that finds the employee busy tries nothing, and it stays the probe. The
+    // cause is registered as shared from this moment, before the next look at the office does it, so that the
+    // probe counts for every other employee in this pass and the next.
+    if (!this.#sharedSince.has(cause)) this.#sharedSince.set(cause, now);
     this.#exitProbes.set(cause, { id: employee.id, at: now });
     return undefined;
+  }
+
+  /**
+   * An employee has been healthy for `healthyResetMs` without a break: the time after which the ladder, too, takes
+   * a problem for settled. A probe that is healthy for a moment between two exits, as in a crash loop, is not.
+   */
+  #settled(id: string, now: number): boolean {
+    const since = this.#histories.get(id)?.healthySince;
+    return (
+      this.#reports.get(id)?.condition === 'healthy' && since !== undefined && now - since >= this.policy.healthyResetMs
+    );
   }
 
   #flags(employee: SupervisedEmployee) {

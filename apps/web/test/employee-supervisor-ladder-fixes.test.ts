@@ -1195,13 +1195,13 @@ describe('a laptop whose agent exited while other work may still run in it', () 
     const probe = stuck.rebuilt[0]!.id;
     for (const id of FIVE.filter((other) => other !== probe)) {
       expect(stuck.report(id).waitingFor).toMatch(
-        /^the laptop of [A-E] to come back healthy: its agent exited as this employee's did/
+        /^the laptop of [A-E] to come back healthy and stay so for ten minutes: its agent exited as this employee's did/
       );
       expect(stuck.report(id).needsHuman).toBeUndefined();
     }
     const fine = exited(FIVE, false);
     for (const id of FIVE) fine.afterRebuild.set(id, back);
-    await fine.run(30);
+    await fine.run(90);
     expect(fine.rebuilt.map((row) => row.id).sort()).toEqual(FIVE);
   });
 });
@@ -1325,5 +1325,52 @@ describe('a read of other work made in a laptop other than the one on record', (
     const other = exited('op-replaced');
     await other.run(15);
     expect(other.rebuilt.map((row) => row.id)).toEqual(['a']);
+  });
+});
+
+describe('agents that exit again and again in five laptops at once', () => {
+  const EXITED: Session = {
+    available: true,
+    runtimeHealth: 'healthy',
+    viewerHealth: 'connected',
+    providerHealth: 'dead',
+  };
+  const exitedDesk = () => ({
+    session: EXITED,
+    restoration: { state: 'attached' as const },
+    reading: heldAt('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'),
+    provider: 'exited' as const,
+  });
+  const FIVE = ['a', 'b', 'c', 'd', 'e'];
+
+  it('rebuilds one laptop in the first pass after an office start, not two', async () => {
+    // The exits were first seen an hour before this office process started: every rebuild is due at its first pass.
+    const saved = new Map(
+      FIVE.map((id) => [id, since(1_800_000_000_000 - HOUR, 'code:DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED')])
+    );
+    const o = officeOf(FIVE, exitedDesk, { otherWork: () => false, saved });
+    await o.run(0.5);
+    expect(o.rebuilt.length).toBeLessThanOrEqual(1);
+    await o.run(5);
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+  });
+
+  it('does not take a probe that is healthy for a moment between two exits for one that came back', async () => {
+    const o = officeOf(FIVE, exitedDesk, { otherWork: () => false });
+    const back = new Set<string>();
+    for (const id of FIVE)
+      o.afterRebuild.set(id, (target) => {
+        healthy(target);
+        target.provider = 'running';
+        back.add(id);
+      });
+    for (let minute = 0; minute < 3 * 60; minute++) {
+      await o.run(1);
+      // A crash loop: an agent that came back exits again a minute later.
+      for (const id of back) Object.assign(o.desks.get(id)!, exitedDesk());
+      back.clear();
+    }
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+    expect(o.rebuilt.length).toBeLessThanOrEqual(2);
   });
 });

@@ -248,7 +248,11 @@ discards no agent, so the limit of one an hour does not apply to it, but the
 same probe does: when more than one employee in the office is held for the
 same cause and the read finds this one's agent exited, one laptop is rebuilt at
 once as the probe, and no other laptop held for that cause is rebuilt until the
-probe is healthy again. Then the next one is the probe. The others' `waitingFor`
+probe has been healthy for ten minutes without a break: a probe that is
+healthy for a moment between two exits, as in a crash loop, does not count.
+Then the next one is the probe. After an office start no such laptop is
+rebuilt before every employee in the office has been looked at once, so the
+first pass rebuilds one laptop at most. The others' `waitingFor`
 names the employee they wait for. A probe that does not come back keeps its own
 steps and its own limit per day. The office's crash wake does not restart an
 exited agent: it only attaches a terminal to a provider that already runs, for
