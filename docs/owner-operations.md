@@ -385,8 +385,13 @@ was first made, and lapses when it is not repeated):
   or not: no open plan move, no laptop set-up, rebuild or limits repair, and
   no step for the shared pool that the supervisor is taking right now (the
   start of the stopped anchor, the end of a recovery, the removal of a dead
-  anchor); for a request of the supervisor also no step of its own and no pool
-  step that is still to be taken. A restart would cut such an operation off, and for a plan move
+  anchor), and no repair step of the supervisor that is running (a wake, a
+  sign-in put back, an owed handoff being typed, a rebuild), whoever asked for
+  the restart: the supervisor's own request stays valid for two minutes after
+  it last asked, and a handoff cut off while it is typed can never be typed
+  again. A step taken as interrupted after thirty minutes no longer counts. For
+  a request of the supervisor there is also no pool step that is still to be
+  taken. A restart would cut such an operation off, and for a plan move
   it would reset what the move has watched. The handoff a closed move still
   owes, or whose outcome is not known, is no such operation: it is on record
   and survives a restart. `waitingFor` then reads “the

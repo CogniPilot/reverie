@@ -2679,9 +2679,10 @@ export class WebServer extends EventEmitter {
               .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
           )
             return 'a laptop operation that is running';
-          // The supervisor's own step for the pool every laptop shares belongs to no employee, so neither of the
-          // two checks above sees it. It goes on after the laptop configuration has changed, and is not cut off.
-          return this.employeeSupervisor?.poolStepInFlight() ? 'a step for the shared pool that is running' : undefined;
+          // The supervisor's own steps: one for the pool every laptop shares belongs to no employee, and a wake, a
+          // sign-in put back or an owed handoff being typed is no laptop operation, so neither of the two checks
+          // above sees them. A handoff cut off while it is typed can never be typed again.
+          return this.employeeSupervisor?.stepInFlight();
         },
         restartPolicy: () => {
           let mounts = '';

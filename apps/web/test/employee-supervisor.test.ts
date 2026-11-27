@@ -1795,3 +1795,37 @@ describe('EmployeeSupervisor: a repair step that does not return', () => {
     expect(w.state.stored.get('a')!.lastAction).toEqual(before);
   });
 });
+
+describe('EmployeeSupervisor: what a restart of the office would cut off', () => {
+  it('names a repair step while it runs, and nothing once it has returned or was taken as interrupted', async () => {
+    const w = world([heldMove(person('a'), 'x')], {
+      limits: { ...LIMITS, stepDeadlineMs: 10 * MINUTE } as typeof LIMITS,
+    });
+    // The handoff of a closed move being typed, as one example of a step that is no laptop operation.
+    w.state.people[0]!.move = { id: 'm1', docker: true, phase: 'handoff-owed', busy: false, allowedActions: [] };
+    w.state.people[0]!.glance = {
+      ...w.state.people[0]!.glance,
+      session: { ...w.state.people[0]!.glance.session, turn: 'idle', idleSince: 0 },
+    };
+    let release!: () => void;
+    let typed = 0;
+    // The first typing returns when the test lets it, the second never does, and any later one at once.
+    w.state.respond = (action) =>
+      action !== 'continue-move' || ++typed > 2
+        ? Promise.resolve({ outcome: 'busy', detail: 'the agent is not idle at an empty composer' })
+        : new Promise((resolve) => typed === 1 && (release = () => resolve({ outcome: 'done', detail: 'handoff delivered m1' })));
+    expect(w.supervisor.stepInFlight()).toBeUndefined();
+    await w.run(3);
+    expect(w.state.acts).toEqual(['continue-move:a']);
+    expect(w.supervisor.stepInFlight()).toBe('a step of the office supervisor for A that is running (continue-move)');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(w.supervisor.stepInFlight()).toBeUndefined();
+    // One that never returns is not counted once it was taken as interrupted: a restart is what ends it.
+    w.state.people[0]!.move = { id: 'm2', docker: true, phase: 'handoff-owed', busy: false, allowedActions: [] };
+    await w.run(4);
+    expect(w.supervisor.stepInFlight()).toMatch(/continue-move/);
+    await w.run(12);
+    expect(w.supervisor.stepInFlight()).toBeUndefined();
+  });
+});

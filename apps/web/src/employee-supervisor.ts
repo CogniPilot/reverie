@@ -548,6 +548,22 @@ export class EmployeeSupervisor {
     return this.#poolActing;
   }
 
+  /**
+   * What this supervisor is doing right now that a restart of the office would cut off in the middle, in words, or
+   * undefined: a step for the shared pool (`poolStepInFlight`), or a repair step for an employee that has not
+   * returned (a wake, a sign-in put back, an owed handoff being typed, a rebuild). Whoever decides on a restart
+   * asks here first; the supervisor's own request for one lapses only minutes later, and a handoff cut off while it
+   * is being typed can never be typed again. A step that was taken as interrupted (`stepDeadlineMs`) is not
+   * counted: it is presumed to hang, and a restart is what ends it.
+   */
+  stepInFlight(): string | undefined {
+    if (this.#poolActing) return 'a step for the shared pool that is running';
+    const [id, step] = [...this.#steps].at(0) ?? [];
+    if (!id || !step) return undefined;
+    const name = this.ports.employees().find((row) => row.id === id)?.name ?? id;
+    return `a step of the office supervisor for ${name} that is running (${step.action})`;
+  }
+
   /** One pass over every employee. A pass that is still running is joined, never doubled. Never rejects. */
   tick(): Promise<void> {
     if (this.#flight) return this.#flight;
