@@ -81,16 +81,18 @@ const until = (
   history: SupervisorHistory,
   seen: SupervisorObservation,
   from: number,
-  hit: (result: Assessment) => boolean,
+  hit: (result: Assessment, now: number) => boolean,
   limit = 12 * HOUR
 ) => {
   for (let now = from; now < from + limit; now += 30_000) {
     history = rollSupervisorHistory(history, classifyEmployee(seen), now);
-    if (hit(assessEmployee(seen, history, ON, now))) return now - from;
+    if (hit(assessEmployee(seen, history, ON, now), now)) return now - from;
   }
   return undefined;
 };
-const rebuilds = (result: Assessment) => result.next.action === 'rebuild-laptop';
+/** The rebuild is the step to take, and it is due. */
+const rebuilds = (result: Assessment, now: number) =>
+  result.next.action === 'rebuild-laptop' && (result.next.at ?? 0) <= now;
 const T = 1000;
 void [held, withLaptop, since, tried, watch, until, rebuilds, T, HOUR];
 
@@ -131,5 +133,79 @@ describe('a step that an office restart interrupted', () => {
     const uncounted = issueSupervisorAttempt(since(T, FAILED), 'rebuild-laptop', T + HOUR, true);
     expect(resumeSupervisorHistory(uncounted).rebuilds).toEqual([]);
     expect(resumeSupervisorHistory(uncounted).lastAction).toMatchObject({ outcome: 'failed', uncounted: true });
+  });
+});
+
+describe('a laptop whose own read says it is ready, with an agent running in it', () => {
+  /** The office's last attach attempt is stuck on `code`; the read made now says ready; the pane is attached and idle. */
+  const contradicted = (code: string, session: Patch['session'] = {}) =>
+    observed({
+      session: { turn: 'idle', idleSince: 0, ...session },
+      laptop: {
+        restoration: { state: 'held', code },
+        continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] },
+        provider: 'running',
+      },
+    });
+
+  it.each([
+    ['a wait code', 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'],
+    ['a code that says the agent could not be verified', 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED'],
+    ['a code that says the laptop is stopped', 'DOCKER_CONTINUATION_DESTINATION_STOPPED'],
+    ['a code the table does not list', 'DOCKER_SOMETHING_NOBODY_LISTED'],
+  ])('is never rebuilt for the office’s older attach report, stuck on %s: the terminal is what is wrong', (_title, code) => {
+    const seen = contradicted(code);
+    expect(classifyEmployee(seen)).toMatchObject({ condition: 'viewer-lost', code });
+    expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, rebuilds)).toBeUndefined();
+    // What is tried is the step that discards nothing.
+    expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, (result) => result.next.action === 'reconnect-viewer')).toBe(0);
+  });
+
+  it('is not rebuilt because a health report calls the agent dead while the read finds it running', () => {
+    const dead = observed({
+      session: { providerHealth: 'dead', turn: 'idle', idleSince: 0 },
+      laptop: { continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] }, provider: 'running' },
+    });
+    expect(classifyEmployee(dead).condition).toBe('provider-exited');
+    expect(until(EMPTY_SUPERVISOR_HISTORY, dead, T, rebuilds)).toBeUndefined();
+    const waiting = assessEmployee(dead, watch(EMPTY_SUPERVISOR_HISTORY, dead, T, T + HOUR), ON, T + HOUR);
+    expect(waiting.next).toMatchObject({
+      action: null,
+      waitingFor: expect.stringMatching(/the laptop's own read says it is ready and an agent runs in it/),
+    });
+    expect(waiting.needsHuman).toBeUndefined();
+    // Once the read inside the laptop agrees that no agent runs, nothing is lost and it is rebuilt.
+    expect(until(EMPTY_SUPERVISOR_HISTORY, withLaptop(dead, { provider: 'exited' }), T, rebuilds)).toBe(3 * MINUTE);
+  });
+
+  it('is not rebuilt on a rebuild read alone, with no read of the laptop that says it is held', () => {
+    // A laptop of this employee runs, and nothing the laptop itself reported says it is held.
+    const unread = observed({
+      session: { available: false, turn: 'idle', idleSince: 0 },
+      laptop: { record: null, bound: false, restoration: undefined, source: 'running', provider: 'running' },
+    });
+    expect(classifyEmployee(unread)).toMatchObject({ condition: 'held-needs-rebuild', code: 'no-laptop' });
+    expect(until(EMPTY_SUPERVISOR_HISTORY, unread, T, rebuilds)).toBeUndefined();
+  });
+
+  it('keeps the two exceptions: a held terminal input and an agent parked on a start-up screen', () => {
+    const heldInput = contradicted('DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED', { inputHeld: true });
+    const refused: SupervisorHistory = {
+      ...since(T, classifyEmployee(heldInput).fingerprint, { attempts: tried('reconnect-viewer', 1, T + 45_000) }),
+      lastAction: { action: 'reconnect-viewer', at: T + 45_000, outcome: 'refused' },
+    };
+    expect(assessEmployee(heldInput, refused, ON, T + 10 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['terminal-input-held'],
+    });
+    const parked = observed({
+      session: {
+        turn: 'idle',
+        idleSince: 0,
+        startupScreen: { label: 'a chooser', kind: 'first-run', answering: false, proof: 'widget' },
+      },
+      laptop: { continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] }, provider: 'running' },
+    } as Patch);
+    expect(until(EMPTY_SUPERVISOR_HISTORY, parked, T, rebuilds)).toBeDefined();
   });
 });

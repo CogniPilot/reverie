@@ -794,7 +794,8 @@ describe('employee supervisor: last night', () => {
     });
     // The same limits as every other rebuild: never beside a running laptop, an unread one or a dead pool.
     const occupied = assessEmployee(withProvider('running'), history, ON, 3 * MINUTE);
-    expect(occupied.next).toMatchObject({ action: null, at: 120 * MINUTE });
+    // No read of that laptop says it is held, so it is not rebuilt for the unused source beside it.
+    expect(occupied.next).toMatchObject({ action: null, waitingFor: expect.stringMatching(/so it is not rebuilt$/) });
     expect(occupied.needsHuman).toBeUndefined();
     expect(assessEmployee(withProvider('unknown'), history, ON, 3 * MINUTE).next).toMatchObject({
       action: null,

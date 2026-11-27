@@ -1159,7 +1159,18 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
   const attached = laptop.restoration?.state === 'attached';
   if (session.available && session.viewerHealth !== 'disconnected' && (attached || !laptop.restoration))
     return classified('healthy', `${name} is running.`);
-  if (laptop.restoration?.state === 'held') return classifyCode(observed, laptop.restoration.code);
+  if (laptop.restoration?.state === 'held') {
+    const code = laptop.restoration.code;
+    // With no read of the laptop made now, the office's last attempt to attach its terminal is all there is.
+    if (seen?.state !== 'ready' || supervisorCodeKind(code) === 'viewer') return classifyCode(observed, code);
+    // The laptop's own read, made now, says it is ready and its agent runs. The attach report is older and
+    // narrower: whatever it says, what is wrong is the terminal, and nothing in it is a reason to touch the laptop.
+    return classified(
+      'viewer-lost',
+      `${name}'s laptop is ready and its agent runs, but the office terminal is not connected to it.`,
+      { code: code || 'viewer-disconnected', fingerprint: 'viewer:' + code }
+    );
+  }
   return classified('viewer-lost', `${name}'s agent is running, but the office terminal is not connected to it.`, {
     code: 'viewer-disconnected',
     fingerprint: 'viewer-disconnected',
@@ -1373,6 +1384,11 @@ const HELD_INPUT_WAIT: Readonly<Record<SupervisorTurn, string>> = {
 
 const HELD_INPUT_BACKGROUND_WAIT = 'the work the agent left running to finish';
 
+/** Why a laptop is not rebuilt for a report that the laptop's own read does not bear out. */
+const READY_AND_RUNNING =
+  "the office's reports of this laptop to agree: the laptop's own read says it is ready and an agent runs in it, " +
+  'or nothing the laptop itself reported says it is held, so it is not rebuilt';
+
 /** A laptop code the office does not recognize is what holds this employee. */
 function unrecognizedCode(base: Pick<SupervisorClassification, 'code' | 'fingerprint'>): boolean {
   return !!base.code && base.fingerprint === 'code:' + base.code && supervisorCodeKind(base.code) === undefined;
@@ -1576,8 +1592,14 @@ function rebuildGate(
   const provider = observed.laptop.provider;
   if (provider === 'unknown' && !(watched > 0 && now - watched >= policy.stalledAfterMs))
     return { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
-  if (provider === 'running' || provider === 'unknown')
-    return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', ...laptopHeld(observed)]);
+  if (provider === 'running' || provider === 'unknown') {
+    // An agent runs there, or may. Such a laptop is rebuilt only for what the laptop itself reports: its own read,
+    // made in this pass, must say that it is held or unfinished. A read that says ready, or no read at all, leaves
+    // only the office's secondary reports (its last attach, a health reading), and none of those is a reason to
+    // discard a laptop whose own read finds nothing wrong. The steps that discard nothing go on.
+    if (!laptopHeld(observed).length) return { kind: 'wait', waitingFor: READY_AND_RUNNING };
+    return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', 'laptop-held']);
+  }
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
   // looks like. The office recovers the shared pool itself, and no laptop is rebuilt before that: a rebuild
   // retires the laptop record the recovery reads, and a fresh laptop could not be set up without the pool.
