@@ -171,7 +171,7 @@ export interface DockerSupervisorLaptopDeps {
   };
   /** The in-place repair of one finished laptop's own limits that does not ask where its employee is. */
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
-  readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
+  readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild' | 'flightActive'>;
   /** The plan moves' journal, for the candidate laptops that abandoned moves of an employee left behind. */
   readonly moves?: () => Pick<DockerAbsentReprovisionPlanMoves, 'abandonedCandidateRecords'> | undefined;
   /** The office's own terminal object for a session, when it has one. */
@@ -392,7 +392,11 @@ export class DockerSupervisorLaptops {
   }
 
   flightActive(employeeId: string): boolean {
-    return this.deps.service.flightActive(employeeId) || !!this.deps.limits?.flightActive(employeeId);
+    return (
+      this.deps.service.flightActive(employeeId) ||
+      !!this.deps.limits?.flightActive(employeeId) ||
+      this.deps.absent.flightActive(employeeId)
+    );
   }
 
   /** The owner's observe read. A refusal is returned as the hold it names. */

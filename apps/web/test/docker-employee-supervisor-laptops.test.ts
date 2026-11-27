@@ -104,6 +104,8 @@ function world(extra: Partial<DockerSupervisorLaptopDeps> = {}) {
     holds: [] as string[],
     /** While set, the rebuild does not return until it settles. */
     hang: undefined as Promise<void> | undefined,
+    /** The rebuild service holds a flight for the employee. */
+    rebuildFlight: false,
     /** Each read of the stored home: the holds in place then, and the calls that had been made before it. */
     homeReads: [] as Array<{ holds: string; after: string[] }>,
     /** What the read of the stored home finds. A laptop that runs has no stopped storage to compare. */
@@ -211,6 +213,7 @@ function world(extra: Partial<DockerSupervisorLaptopDeps> = {}) {
       },
     },
     absent: {
+      flightActive: () => state.rebuildFlight,
       previewRebuild: async (_id: string, template: unknown, authority: DockerContinuationAuthority) => {
         took('preview', template, authority);
         if (state.preview instanceof Error) throw state.preview;
@@ -1537,5 +1540,14 @@ describe('a rebuild that does not return', () => {
 
   it('keeps the hold for thirty minutes by default, the supervisor’s own deadline for a step', () => {
     expect(SUPERVISOR_LIMITS.stepDeadlineMs).toBe(30 * 60_000);
+  });
+});
+
+describe('a rebuild in flight in the rebuild service', () => {
+  it('makes the employee read as busy, so that no other step of the ladder acts beside it', () => {
+    const w = world();
+    expect(w.laptops.flightActive(EMPLOYEE.id)).toBe(false);
+    w.state.rebuildFlight = true;
+    expect(w.laptops.flightActive(EMPLOYEE.id)).toBe(true);
   });
 });

@@ -193,6 +193,7 @@ function world() {
       restore: async (_id: string, operationId: string) => ({ operationId, limits: give(state.limits) }),
     },
     absent: {
+      flightActive: () => false,
       previewRebuild: async (id: string, _template: unknown, authority: DockerContinuationAuthority) => {
         took('rebuild-preview', id, authority);
         return {

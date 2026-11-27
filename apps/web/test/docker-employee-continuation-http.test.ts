@@ -71,7 +71,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(options: { recover?: boolean; office?: boolean; storedPolicy?: boolean } = {}) {
+async function fixture(
+  options: { recover?: boolean; office?: boolean; storedPolicy?: boolean; rebuilding?: () => boolean } = {}
+) {
   const directory = await mkdtemp(join(tmpdir(), 'boxed-http-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const ownerStore = new OwnerAuthStore(join(directory, 'owner.json'));
@@ -198,7 +200,9 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
         effects++;
       },
     },
-    { issue: () => 'synthetic-unused-credential' }
+    { issue: () => 'synthetic-unused-credential' },
+    undefined,
+    (id) => options.rebuilding?.() === true && id === target
   );
   let identityCurrent = true;
   let runtimeCurrent = true;
@@ -2498,5 +2502,33 @@ describe('laptop rebuild routes are owner-only and say what to do next', () => {
     f.logout();
     for (const response of await calls(f, f.ownerHeaders)) expect([401, 403]).toContain(response.statusCode);
     expect(f.absentCalls).toEqual([]);
+  });
+});
+
+describe('a laptop set-up beside a rebuild of the same laptop', () => {
+  it('is refused as busy while the rebuild service holds its flight, before any read or effect', async () => {
+    let rebuilding = true;
+    const f = await fixture({ office: true, storedPolicy: true, rebuilding: () => rebuilding });
+    const before = f.companyStore.snapshot();
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: { request: f.request },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('DOCKER_CONTINUATION_BUSY');
+    expect(f.observations()).toBe(0);
+    expect(f.effects()).toBe(0);
+    expect(f.companyStore.snapshot()).toEqual(before);
+    // Once the rebuild has ended, the same request is no longer refused for it.
+    rebuilding = false;
+    const after = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: { request: f.request },
+    });
+    expect(after.json().error?.code).not.toBe('DOCKER_CONTINUATION_BUSY');
   });
 });

@@ -307,7 +307,13 @@ export class DockerEmployeeContinuation {
     private readonly engine: DockerContinuationEngine,
     private readonly provider: DockerContinuationProvider,
     private readonly identity: DockerContinuationIdentity,
-    private readonly onFailure?: (failure: DockerContinuationFailure) => void
+    private readonly onFailure?: (failure: DockerContinuationFailure) => void,
+    /**
+     * Another operation of this employee's laptop that this service must not run beside: a rebuild or reprovision
+     * in flight (`DockerAbsentReprovision.flightActive`). Between the stop of the old laptop and the retirement of
+     * its record, a set-up step would act on a record whose laptop is being discarded. Denial DATA only.
+     */
+    private readonly otherOperation: (employeeId: string) => boolean = () => false
   ) {}
   /** Denial DATA for other owners of the same employee; never an admission. */
   flightActive(employeeId: string): boolean {
@@ -672,7 +678,7 @@ export class DockerEmployeeContinuation {
     current();
     if (request.enterOffice) authority.requireOffice();
     else if (subject.onVacation || subject.desiredRunning === false) refuse('DOCKER_CONTINUATION_OFFICE_REQUIRED');
-    if (this.#flights.has(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
+    if (this.#flights.has(employeeId) || this.otherOperation(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
     this.#flights.set(employeeId, request.operationId);
     try {
       let row = this.store.record(employeeId);
@@ -773,6 +779,7 @@ export class DockerEmployeeContinuation {
       if (mode === 'repair') refuse('DOCKER_CONTINUATION_BUSY');
       return this.#result(row);
     }
+    if (this.otherOperation(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
     this.#flights.set(employeeId, operationId);
     try {
       return await this.#advance(subject, row, authority, current, mode);

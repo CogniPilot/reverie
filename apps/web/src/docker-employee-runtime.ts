@@ -503,7 +503,9 @@ export class DockerEmployeeRuntime {
           );
         },
       },
-      (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure))
+      (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure)),
+      // Bound to the rebuild service made below; asked only once both exist.
+      (employeeId) => absent.flightActive(employeeId)
     );
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');

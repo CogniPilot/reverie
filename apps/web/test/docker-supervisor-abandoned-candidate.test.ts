@@ -75,6 +75,7 @@ function world() {
     service: { flightActive: () => false },
     pool: {},
     absent: {
+      flightActive: () => false,
       previewRebuild: async (_id: string, _template: unknown, authority: DockerContinuationAuthority) =>
         took(
           {

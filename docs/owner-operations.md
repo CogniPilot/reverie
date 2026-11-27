@@ -281,7 +281,13 @@ row, so about twenty-five minutes if each ran to its limit (an estimate from
 reading the steps; a healthy rebuild takes well under a minute). Nothing stops
 the step itself. A second rebuild of the same laptop meets the rebuild
 service's own rule of one operation per employee at a time: it is refused as
-busy, which spends no attempt, for as long as the first runs. If the first
+busy, which spends no attempt, for as long as the first runs. While the rebuild service holds
+its flight for the employee, the employee reads as busy (`continuation-flight`,
+“a laptop set-up step that is running”), so no other step of the ladder acts
+beside it, and the laptop set-up service itself refuses a set-up step or a
+repair for that employee with `DOCKER_CONTINUATION_BUSY`: between the stop of
+the old laptop and the retirement of its record, such a step would act on a
+laptop that is being discarded. If the first
 returns later, its outcome is written to the log and changes nothing else.
 The rebuild's hold on the session's input and chat ends at the same thirty
 minutes, with a line in the log, so a rebuild that never returns does not keep
