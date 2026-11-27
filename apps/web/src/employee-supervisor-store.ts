@@ -39,6 +39,7 @@ const History = z
         at: time,
         outcome: z.enum(['issued', 'done', 'refused', 'failed', 'busy']),
         detail: z.string().max(300).optional(),
+        uncounted: z.literal(true).optional(),
       })
       .strict()
       .optional(),

@@ -128,6 +128,57 @@ pub(crate) fn verify_reference(
     let checked = compared_reference(observation(files, home_fd, nix_fd, None)?, home, nix)?;
     encode(&checked)
 }
+/// The kernel's own identity of the filesystem one open directory is on.
+#[derive(Serialize, PartialEq, Eq, Debug)]
+#[serde(rename_all = "camelCase")]
+struct Filesystem {
+    ext4: bool,
+    id: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FilesystemObservation {
+    version: u8,
+    purpose: &'static str,
+    home: Directory,
+    nix: Directory,
+    home_filesystem: Filesystem,
+    nix_filesystem: Filesystem,
+}
+fn filesystem(files: &Files, index: usize) -> Result<Filesystem> {
+    let directory = files.get(index);
+    let metadata = nix::sys::statfs::fstatfs(directory).map_err(std::io::Error::from)?;
+    let volume = rustix::fs::fstatvfs(directory).map_err(std::io::Error::from)?;
+    Ok(Filesystem {
+        ext4: metadata.filesystem_type() == nix::sys::statfs::EXT4_SUPER_MAGIC,
+        id: volume.f_fsid.to_string(),
+    })
+}
+/// Report what the two fixed read-only reference mounts are now: each
+/// directory's identity and the filesystem it is on. This compares nothing and
+/// accepts nothing. The directories are read again after the filesystems, so
+/// one report never describes two different mounts.
+pub(crate) fn observe_reference(files: &mut Files) -> Result<String> {
+    let (home, nix) = reference_mounts(files)?;
+    let before = observation(files, home, nix, None)?;
+    let home_filesystem = filesystem(files, home)?;
+    let nix_filesystem = filesystem(files, nix)?;
+    let after = observation(files, home, nix, None)?;
+    need(
+        before.home == after.home && before.nix == after.nix,
+        "BOXED_STORAGE_REFERENCE_CHANGED",
+    )?;
+    serde_json::to_string(&FilesystemObservation {
+        version: 1,
+        purpose: "reverie-boxed-storage-filesystem-observation-v1",
+        home: after.home,
+        nix: after.nix,
+        home_filesystem,
+        nix_filesystem,
+    })
+    .map_err(std::io::Error::other)
+    .map_err(Into::into)
+}
 pub(crate) fn status(files: &mut Files, expected: u64) -> Result<String> {
     let before = birth(files)?;
     need(

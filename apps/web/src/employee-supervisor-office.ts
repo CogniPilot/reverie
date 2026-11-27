@@ -31,12 +31,16 @@
  *   capture. The office never types at such a screen from here. The rebuild that starts the agent again is a
  *   laptop step, under the rule of every laptop an agent may run in;
  * - keeping a running laptop's approved limits in place: `DockerSupervisorLaptops.keepLimits`, for an employee in
- *   the office or not.
+ *   the office or not;
+ * - the pool every laptop shares, after a host restart: `DockerSupervisorLaptops.keepPool`, under the owner's
+ *   standing switch for repairs where the cold recovery routes prove a signed-in owner;
+ * - the stored home of a stopped laptop, before it is rebuilt: `DockerSupervisorLaptops.storedHome`, a read.
  */
 import type { CompanyService } from './company-service.js';
 import type { CompanyEmployee } from './company-types.js';
 import type { CompanyWakeReport } from './company-wake.js';
 import type { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
+import { employeeStartupOrder } from './employee-startup-order.js';
 import { laptopSignInHolderId, type PlanSignInReport } from './plan-signin-reconciler.js';
 import type {
   EmployeeSupervisorPorts,
@@ -45,6 +49,8 @@ import type {
   SupervisorAuditEntry,
   SupervisorGuard,
   SupervisorMove,
+  SupervisorPoolGuard,
+  SupervisorPoolStep,
 } from './employee-supervisor.js';
 import {
   SIGN_IN_NO_FOLDER,
@@ -150,8 +156,9 @@ function shownTurn(session: OfficeSession | undefined): Partial<ReturnType<typeo
 export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSupervisorPorts {
   const now = deps.now ?? Date.now;
   const screens = new Map<string, { at: number; value: SupervisorScreenReading }>();
+  // In the office's start-up order: the supervisor attends to employees who are level in that order.
   const employees = (): SupervisedEmployee[] =>
-    deps.company.registeredEmployees().map((employee) => ({
+    employeeStartupOrder(deps.company.registeredEmployees()).map((employee) => ({
       id: employee.id,
       name: employee.name,
       owner: employee.owner,
@@ -349,7 +356,15 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     readSource: async (employee, guard) => (laptops ? laptops.source(employee, guard) : 'unknown'),
     readProvider: async (employee, guard) => (laptops ? laptops.provider(employee, guard) : 'unknown'),
     ...(laptops
-      ? { keepLimits: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.keepLimits(employee, guard) }
+      ? {
+          keepLimits: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.keepLimits(employee, guard),
+          keepPool: (
+            candidates: readonly SupervisedEmployee[],
+            guard: SupervisorPoolGuard,
+            step?: SupervisorPoolStep
+          ) => laptops.keepPool(candidates, guard, step),
+          readStoredHome: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.storedHome(employee, guard),
+        }
       : {}),
     actions: {
       ...(laptops

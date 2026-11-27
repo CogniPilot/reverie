@@ -40,6 +40,8 @@ pub(crate) enum Command {
         #[arg(long, value_parser=decimal)]
         filesystem_id: Option<u64>,
     },
+    /// Report the identity of the two fixed read-only reference mounts and of their filesystems.
+    ObserveStorageReference,
     /// Check an existing worker credential digest from one bounded private stdin record.
     VerifyWorkerCredential,
 }

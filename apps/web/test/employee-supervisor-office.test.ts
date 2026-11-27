@@ -156,7 +156,8 @@ describe('office supervisor ports', () => {
   it('reads each employee and the plan they should run on from the company record', () => {
     const o = office();
     o.state.rows = [row('a'), row('b', { onVacation: true, runtimeRecipe: { customModel: {} } }), row('c', { runtimeRecipe: undefined })];
-    expect(o.ports.employees()).toEqual([
+    // In the office's start-up order: the employee on a local model, who waits for no sign-in, comes first.
+    expect([...o.ports.employees()].sort((x, y) => x.id.localeCompare(y.id))).toEqual([
       expect.objectContaining({ id: 'a', planAccountId: 'plan-a', planLabel: 'Plan A', onVacation: false, bindingMigration: false }),
       expect.objectContaining({ id: 'b', planLabel: 'their local model', onVacation: true }),
       expect.not.objectContaining({ planLabel: expect.anything() }),

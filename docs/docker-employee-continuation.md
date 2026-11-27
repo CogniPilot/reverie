@@ -169,6 +169,32 @@ Ownership, mode and inode checks still apply. Approval lasts for this office
 process and applies only to the selected placement. A stopped source or an
 existing held move uses its ordinary owner recovery workflow after approval.
 
+The office now supplies the stable filesystem identifier itself, so the
+approval is no longer the only way past a renumbering. The verifier has a
+read-only command, `observe-storage-reference`, that reports the identity of
+the two reference mounts and of the filesystem each is on. While a finished
+laptop runs, the office records the filesystem ID of its two directories in
+`docker-storage-identity.jsonl`, only when the verifier sees exactly the
+directories the laptop itself reports, on one ext4 filesystem. For a stopped
+laptop whose mounts no longer match the holder's receipt, the office reads what
+is mounted now and proposes the renumbered reference to the verifier by itself
+when both directories are otherwise unchanged and either that record matches or
+the owner's standing grant (company setting `acceptStorageRenumbering`) covers
+it. The verifier then checks that reference, with the filesystem ID, on both
+reads, as it does for an approval. Another inode, owner or mode, a filesystem
+that is not ext4 and directories on two filesystems are never proposed. A
+verifier image that predates the command is used as before: an unchanged device
+verifies, a changed one needs the approval. See
+[owner operations](owner-operations.md#the-stored-home-of-a-stopped-laptop) for
+what the supervisor does with each finding.
+
+The office also recovers the shared pool and brings every employee back after a
+host restart without the owner, through the existing cold recovery, rebuild and
+set-up services; see
+[owner operations](owner-operations.md#after-a-host-restart). That is the path
+in use today. The durable operation below, which would restart a stopped laptop
+in place instead of rebuilding it, is still not implemented.
+
 Cold recovery still needs a durable Rust operation with the following behavior.
 
 1. Read the current desired state, session generation, account, provider thread

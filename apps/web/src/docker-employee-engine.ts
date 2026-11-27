@@ -18,7 +18,11 @@ import {
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
  */
 import { parseWorkerCredentialReadback } from './worker-client-manifest.js';
-import { DockerEmployeeStorage, type DockerEmployeeStorageObservation } from './docker-employee-storage.js';
+import {
+  DockerEmployeeStorage,
+  probeDockerEmployeeStorage,
+  type DockerEmployeeStorageObservation,
+} from './docker-employee-storage.js';
 import type { DockerContinuationTaskJournal } from './docker-continuation-task.js';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -767,7 +771,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         observed = seen;
         return retained.helper.storage(destination, seen, check, filesystemId);
       }, check, placement === 'stopped' ? retained.observed ?? 'original-reference' : undefined,
-      original => retained.helper.stoppedReference(row, original));
+      (original, destination) => retained.helper.stoppedReference(row, original, destination, check));
       check();
       if (!home || !observed) throw error;
       if (placement === 'running') retained.observed = observed;
@@ -778,6 +782,61 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!after || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
+  }
+  /**
+   * Whether the stored HOME and Nix directories of a finished laptop that is stopped are still the ones its storage
+   * holder recorded. It is the same read a same-plan recovery makes before it reserves a move, and it changes
+   * nothing.
+   *
+   * - `verified`: the retained holder still holds them, or the pinned verifier confirmed them against the holder's
+   *   receipt (under a new device number only when `stoppedReference` could accept that).
+   * - `renumbered`: the directories are otherwise unchanged on a new device number that was not accepted.
+   * - `different`: they are not the directories the laptop was built on.
+   * - `not-stopped`: the laptop is running, absent or not finished, so there is no stopped storage to compare.
+   * - `unverifiable`: nothing was found against the stored directories and they could not be confirmed either.
+   *   This office has no verifier, the holder's receipt can no longer be read, the verifier cannot report what is
+   *   mounted, or it saw the recorded directories on the recorded device and its confirmation then failed for
+   *   another reason. Only a finding (`renumbered`, `different`) says that the directories changed.
+   */
+  async stoppedStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper | undefined,
+    current: () => void
+  ): Promise<'verified' | 'renumbered' | 'different' | 'not-stopped' | 'unverifiable'> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-stopped';
+    const seen = await this.#destination(row, current, true).catch(() => undefined);
+    current();
+    if (seen === undefined) return 'unverifiable';
+    if (seen === null || seen.State.Running) return 'not-stopped';
+    helper?.forgetVerdict(row);
+    try {
+      await this.planReplacementHome(row, current, 'stopped', helper ? { helper } : undefined);
+      return 'verified';
+    } catch {
+      current();
+      const verdict = helper?.verdict(row);
+      if (verdict === 'different') return 'different';
+      // A new device number that nothing accepts, or one the verifier then refused.
+      if (verdict && verdict !== 'same' && verdict !== 'unobserved') return 'renumbered';
+      return 'unverifiable';
+    }
+  }
+  /** Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix
+   * directories are on. Reads only; false when nothing was recorded. */
+  async rememberStorage(
+    row: DockerEmployeeContinuationRecord,
+    helper: DockerWorkerReattachHelper,
+    current: () => void
+  ): Promise<boolean> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return false;
+    const raw = await this.#destination(row, current, true);
+    current();
+    if (!raw?.State.Running) return false;
+    const live = await probeDockerEmployeeStorage(this.command, raw.Id);
+    current();
+    return helper.rememberRunning(row, raw, live, current);
   }
   /** Read-only current stopped worker membership, separate from requester/effect
    * authority. The caller must retain the original binding across every await. */

@@ -332,6 +332,13 @@ export const CompanySettingsSchema = z.object({
    */
   supervisorAutoRepair: z.boolean().optional(),
   /**
+   * The owner's standing answer to a storage device change. After a host restart the filesystem an employee's home
+   * is on can have a new device number. The office accepts that by itself when it recorded that filesystem earlier.
+   * When it has no such record, this grant lets it accept the new number while both recorded directories are
+   * otherwise unchanged (inode, owner, mode) on one ext4 filesystem. Absent means off: the office then waits.
+   */
+  acceptStorageRenumbering: z.boolean().optional(),
+  /**
    * The owner's standing defaults for a laptop. An employee who has no approved resource limits, or no laptop layout
    * on record, is given what the owner already approved for the other employees: the most restrictive of their
    * limits, and the layout all of their laptops share (docker-standing-defaults.ts). Nothing is given that some

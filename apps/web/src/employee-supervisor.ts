@@ -18,7 +18,22 @@
  * employee, the supervisor asks the `keepLimits` port to put the approved limits of a finished, running laptop back.
  * It is asked for an employee who is stopped or out of the office and for one who is running normally: the two
  * states in which no repair step looks at the laptop. It writes only values the owner already approved, attaches
- * nothing, starts nothing, changes no attendance and spends no attempt of the ladder.
+ * nothing, starts nothing, changes no attendance and spends no attempt of the ladder. An employee who is held by
+ * the shared pool's limits, and for whom the ladder has no step left, is asked for in the same way: the pool's
+ * limits are put back about every `limitsCheckMs`, for as long as it takes.
+ *
+ * Keeping the pool. All laptops share one pool, and its anchor does not survive a host restart: every laptop and
+ * the anchor are then stopped, and no laptop can be set up before the anchor runs again. That is no employee's
+ * problem, so it is no rung of anyone's ladder. Before the employees of a pass are looked at, and only while no
+ * employee who should be in the office has an attached terminal, the supervisor asks the `keepPool` port for one
+ * look at the pool: at most every `poolReadMs`. The first look only reads. A later look may take the one step the
+ * earlier one found (recover the stopped pool, finish a recovery that did not finish, record the pool's
+ * observation), no earlier than `poolDwellMs` after the pool was first seen that way and with `poolBackoffMs`
+ * between attempts. The last backoff repeats: the step is tried again for as long as the pool is down, and nothing
+ * here ever stops for good. What the look found is given to every employee's assessment as `laptop.pool`, so their
+ * rebuilds and starts wait for the pool instead of spending attempts against it. The service behind the port
+ * refuses to recover a pool cold while any laptop of the box runs; the supervisor never decides that, and never
+ * takes a read that failed for a stopped pool.
  */
 import {
   EMPTY_SUPERVISOR_HISTORY,
@@ -37,8 +52,10 @@ import {
   type SupervisorPolicy,
   type SupervisorPrecondition,
   type SupervisorProviderPresence,
+  type SupervisorStoredHome,
   SUPERVISOR_OCCUPIED_PROOFS,
   SUPERVISOR_POLICY,
+  sharedPoolCode,
 } from './employee-supervisor-policy.js';
 
 /** The identity of one employee as the company records it right now. */
@@ -65,6 +82,49 @@ export interface SupervisorActionResult {
 }
 /** Throws once the supervisor may no longer act for this employee. Every port effect rechecks it. */
 export type SupervisorGuard = () => void;
+
+/** The step a look at the shared pool calls for. */
+export type SupervisorPoolStep = 'recover-pool' | 'finish-pool-recovery' | 'reconcile-pool';
+/** What one look at the shared pool found, and how the one step it took ended, when it took one. */
+export interface SupervisorPoolResult {
+  /**
+   * `up`: the pool's anchor runs and no recovery is open, so a laptop can be set up. `down`: the anchor is stopped
+   * or a recovery is open. `unknown`: the pool could not be read; it is never taken for stopped. `none`: no
+   * laptop record names a pool, as in an office that never finished a laptop, so there is nothing to recover and
+   * a laptop set-up creates it.
+   */
+  readonly pool: 'up' | 'down' | 'unknown' | 'none';
+  /** The step this look would take, or took. */
+  readonly step?: SupervisorPoolStep;
+  /** How the step ended. Absent when none was taken. */
+  readonly outcome?: SupervisorActionResult['outcome'];
+  /** A code or a short phrase. Never a credential, a path or terminal text. */
+  readonly detail?: string;
+  /** The employee whose laptop record stood for the pool. */
+  readonly employeeId?: string;
+}
+/** A guard for one employee whose record stands for the pool. `repair` also needs the owner's switch for repairs. */
+export type SupervisorPoolGuard = (employee: SupervisedEmployee, tier: 'retry' | 'repair') => SupervisorGuard;
+/** The last look at the shared pool, for reports. DATA only. */
+export interface SupervisorPoolReport {
+  readonly pool: SupervisorPoolResult['pool'];
+  /** The step the pool calls for now. */
+  readonly step?: SupervisorPoolStep;
+  /** The code or phrase of the last look. */
+  readonly detail?: string;
+  readonly at: number;
+  /** When the pool was first seen as it is now. */
+  readonly since: number;
+  /** Steps taken since then. */
+  readonly attempts: number;
+  /** The last step that was taken for the pool, and how it ended. */
+  readonly last?: {
+    readonly step: SupervisorPoolStep;
+    readonly at: number;
+    readonly outcome: SupervisorActionResult['outcome'];
+    readonly detail?: string;
+  };
+}
 
 export interface SupervisorAuditEntry {
   readonly admin: 'office supervisor';
@@ -110,6 +170,18 @@ export interface EmployeeSupervisorPorts {
    */
   keepLimits?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult | undefined>;
   /**
+   * One look at the pool every laptop shares. With `step`, that step is taken when this look calls for exactly
+   * it; a look that calls for another one only says so. `candidates` are the employees whose laptop record may
+   * stand for the pool, those in the office first. Absent where the office has no laptops.
+   */
+  keepPool?(
+    candidates: readonly SupervisedEmployee[],
+    guard: SupervisorPoolGuard,
+    step?: SupervisorPoolStep
+  ): Promise<SupervisorPoolResult>;
+  /** A fresh read of the stored home of this employee's stopped laptop. Absent where the office cannot read one. */
+  readStoredHome?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorStoredHome>;
+  /**
    * One effect each. A port that is absent is a step this office cannot take. `proved` is what the policy asked to
    * be proved again for this step and still stood when it was issued; a step whose effect depends on it proves it
    * once more itself, last. Absent means nothing was proved.
@@ -140,14 +212,39 @@ export interface EmployeeSupervisorLimits {
   readonly idleReadMs: number;
   /** How often the approved limits of one employee's running laptop are checked, and put back when they are gone. */
   readonly limitsCheckMs: number;
+  /** How often the shared pool is looked at while no employee's terminal is attached. */
+  readonly poolReadMs?: number;
+  /** The pool must have been seen the same way this long before the first step is taken for it. */
+  readonly poolDwellMs?: number;
+  /** Wait after pool step N before step N+1. The last value repeats for as long as the pool needs a step. */
+  readonly poolBackoffMs?: readonly number[];
+  /** How long a finding that stops a rebuild for the stored home (renumbered, different) stands before it is read again. */
+  readonly storedHomeReadMs?: number;
 }
-export const SUPERVISOR_LIMITS: EmployeeSupervisorLimits = {
+export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   actionsPerTick: 2,
   startupGraceMs: 90_000,
   actionWaitMs: 5 * 60_000,
   idleReadMs: 2 * 60_000,
   limitsCheckMs: 10 * 60_000,
+  poolReadMs: 60_000,
+  poolDwellMs: 60_000,
+  poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000],
+  storedHomeReadMs: 10 * 60_000,
 };
+/** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
+const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
+  'recover-pool': 'repair',
+  'finish-pool-recovery': 'repair',
+  'reconcile-pool': 'retry',
+};
+/** Said once with a pool step that needs the switch for repairs: what happens with it on, and the calls with it off. */
+const POOL_REPAIR_NOTE =
+  ' (taken by the office itself while the company setting supervisorAutoRepair is on; by hand: GET ' +
+  '/api/company/employees/:id/docker-pool/cold-preview, then POST …/docker-pool/cold-recover, or POST ' +
+  '…/docker-pool/cold-resume for a recovery that did not finish)';
+/** Findings about a stored home that stop a rebuild, and the one that says nothing was read. */
+const STORED_HOME_HELD = new Set<SupervisorStoredHome>(['renumbered', 'different', 'unknown']);
 /** A limits check that found the employee busy is asked again this soon. */
 const LIMITS_BUSY_RETRY_MS = 60_000;
 
@@ -183,6 +280,8 @@ export interface SupervisorReport {
   readonly needsHuman?: string;
   /** The last check of the laptop's approved limits, for an employee who has a finished laptop. */
   readonly limits?: SupervisorLimitsReport;
+  /** The office's last look at the shared pool, while no terminal is attached and it is looking. */
+  readonly pool?: SupervisorPoolReport;
 }
 
 class SupervisorStopped extends Error {
@@ -217,6 +316,14 @@ export class EmployeeSupervisor {
   /** The last limits check of each employee, and when the next one is due. In memory: a restart checks again. */
   readonly #limits = new Map<string, SupervisorLimitsReport>();
   readonly #limitsDue = new Map<string, number>();
+  /** The last look at the shared pool. Undefined while a terminal is attached, when nobody looks. In memory. */
+  #pool?: SupervisorPoolReport;
+  #poolDue = 0;
+  #poolLastStep = 0;
+  #poolFlight?: Promise<void>;
+  /** The last read of a stored home that stopped a rebuild or failed. Never one that allowed it. */
+  readonly #storedHome = new Map<string, { at: number; found: SupervisorStoredHome }>();
+  readonly #resolved: Required<EmployeeSupervisorLimits>;
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -230,6 +337,12 @@ export class EmployeeSupervisor {
     // The pacing is kept across an office start; the clocks that count what this process has watched are not.
     this.#histories = new Map([...ports.load()].map(([id, history]) => [id, resumeSupervisorHistory(history)]));
     this.#startedAt = ports.now();
+    this.#resolved = { ...SUPERVISOR_LIMITS, ...limits };
+  }
+
+  /** The last look at the shared pool, while the supervisor is looking. DATA only. */
+  pool(): SupervisorPoolReport | undefined {
+    return this.#pool;
   }
 
   /** The latest report for each employee of one owner. DATA only. */
@@ -273,18 +386,23 @@ export class EmployeeSupervisor {
         this.#announced.delete(id);
         this.#readings.delete(id);
         this.#occupied.delete(id);
+        this.#storedHome.delete(id);
       }
     for (const id of [...this.#limitsDue.keys()])
       if (!known.has(id)) {
         this.#limitsDue.delete(id);
         this.#limits.delete(id);
       }
-    // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat.
+    // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat. Among employees
+    // who are level, as all are after a host restart, the order the office gives them is kept: that is its
+    // start-up order (employee-startup-order.ts). The seats of a pass space them out.
+    const place = new Map(employees.map((employee, index) => [employee.id, index]));
     const order = [...employees].sort(
       (a, b) =>
         (this.#histories.get(a.id)?.lastAction?.at ?? 0) - (this.#histories.get(b.id)?.lastAction?.at ?? 0) ||
-        a.id.localeCompare(b.id)
+        place.get(a.id)! - place.get(b.id)!
     );
+    if (!this.#closed) await this.#keepPool(employees);
     let seats = this.limits.actionsPerTick;
     for (const employee of order) {
       if (this.#closed) break;
@@ -304,7 +422,142 @@ export class EmployeeSupervisor {
    */
   #unattended(employee: SupervisedEmployee): boolean {
     if (employee.desiredRunning !== true || employee.onVacation) return true;
-    return this.#reports.get(employee.id)?.condition === 'healthy';
+    const report = this.#reports.get(employee.id);
+    // Held by the limits of the pool every laptop shares, with no step of the ladder pending: the pool's limits
+    // are put back from here, for as long as it takes.
+    return report?.condition === 'healthy' || (!!report && !report.next && sharedPoolCode(report.code));
+  }
+
+  /** An employee who should be in the office has a terminal attached to a laptop, so laptops run in the pool. */
+  #laptopAttached(employees: readonly SupervisedEmployee[]): boolean {
+    return employees.some((employee) => {
+      const { laptop, session } = this.ports.glance(employee);
+      return (
+        laptop.poolAlive === true ||
+        (laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected')
+      );
+    });
+  }
+
+  /** The office-level look at the shared pool. See the file comment. */
+  async #keepPool(employees: readonly SupervisedEmployee[]): Promise<void> {
+    const keep = this.ports.keepPool?.bind(this.ports);
+    if (!keep || this.#poolFlight) return;
+    const now = this.ports.now();
+    const inOffice = employees.filter(
+      (row) =>
+        row.desiredRunning === true && !row.onVacation && !row.bindingMigration && this.ports.flags(row.owner).enabled
+    );
+    if (!inOffice.length || this.#laptopAttached(inOffice)) {
+      if (this.#pool && this.#pool.pool !== 'up')
+        this.ports.log('[supervisor] shared pool: a laptop is attached again');
+      this.#pool = undefined;
+      this.#poolDue = 0;
+      return;
+    }
+    // Nobody is attached and nothing has been read yet: the pool is unknown, never assumed to be up.
+    this.#pool ??= { pool: 'unknown', at: now, since: now, attempts: 0 };
+    if (now < this.#poolDue) return;
+    const before = this.#pool;
+    // The employees in the office come first; anyone's laptop record can stand for the pool they all share.
+    const candidates = [...inOffice, ...employees.filter((row) => !inOffice.includes(row) && !row.bindingMigration)];
+    const backoff = this.#resolved.poolBackoffMs;
+    const stepAt = before.step
+      ? Math.max(
+          before.since + this.#resolved.poolDwellMs,
+          before.attempts ? this.#poolLastStep + (backoff[Math.min(before.attempts, backoff.length) - 1] ?? 0) : 0
+        )
+      : undefined;
+    // A step is taken only for what an earlier look already found, and only with the switch it needs.
+    const owner = inOffice[0]!.owner;
+    const allowed = !!before.step && (POOL_STEP_TIER[before.step] === 'retry' || this.ports.flags(owner).autoRepair);
+    const act = allowed && stepAt !== undefined && stepAt <= now ? before.step : undefined;
+    if (act) this.#poolLastStep = now;
+    this.#poolDue = now + this.#resolved.poolReadMs;
+    const work = (async (): Promise<SupervisorPoolResult> => {
+      try {
+        return await keep(candidates, (employee, tier) => this.#poolGuard(employee, tier), act);
+      } catch (error) {
+        return { pool: 'unknown', detail: describe(error) };
+      }
+    })().then((result) => {
+      this.#poolFlight = undefined;
+      this.#poolLooked(before, result, act, now);
+    });
+    this.#poolFlight = work;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.limits.actionWaitMs);
+      timer.unref?.();
+    });
+    await Promise.race([work, waited]);
+    if (timer) clearTimeout(timer);
+  }
+
+  /** Record one look at the pool. A line and an audit entry are written for every step that was taken, and one
+   * line when what the pool is, or what it needs, changes. */
+  #poolLooked(
+    before: SupervisorPoolReport,
+    result: SupervisorPoolResult,
+    asked: SupervisorPoolStep | undefined,
+    at: number
+  ): void {
+    const took = asked !== undefined && result.outcome !== undefined;
+    const same = before.pool === result.pool && before.step === result.step;
+    const last = took
+      ? { step: result.step!, at, outcome: result.outcome!, ...(result.detail ? { detail: result.detail } : {}) }
+      : before.last;
+    const report: SupervisorPoolReport = {
+      pool: result.pool,
+      ...(result.step ? { step: result.step } : {}),
+      ...(result.detail ? { detail: result.detail } : {}),
+      at,
+      since: same ? before.since : at,
+      attempts: (same || took ? before.attempts : 0) + (took ? 1 : 0),
+      ...(last ? { last } : {}),
+    };
+    this.#pool = report;
+    try {
+      if (took) {
+        this.ports.log(
+          `[supervisor] shared pool: ${result.step} -> ${result.outcome}` +
+            `${result.detail ? ' ' + result.detail : ''} (pool ${result.pool}; attempt ${report.attempts})`
+        );
+        this.ports.audit({
+          admin: 'office supervisor',
+          action: 'supervisor_' + result.step!.replaceAll('-', '_'),
+          target: 'shared pool',
+          detail: {
+            outcome: result.outcome,
+            ...(result.detail ? { detail: result.detail } : {}),
+            pool: result.pool,
+            attempt: report.attempts,
+            ...(result.employeeId ? { id: result.employeeId } : {}),
+          },
+        });
+      } else if (!same || before.detail !== result.detail)
+        this.ports.log(
+          `[supervisor] shared pool: ${result.pool}` +
+            `${result.detail ? ' ' + result.detail : ''}${result.step ? '; next: ' + result.step : ''}` +
+            (result.step && POOL_STEP_TIER[result.step] === 'repair' ? POOL_REPAIR_NOTE : '')
+        );
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * Throws unless the supervisor may still act for the pool through this employee's record: the owner's switch
+   * (and the one for repairs, for a step that starts the stopped anchor), the ready office and the unchanged
+   * employee. Attendance is not asked: the pool belongs to the box, and nobody is started or returned by it.
+   */
+  #poolGuard(employee: SupervisedEmployee, tier: 'retry' | 'repair'): SupervisorGuard {
+    const identity = this.#identityGuard(employee);
+    return () => {
+      identity();
+      if (tier === 'repair' && !this.ports.flags(employee.owner).autoRepair)
+        throw new SupervisorStopped('Automatic repairs were switched off');
+    };
   }
 
   /** The limits check of the one employee whose check is longest overdue. See the file comment. */
@@ -571,10 +824,21 @@ export class EmployeeSupervisor {
     // A laptop that was just found occupied or unreadable is not asked again every half minute. Only a reading
     // that forbids a rebuild is ever kept: one that would allow it is always made immediately before the step.
     const occupied = this.#occupied.get(employee.id);
-    const withOccupied = (seen: SupervisorObservation): SupervisorObservation =>
-      occupied && now - occupied.at < this.limits.idleReadMs
-        ? { ...seen, laptop: { ...seen.laptop, provider: occupied.presence } }
-        : seen;
+    const stored = this.#storedHome.get(employee.id);
+    // The same holds for a stored home that was found renumbered or different. What the office's own look at the
+    // shared pool found is given to every assessment while it is looking.
+    const storedFresh =
+      stored &&
+      now - stored.at < (stored.found === 'unknown' ? this.limits.idleReadMs : this.#resolved.storedHomeReadMs);
+    const withOccupied = (seen: SupervisorObservation): SupervisorObservation => ({
+      ...seen,
+      laptop: {
+        ...seen.laptop,
+        ...(occupied && now - occupied.at < this.limits.idleReadMs ? { provider: occupied.presence } : {}),
+        ...(storedFresh ? { storedHome: stored.found } : {}),
+        ...(this.#pool ? { pool: this.#pool.pool } : {}),
+      },
+    });
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
     let history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
@@ -607,6 +871,22 @@ export class EmployeeSupervisor {
         return false;
       }
     }
+    if (assessment.next.preconditions.includes('stored-home') && observed.laptop.storedHome === undefined) {
+      // Nothing runs in the laptop. Before it is replaced by one bound to the same home path, that path is read,
+      // and the decision is taken again with what was found. The step reads it once more itself.
+      const read = this.ports.readStoredHome?.bind(this.ports);
+      const found = read
+        ? await read(employee, this.#guard(employee, 'repair')).catch(() => 'unknown' as const)
+        : ('unchecked' as const);
+      if (STORED_HOME_HELD.has(found)) this.#storedHome.set(employee.id, { at: now, found });
+      else this.#storedHome.delete(employee.id);
+      observed = { ...observed, laptop: { ...observed.laptop, storedHome: found } };
+      assessment = assessEmployee(observed, history, flags, now, this.policy);
+      if (!due(assessment) || !assessment.next.preconditions.includes('stored-home')) {
+        this.#report(employee, assessment, history, now);
+        return false;
+      }
+    }
     if (assessment.next.preconditions.some((name) => SUPERVISOR_OCCUPIED_PROOFS.includes(name))) {
       // A laptop an agent may run in. The office terminal is looked at once more, from memory, and the decision is
       // taken again with it: the step goes ahead only when exactly the same is still asked to be proved. The laptop
@@ -622,7 +902,7 @@ export class EmployeeSupervisor {
       }
     }
     const action = assessment.next.action!;
-    history = issueSupervisorAttempt(history, action, now);
+    history = issueSupervisorAttempt(history, action, now, assessment.next.uncounted);
     this.#remember(employee.id, history);
     await this.#persist();
     this.#report(
@@ -736,6 +1016,7 @@ export class EmployeeSupervisor {
         : {}),
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
       ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
+      ...(this.#pool && assessment.condition !== 'owner-stopped' ? { pool: this.#pool } : {}),
     };
     this.#reports.set(employee.id, report);
     // One console line when an employee starts to need a person, and one when that ends.

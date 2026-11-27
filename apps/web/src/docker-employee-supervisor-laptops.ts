@@ -54,6 +54,24 @@
  * docker-standing-defaults.ts for what they are. The supervisor still never chooses a value: both are derived from
  * what the owner approved for the other employees, and the limits are saved through the same store method the
  * owner's docker-policy route calls. The switch is read again inside that save.
+ *
+ * THE POOL AFTER A HOST RESTART (`keepPool`). When the host restarts, every laptop and the pool's anchor are stopped.
+ * No laptop can be set up before the anchor runs again, and only the cold recovery starts a stopped anchor. The
+ * owner's two calls for that (`cold-preview`, then `cold-recover`) are made here through the same service, under
+ * the owner's standing switch for repairs instead of a signed-in owner. The service itself refuses while any laptop
+ * of the box runs; this file never decides that. A recovery that was issued and did not finish is finished as
+ * itself (`cold-resume`) before anything new is previewed. A pool that runs and only lacks its observation record
+ * gets that record (`reconcile`). The pool is shared, so any employee's record can stand for it: the attendance of
+ * that employee is not asked, and nobody is started, attached or returned to the office by this step.
+ *
+ * STORED HOME (`storedHome`). Before a finished laptop that is stopped is rebuilt, the office asks whether the HOME
+ * and Nix directories at its recorded paths are still the ones its storage holder recorded. A rebuilt laptop is
+ * bound to those paths, so this is where a different disk at the same path would be taken for an employee's home.
+ * The read is the one a same-plan recovery makes; a new device number is accepted only as `stoppedReference` of the
+ * reattach helper allows. `renumbered` and `different` stop the automatic rebuild. An office that has no verifier
+ * rebuilds by the recorded path, as it did before this check existed. The policy asks for the read before it
+ * decides (`stored-home`), the driver makes it, and `rebuild` makes it once more itself, last, for every rebuild:
+ * a laptop that runs has no stopped storage to compare and is not held up by it.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
@@ -82,6 +100,9 @@ import type {
   SupervisorActionResult,
   SupervisorGuard,
   SupervisorLaptopReading,
+  SupervisorPoolGuard,
+  SupervisorPoolResult,
+  SupervisorPoolStep,
 } from './employee-supervisor.js';
 import {
   readParkedScreen,
@@ -111,8 +132,19 @@ export interface DockerSupervisorLaptopDeps {
     observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
   };
   readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'repair' | 'flightActive'>;
-  /** The shared pool's status and in-place repair, as the owner's routes call them. */
-  readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'>;
+  /** The shared pool's status, in-place repair, observation record and cold recovery, as the owner's routes call them. */
+  readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'> &
+    Partial<Pick<DockerPoolReconciliation, 'reconcile' | 'coldPreview' | 'coldRecover' | 'coldResume' | 'coldHeld'>>;
+  /** Reads of an employee's stored HOME and Nix directories. Absent where the office has no laptops to verify. */
+  readonly storage?: {
+    /** See `DockerEmployeeEngine.stoppedStorage`. */
+    stopped(
+      row: DockerEmployeeContinuationRecord,
+      current: () => void
+    ): Promise<'verified' | 'renumbered' | 'different' | 'not-stopped' | 'unverifiable'>;
+    /** Record which filesystem a running laptop's directories are on. See `DockerEmployeeEngine.rememberStorage`. */
+    remember?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<boolean>;
+  };
   /** The in-place repair of one finished laptop's own limits that does not ask where its employee is. */
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
@@ -125,6 +157,24 @@ export interface DockerSupervisorLaptopDeps {
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
+
+/** Findings about the stored home of a stopped laptop with which the rebuild step itself refuses. */
+const STORED_HOME_REFUSALS: Readonly<
+  Partial<Record<Awaited<ReturnType<DockerSupervisorLaptops['storedHome']>>, string>>
+> = {
+  renumbered: 'the stored home has a new device number that nothing accepts',
+  different: 'the stored home is not the directory the laptop was built on',
+  unknown: 'the stored home could not be read',
+};
+/** What a read answers when this employee's record cannot stand for the pool; another one may. */
+const NO_SOURCE = '';
+/** The refusal that says this employee has no laptop record that names the pool's anchor; another one may. */
+const NO_POOL_SOURCE = new Set(['DOCKER_POOL_COLD_SOURCE_UNCONFIRMED']);
+/** The pool's anchor is not running: what the cold recovery is for. */
+const ANCHOR_STOPPED = 'DOCKER_POOL_ANCHOR_UNCONFIRMED';
+/** The anchor runs and its limits or their acknowledgement are missing: a laptop set-up or the in-place repair
+ * writes them. Nothing is recovered cold for it. */
+const POOL_RUNNING_HOLDS = new Set(['DOCKER_POOL_POLICY_CHANGED', 'DOCKER_POOL_ORIGINAL_ACK_MISSING']);
 
 /** Another operation holds the employee: nothing was tried and the attempt is not spent. */
 const BUSY = new Set(['DOCKER_CONTINUATION_BUSY', 'DOCKER_REPROVISION_BUSY']);
@@ -146,6 +196,8 @@ function settled(result: DockerContinuationResult): SupervisorActionResult {
 }
 
 export class DockerSupervisorLaptops {
+  /** The laptop operation of each employee whose storage this office process already asked to record. */
+  readonly #storageAsked = new Map<string, string>();
   constructor(private readonly deps: DockerSupervisorLaptopDeps) {}
 
   /** The whole of what the supervisor presents where a route presents a verified owner. See the file comment. */
@@ -434,7 +486,10 @@ export class DockerSupervisorLaptops {
         if (error instanceof DockerEmployeeContinuationError && POOL_FIRST.has(error.code)) return error;
         throw error;
       });
-      if (!(first instanceof DockerEmployeeContinuationError)) return { outcome: 'done', detail: first.limits };
+      if (!(first instanceof DockerEmployeeContinuationError)) {
+        await this.#rememberStorage(row, authority.require);
+        return { outcome: 'done', detail: first.limits };
+      }
       if (!(await this.#repairPool(employee, authority))) throw first;
       await restore();
       return { outcome: 'done', detail: 'restored' };
@@ -443,6 +498,174 @@ export class DockerSupervisorLaptops {
         return { outcome: 'done', detail: 'not-running' };
       return refusal(error);
     }
+  }
+
+  /** The code of a refusal by one of the laptop services, or a fixed phrase. Never a message. */
+  #code(error: unknown): string {
+    if (error instanceof DockerEmployeeContinuationError) return error.code;
+    return error instanceof CompanyError ? 'the office refused this employee' : 'the read failed';
+  }
+
+  /**
+   * One look at the shared pool. With `step`, that step is taken when this look calls for exactly it. See the
+   * file comment. `candidates` are tried in order until the record of one can stand for the pool.
+   */
+  async keepPool(
+    candidates: readonly SupervisedEmployee[],
+    guard: SupervisorPoolGuard,
+    step?: SupervisorPoolStep
+  ): Promise<SupervisorPoolResult> {
+    let held: ReturnType<NonNullable<DockerSupervisorLaptopDeps['pool']['coldHeld']>>;
+    try {
+      held = this.deps.pool.coldHeld?.();
+    } catch (error) {
+      return { pool: 'unknown', detail: this.#code(error) };
+    }
+    // The employee an open recovery was issued for comes first: only they can run it again as it was issued.
+    const order = held
+      ? [...candidates].sort((a, b) => Number(b.id === held!.employeeId) - Number(a.id === held!.employeeId))
+      : candidates;
+    let unread: string | undefined;
+    for (const employee of order) {
+      const found = held
+        ? await this.#finishPool(employee, guard, step === 'finish-pool-recovery')
+        : await this.#poolFor(employee, guard, step);
+      if (typeof found === 'object') return { ...found, employeeId: employee.id };
+      if (found !== NO_SOURCE) unread ??= found;
+    }
+    // Nobody's record could be read: nothing is known. Every record was read and none names the pool: an open
+    // recovery stays open, and otherwise there is no pool to recover (a laptop set-up creates one).
+    if (unread !== undefined) return { pool: 'unknown', detail: unread };
+    return held
+      ? { pool: 'down', detail: 'DOCKER_POOL_COLD_ATTEMPT_HELD' }
+      : { pool: 'none', detail: 'no laptop record names the shared pool' };
+  }
+
+  /** An open recovery, finished as itself. `NO_SOURCE` when this employee's record cannot stand for the pool. */
+  async #finishPool(
+    employee: SupervisedEmployee,
+    guard: SupervisorPoolGuard,
+    act: boolean
+  ): Promise<SupervisorPoolResult | string> {
+    const step = 'finish-pool-recovery' as const;
+    if (!act) return { pool: 'down', step };
+    try {
+      const authority = this.#authority(employee, guard(employee, 'repair'));
+      const status = await this.deps.pool.coldResume!(employee.id, authority);
+      return { ...this.#poolState(status), step, outcome: 'done', detail: status.code ?? status.state };
+    } catch (error) {
+      const code = this.#code(error);
+      return NO_POOL_SOURCE.has(code) || error instanceof CompanyError
+        ? NO_SOURCE
+        : { pool: 'down', step, outcome: 'refused', detail: code };
+    }
+  }
+
+  /** What a pool status says a laptop set-up can count on. */
+  #poolState(status: { state: string; code?: string }): Pick<SupervisorPoolResult, 'pool' | 'detail'> {
+    if (status.state !== 'held') return { pool: 'up' };
+    if (status.code && POOL_RUNNING_HOLDS.has(status.code)) return { pool: 'up', detail: status.code };
+    const down = status.code === ANCHOR_STOPPED || status.code === 'DOCKER_POOL_COLD_ATTEMPT_HELD';
+    return { pool: down ? 'down' : 'unknown', ...(status.code ? { detail: status.code } : {}) };
+  }
+
+  /** The pool as one employee's record shows it. `NO_SOURCE` when that record cannot stand for the pool, and the
+   * code of the failure when the pool could not be read through it. */
+  async #poolFor(
+    employee: SupervisedEmployee,
+    guard: SupervisorPoolGuard,
+    asked: SupervisorPoolStep | undefined
+  ): Promise<SupervisorPoolResult | string> {
+    const pool = this.deps.pool;
+    let status: Awaited<ReturnType<DockerPoolReconciliation['status']>>;
+    try {
+      status = await pool.status(employee.id, this.#authority(employee, guard(employee, 'retry')));
+    } catch (error) {
+      // An employee with no approved limits, or one who is being moved, has no pool to show.
+      return error instanceof CompanyError ? NO_SOURCE : this.#code(error);
+    }
+    const seen = this.#poolState(status);
+    if (status.allowedActions.includes('reconcile-pool') && status.scopeDigest && pool.reconcile)
+      return this.#poolStep('reconcile-pool', seen, asked, async () =>
+        pool.reconcile!(
+          employee.id,
+          {
+            sessionId: status.sessionId,
+            sessionGeneration: status.sessionGeneration,
+            expectedScopeDigest: status.scopeDigest!,
+          },
+          this.#authority(employee, guard(employee, 'retry'))
+        )
+      );
+    if (status.code !== ANCHOR_STOPPED || !pool.coldPreview || !pool.coldRecover) return seen;
+    // The service decides whether the pool may be recovered cold: a stopped anchor, no laptop of the box running,
+    // every earlier writer accounted for. Its refusal is the answer.
+    let preview: Awaited<ReturnType<DockerPoolReconciliation['coldPreview']>>;
+    try {
+      preview = await pool.coldPreview(employee.id, this.#authority(employee, guard(employee, 'retry')));
+    } catch (error) {
+      const code = this.#code(error);
+      if (NO_POOL_SOURCE.has(code) || error instanceof CompanyError) return NO_SOURCE;
+      // This record does not carry the pool policy every employee is approved with; another one may.
+      return code === 'DOCKER_POOL_COLD_POLICY_CHANGED' ? code : { pool: 'down', detail: code };
+    }
+    return this.#poolStep('recover-pool', seen, asked, async () =>
+      pool.coldRecover!(
+        employee.id,
+        {
+          operationId: randomUUID(),
+          sessionId: preview.sessionId,
+          sessionGeneration: preview.sessionGeneration,
+          expectedScopeDigest: preview.scopeDigest,
+        },
+        this.#authority(employee, guard(employee, 'repair'))
+      )
+    );
+  }
+
+  async #poolStep(
+    step: SupervisorPoolStep,
+    seen: Pick<SupervisorPoolResult, 'pool' | 'detail'>,
+    asked: SupervisorPoolStep | undefined,
+    run: () => Promise<{ state: string; code?: string }>
+  ): Promise<SupervisorPoolResult> {
+    if (asked !== step) return { ...seen, step };
+    try {
+      const status = await run();
+      return { ...this.#poolState(status), step, outcome: 'done', detail: status.code ?? status.state };
+    } catch (error) {
+      return { ...seen, step, outcome: 'refused', detail: this.#code(error) };
+    }
+  }
+
+  /**
+   * Whether the stored HOME and Nix directories of this employee's stopped, finished laptop are still the ones the
+   * laptop was built on. `unchecked`: there is no stopped, finished laptop to compare, or this office cannot
+   * verify one. `unknown`: the read itself was refused or failed.
+   */
+  async storedHome(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard
+  ): Promise<'verified' | 'unchecked' | 'renumbered' | 'different' | 'unknown'> {
+    const row = this.#row(employee.id),
+      storage = this.deps.storage;
+    if (!row || !storage) return 'unchecked';
+    try {
+      const authority = this.#authority(employee, guard);
+      const found = await storage.stopped(row, authority.require);
+      return found === 'not-stopped' || found === 'unverifiable' ? 'unchecked' : found;
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /** Once for each laptop operation that this office process sees finished and running: record which filesystem
+   * its directories are on, so a later device renumbering can be proved. Never fails the step it rides on. */
+  async #rememberStorage(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const remember = this.deps.storage?.remember;
+    if (!remember || this.#storageAsked.get(row.employeeId) === row.request.operationId) return;
+    this.#storageAsked.set(row.employeeId, row.request.operationId);
+    await remember(row, current).catch(() => false);
   }
 
   /**
@@ -618,6 +841,10 @@ export class DockerSupervisorLaptops {
         if (refused) return refused;
         fence = this.#quiet(employee);
       }
+      // The home the new laptop will be bound to is read once more, last, whatever led to this rebuild: a
+      // finished laptop that is stopped is never replaced while its home path holds other directories.
+      const home = STORED_HOME_REFUSALS[await this.storedHome(employee, guard)];
+      if (home) return { outcome: 'refused', detail: home };
       const result = await this.deps.absent.rebuild(
         employee.id,
         {

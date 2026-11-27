@@ -106,6 +106,10 @@ repair steps, which starts at …” and nobody is asked for anything.
 | Abandon a held plan move, or close one from before the laptop runtime | continuing did not help or is not offered, and the same error lasted 15 min (30 min when the cause lies outside the move) | 2 |
 | Rebuild the laptop, then start it | the operation cannot advance, an unused laptop was made for an earlier laptop image, a code the office does not recognize has stood for 30 minutes, the laptop has been starting for 15 minutes, the agent stays parked on a provider start-up screen ([below](#provider-start-up-screens)), or the laptop is gone while an earlier laptop operation is on record. At once when nothing runs in the laptop; otherwise between the agent's turns | 2, and 2 per day across rounds |
 
+One step belongs to no employee: the pool that all laptops share. The
+supervisor recovers it by itself after a host restart, before it rebuilds
+anyone. See [after a host restart](#after-a-host-restart).
+
 A laptop record can offer `continue` for a step it has not issued while the
 request is refused before that step, for example a set-up that was made for a
 laptop image the office no longer uses
@@ -174,7 +178,10 @@ becoming healthy is treated the same way from that moment.
 
 The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
-next day the ladder goes on by itself.
+next day the ladder goes on by itself. The rebuild of a laptop that was stopped
+from outside together with its storage holder, as after a host restart, is
+neither held back by this limit nor counted against it
+([after a host restart](#after-a-host-restart)).
 
 Every wait above that ends in a laptop being rebuilt (fifteen minutes of
 starting or of an unreadable laptop, thirty minutes of an unrecognized code or
@@ -194,9 +201,10 @@ or a laptop layout of its own, never returns anyone to the office, and never
 rebuilds a laptop in the middle of its agent's turn. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
 employee with none on record is given the standing default (below). A stopped or missing
-laptop is rebuilt only while another laptop of the box runs; when none does,
-that is what a host restart looks like, so recover the shared pool first
-(below). A plan move is never left alone, whatever its error says: see
+laptop is rebuilt while another laptop of the box runs. When none does, that is
+what a host restart looks like: the supervisor recovers the shared pool first,
+by itself, and the rebuild waits for that
+([after a host restart](#after-a-host-restart)). A plan move is never left alone, whatever its error says: see
 [a plan move that stopped part-way](#a-plan-move-that-stopped-part-way).
 
 ### Standing defaults for limits and layout
@@ -271,7 +279,11 @@ manager resets the limits that only a helper wrote, and every laptop is then
 refused although its agent is still running. The supervisor calls the same two
 repairs an owner would ([below](#put-approved-limits-back-after-a-reload-of-the-host-service-manager)),
 which write the already approved values again. It never rebuilds a laptop for a
-hold of the shared pool: a new laptop would join the same pool.
+hold of the shared pool: a new laptop would join the same pool. When its four
+attempts for such a hold are used up it does not stop: the limits check below
+takes that employee over and asks for the pool's limits again about every ten
+minutes, for as long as the hold lasts. `needsHuman` says so and names the
+same calls.
 
 That reload resets the limits of every running laptop, whoever it belongs to.
 So beside the repair steps the supervisor checks the approved limits of each
@@ -287,12 +299,167 @@ spends no attempt of a repair step. `GET /api/company` shows the last check as
 and an audit entry `supervisor_keep_limits` are written when limits were put
 back, and once when a check starts to be refused.
 
-Three company settings switch it (`PUT /api/company/settings`, owner only;
-absent means on): `supervisorEnabled` (observe, continue, wake, put a sign-in back),
-`supervisorAutoRepair` (abandon, rebuild, give standing limits, restart the
-office) and `supervisorStandingDefaults` (limits and layout for an employee
-who has none). Its pacing state is `employee-supervisor.json` in the office
-data directory; deleting it only restarts the waits.
+Four company settings switch it (`PUT /api/company/settings`, owner only):
+`supervisorEnabled` (observe, continue, wake, put a sign-in back, record the
+pool's observation), `supervisorAutoRepair` (abandon, rebuild, give standing
+limits, restart the office, recover the stopped pool) and
+`supervisorStandingDefaults` (limits and layout for an employee who has none)
+are on when absent. `acceptStorageRenumbering` is off when absent: it is the
+owner's standing answer to a storage device change and is described
+[below](#the-stored-home-of-a-stopped-laptop). Its pacing state is
+`employee-supervisor.json` in the office data directory; deleting it only
+restarts the waits. The waits of the pool step are kept in memory, so an office
+restart starts them over, like the clocks above; every recovery it issues is in
+the pool's own journal.
+
+### After a host restart
+
+A host restart stops every laptop, every storage holder and the anchor of the
+pool that all laptops share. Docker starts the office container again by itself
+when it was created with the `unless-stopped` restart policy (the installer and
+`reverie-start` do that, and a console update keeps the policy of the console
+it replaces) and the Docker service is enabled at boot. From there the office
+brings everyone back without the owner:
+
+1. The laptop runtime finds every laptop stopped. Each finished laptop reads
+   `DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`, because its storage holder is not
+   running, and nothing starts a holder again: a fresh laptop gets a new one.
+   The supervisor classifies that, and a stopped laptop, as a laptop to rebuild.
+2. No laptop is rebuilt yet. A rebuild retires the laptop record, and a fresh
+   laptop cannot be set up while the pool's anchor is stopped. Every employee
+   shows `waitingFor: the shared pool, which the office is recovering after a
+   host restart`, and no attempt of anyone's ladder is spent. That holds on
+   every path that leads to a rebuild: a laptop that has been starting for
+   fifteen minutes, a code the office does not recognize after its thirty
+   minutes, a lost terminal whose input is held and a parked start-up screen
+   all meet the same wait once a read finds no laptop of the employee running.
+   While the pool is known to be down, no set-up request is sent again and no
+   fresh laptop is started either, and a held plan move is neither continued
+   nor closed: when the pool is back the move is continued as often as any
+   other, and closed after that if it is still held.
+3. The supervisor recovers the pool. It looks at the pool once a minute while no
+   employee who should be in the office has an attached terminal, and never
+   while one has. The first look only reads. One minute after the pool was first
+   seen stopped it makes the same two calls an owner would:
+   `docker-pool/cold-preview`, then `docker-pool/cold-recover` with that
+   preview's digest, through the service behind those routes. The service
+   itself refuses while any laptop of the box runs, while an earlier pool
+   writer is not accounted for, or when the anchor is not cleanly stopped; the
+   supervisor decides none of that and never takes a failed read for a stopped
+   pool. Any employee's laptop record can stand for the pool, those in the
+   office first; nobody is started or returned to the office by this step.
+4. Once the anchor runs, each employee is taken through the ordinary steps: the
+   stored home is read (next section), the laptop is rebuilt, and the fresh
+   laptop is started, which resumes the saved conversation. Two steps are
+   started per thirty-second pass, in the office's start-up order (employees on
+   a local model first, who wait for no sign-in).
+
+The limit of two rebuilds per laptop per day does not apply to this rebuild and
+is not used up by it. The limit is for a laptop whose earlier rebuilds did not
+hold. A laptop that was stopped from outside did hold: the sign of it is that a
+read finds no laptop of the employee running and the laptop's storage holder is
+stopped as well. A holder runs nothing of the employee's and never stops with
+its laptop, so a laptop that crashed, was killed for memory or was stopped by
+hand leaves it running, and that rebuild is counted as before. Rebuilding a
+laptop that is stopped discards nothing that runs. So three or more host
+restarts in a day bring every employee back each time. `supervisor.last` of such a rebuild
+carries `uncounted`. Everything else a rebuild
+needs still holds for it: the layout, the pool, the stored home, the two
+attempts of a round and `supervisorAutoRepair`.
+
+A recovery that fails is tried again one minute later, then after 5, 15 and 60
+minutes, then every six hours for as long as the pool is down. Nothing here
+stops for good. A recovery that was issued and did not finish (the office
+stopped, an Engine reply was lost, the helper failed) is finished as itself
+before anything else: its anchor start is repeated only when every native fact
+is still exactly what it was issued for, its helper is observed under its own
+journal cursor and never created or started twice, and it ends either with the
+published pool observation or, when it can write nothing more and confirmed
+nothing, recorded as ended. Only a helper that cannot be proved to have ended
+keeps it held, and that is read again at the same pace. A pool that runs and
+only lacks its observation record gets that record (`docker-pool/reconcile`).
+
+Each step is an audit entry (`supervisor_recover_pool`,
+`supervisor_finish_pool_recovery`, `supervisor_reconcile_pool`, target `shared
+pool`) and one console line `[supervisor] shared pool: …`. While the supervisor
+is looking, `GET /api/company` shows `supervisor.pool` on each employee: `pool`
+(`up`, `down`, `unknown`, or `none` when no laptop record names a pool yet),
+the `step` it calls for, `attempts`, and `last` (the last step and how it
+ended). Starting the stopped anchor needs `supervisorAutoRepair`; with it off
+the supervisor only looks and the console line names the calls.
+
+What this does not cover, stated plainly:
+
+- A laptop whose set-up had not finished when the host went down has no
+  finished record whose holder says so. Its rebuild is counted against the
+  limit per day like any other.
+- A pool that cannot be read (its status is refused for a reason other than a
+  stopped anchor) is never recovered cold. Rebuilds wait, the look is repeated
+  every minute, and `supervisor.pool.detail` carries the code. A fresh laptop
+  that already exists is still started, as it was before.
+- When no laptop record, current or retired by a rebuild, names the pool, the
+  stopped anchor cannot be recovered by anyone. That is an office that never
+  finished a laptop, where the first set-up creates the pool.
+- Employees whose approved limits name different pool policies cannot share
+  one pool; the recovery is refused for all of them until the owner approves
+  one policy.
+- This is source and component coverage. A restart of a real host has not been
+  qualified with it.
+
+### The stored home of a stopped laptop
+
+A rebuilt laptop is bound to the home path of the laptop it replaces. After a
+host restart that path can hold something else: a disk that was not mounted, or
+another filesystem at the same place. So before the supervisor rebuilds a
+finished laptop that is stopped, it reads whether the HOME and Nix directories
+at the recorded paths are still the ones the laptop's storage holder recorded
+(device number, inode, owner and mode). It is the read a same-plan recovery
+makes before it reserves a move, made by the pinned verifier, and it changes
+nothing.
+
+| Finding | What the supervisor does |
+| --- | --- |
+| The same directories on the same device number | rebuilds |
+| The same directories, a new device number, and the filesystem is the one the office itself recorded for this employee earlier | rebuilds |
+| The same directories, a new device number, no such record, `acceptStorageRenumbering` set | rebuilds, and records the filesystem for the next time |
+| The same directories, a new device number, no record, no grant | does not rebuild; reads again every ten minutes |
+| Another inode, owner or mode | never rebuilds on it; reads again every ten minutes |
+| The read failed | waits and reads again at the next pass |
+| No verifier (`recoveryHelperImageId` not configured), a verifier that cannot report what is mounted, or a holder receipt that no longer exists | rebuilds by the recorded path, as before this check existed |
+
+Device numbers of one filesystem can change across a restart. The office
+proves that case itself: about once per laptop and office process, while the
+laptop runs, it records the kernel filesystem ID of the ext4 filesystem the two
+directories are on, in `docker-storage-identity.jsonl` beside the company
+store. The ID is derived from the filesystem's own identifier and does not
+change with the device number. A later renumbering is accepted when that ID and
+both inodes match, and the verifier then confirms the renumbered reference with
+the filesystem ID on both mounts, twice, exactly as it does for an owner's
+approval. The record is only ever compared; it selects no path and authorizes
+no write.
+
+When the office holds no record yet, the owner's standing grant decides:
+`acceptStorageRenumbering` (`PUT /api/company/settings`, owner only, absent
+means off). With it the office accepts a new device number while both
+directories are otherwise unchanged on one ext4 filesystem. It never accepts
+another directory, a filesystem that is not ext4, or directories on two
+filesystems. The owner's approval for one laptop
+(`POST /api/company/employees/:id/docker-storage/device-approval`) works as
+before and takes precedence. The same rules serve a plan move that reads a
+stopped laptop.
+
+The policy asks for this read before it allows the rebuild (`stored-home`), the
+driver makes it, and the rebuild step makes it once more itself, last, whatever
+led to the rebuild. A stopped laptop that is reached by another rule (one the
+office could not read for two hours is rebuilt as a laptop an agent may run in)
+is therefore refused by the step on the same two findings.
+
+Nothing here is a final stop: a finding that holds a rebuild is read again every
+ten minutes, `needsHuman` says what was found and what settles it, and the
+laptop is rebuilt by the supervisor as soon as the recorded directory is there
+or the renumbering is accepted. What remains for the owner is a real change of
+disk: mounting the right filesystem, or deciding that the directory that is
+there now is the employee's home (rebuild by hand).
 
 ### A plan move that stopped part-way
 
@@ -308,13 +475,15 @@ record offers. No sentence about a held move asks for a person.
 | An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
 | A decision screen in the new session | The same: three continues, then abandon | The same |
 | The sign-in screen of the new session | The same: three continues, then abandon. Nothing waits for the plan to be signed in (below) | The same |
-| An operation that only has to finish, or something every laptop shares (the pool, the storage, the office's configuration) | Three continues, spread as probes: 1, 10 and 30 minutes after the problem was first seen | Abandons 3 minutes after the last probe, if that probe found the cause still there |
+| An operation that only has to finish, or something every laptop shares (the pool's limits, the office's configuration) | Three continues, spread as probes: 1, 10 and 30 minutes after the problem was first seen | Abandons 3 minutes after the last probe, if that probe found the cause still there |
+| Any error, while the office's own look finds the shared pool down (its anchor stopped or a recovery open, as after a host restart) | Waits and spends no continue | Not abandoned while the pool is down; once it is back, three continues and then the abandon, as above |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
 | A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
 | A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
-The thirty minutes cover the recovery of the shared pool after a host restart.
+The thirty minutes cover the repair of the pool's limits and the other causes
+the office does not see directly.
 Only a continue can tell whether such a cause is gone, so the three continues
 are probes and the last one is held back until the thirty minutes are over. A
 move is abandoned for such a cause only after that last probe failed: never
@@ -324,6 +493,18 @@ again. If the three continues of a round were already used on an earlier error
 of the move, nothing is abandoned in that round; the next round, six hours
 after its last attempt, continues the move first. A move that offers no
 continue cannot be probed and is abandoned when the thirty minutes are over.
+
+A host restart is not left to those thirty minutes, because there the office
+sees the cause itself: while its own look finds the pool down, a move is
+neither continued nor closed, however long the recovery takes
+([after a host restart](#after-a-host-restart)). Nothing was tried for it with
+a pool that works, and no laptop could be rebuilt or started in its place
+either. No probe is spent against a pool that is known to be down; once it is
+back the move gets its continues and then the abandon. A move whose error is a
+stopped storage holder (`DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`) is a step of
+the move itself: no other repair starts a holder again, so it is continued
+three times and then closed after the usual fifteen minutes, and the laptop is
+rebuilt.
 
 A move that stopped at the sign-in screen of its new session is not waited
 for, whatever the office reports about the plan. That screen is reached only
@@ -1021,6 +1202,10 @@ kernel; that is qualified on the selected images, as described under
 
 ## Recover the shared Docker pool after a host restart
 
+With the supervisor on, the office does this by itself
+([after a host restart](#after-a-host-restart)). The calls below are the same
+ones by hand, and the only way with `supervisorAutoRepair` off.
+
 Open Docker resources for an employee whose shared pool anchor is unconfirmed
 and select **Review stopped pool recovery**. The verified owner can also call
 `GET /api/company/employees/:id/docker-pool/cold-preview`. The preview checks the
@@ -1039,6 +1224,37 @@ The backend records the attempt before starting the anchor and records each
 helper action before issuing it. If an outcome is uncertain, subsequent effects
 stay held under the original operation ID. `retained` reports fresh pool proof.
 Use the employee's existing recovery operation to continue its session.
+
+A held attempt is finished with
+`POST /api/company/employees/:id/docker-pool/cold-resume` (verified owner, empty
+body), which the supervisor also calls. It issues nothing a second time:
+
+- No helper on record and the anchor still stopped: when every native fact and
+  the pool metadata are exactly what the attempt was issued for, and the caller
+  is the employee it was issued for, its anchor start never took effect and it
+  runs now, as itself. When they differ, or a laptop runs, it did nothing that
+  lasts and is recorded as ended.
+- No helper on record and the anchor running: the start took effect. Its helper
+  was never issued and is issued now, once, and the pool is published.
+- A helper on record: it is observed under its own cursor. One that was created
+  and never started is started with the arguments it was created with, which
+  the helper proves again before it writes. One that exited with an error is
+  recorded as failed. A completed helper whose pool can be observed publishes
+  it; otherwise the attempt is recorded as ended.
+
+An attempt that is recorded as ended confirmed nothing and can write nothing
+more. The pool is then read like any other: a stopped anchor can be previewed
+again under a new operation, and a running anchor without limits gets them from
+the pool step of the next laptop set-up. Only a helper that cannot be proved to
+have ended keeps the attempt held. With no held attempt the call answers with
+the pool status. An office build that predates this cannot read a journal that
+holds an ended attempt; do not return to such a build once one is recorded.
+
+While an employee has no laptop record because a rebuild retired it, the
+retired record stands for the pool in these calls: it still names the box's one
+anchor, and every native check is made against that anchor as it is now. A full
+journal whose attempts have all finished is set aside as
+`docker-pool-cold-recovery.jsonl.previous` and a new one is started.
 Once format 2 is published, this writer refuses downgrades even if the arrays
 later become empty. Older literal-1 readers must refuse the entire store rather
 than strip fields. Do not run old/new writers together or restore an older backup

@@ -163,7 +163,7 @@ describe('employee supervisor: classification', () => {
       { ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED'), laptop: { ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED').laptop, poolAlive: true } },
       'held-needs-rebuild',
     ],
-    ['a stopped laptop when no laptop runs', held('DOCKER_CONTINUATION_DESTINATION_STOPPED'), 'needs-owner', /No other laptop of this office is running either/],
+    ['a stopped laptop when no laptop runs', held('DOCKER_CONTINUATION_DESTINATION_STOPPED'), 'held-needs-rebuild', /No other laptop of this office is running either, so the office recovers the shared pool first/],
     ['an agent that is not running', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), 'provider-exited'],
     [
       'an attached employee whose record was never moved on to ready',
@@ -665,11 +665,15 @@ describe('employee supervisor: laptops the office cannot judge alone', () => {
     });
   });
 
-  it('leaves a stopped laptop to the owner while no other laptop runs, and rebuilds it once one does', () => {
+  it('asks nobody about a stopped laptop while no other laptop runs, and rebuilds it once one does', () => {
     const stopped = held('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     const alone = assessEmployee(stopped, since(0, 'x'), ON, 60 * MINUTE);
-    expect(alone).toMatchObject({ condition: 'needs-owner', next: { action: null } });
-    expect(alone.needsHuman).toMatch(/recover the shared pool first.*cold-preview/);
+    // The rebuild rung takes it; what runs in the laptop is read first, and the rung then waits for the pool.
+    expect(alone).toMatchObject({
+      condition: 'held-needs-rebuild',
+      next: { action: 'rebuild-laptop', preconditions: ['no-agent-running'] },
+    });
+    expect(alone.needsHuman).toBeUndefined();
     const withOthers = { ...stopped, laptop: { ...stopped.laptop, poolAlive: true, provider: 'no-laptop' as const } };
     expect(assessEmployee(withOthers, since(0, 'x'), ON, 60 * MINUTE).next.action).toBe('rebuild-laptop');
   });
@@ -681,8 +685,8 @@ describe('employee supervisor: laptops the office cannot judge alone', () => {
       assessEmployee({ ...failed, laptop: { ...failed.laptop, provider, poolAlive } }, history, ON, 10 * MINUTE);
     expect(gone(true, 'no-laptop').next.action).toBe('rebuild-laptop');
     const alone = gone(false, 'no-laptop');
-    expect(alone.next.action).toBeNull();
-    expect(alone.needsHuman).toMatch(/No laptop of this office is running.*cold-recover/);
+    expect(alone.next).toMatchObject({ action: null, waitingFor: expect.stringMatching(/the shared pool/) });
+    expect(alone.needsHuman).toBeUndefined();
     // A laptop that runs with no agent in it is evidence that the box is up.
     expect(gone(false, 'absent').next.action).toBe('rebuild-laptop');
   });
@@ -796,7 +800,10 @@ describe('employee supervisor: last night', () => {
       action: null,
       waitingFor: 'a confirmed read of what is running in the laptop',
     });
-    expect(assessEmployee(withProvider('no-laptop', false), history, ON, 3 * MINUTE).needsHuman).toMatch(/cold-recover/);
+    expect(assessEmployee(withProvider('no-laptop', false), history, ON, 3 * MINUTE).next).toMatchObject({
+      action: null,
+      waitingFor: expect.stringMatching(/the shared pool/),
+    });
     const spent = { attempts: tried('rebuild-laptop', 2, 0) };
     expect(assessEmployee(withProvider('no-laptop'), since(0, seen.fingerprint, spent), ON, 60 * MINUTE).next).toMatchObject({
       action: null,
@@ -1195,8 +1202,13 @@ describe('employee supervisor: a terminal the office can never type into again',
     // The read inside the laptop is asked for first.
     expect(blind().next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
     // Nothing runs there: nothing can be lost, and nothing more has to be proved.
-    for (const provider of ['exited', 'absent', 'no-laptop'] as const)
+    for (const provider of ['exited', 'absent'] as const)
       expect(blind({ provider, poolAlive: true }).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+    // A finished laptop that is stopped: the home its replacement would be bound to is read first.
+    expect(blind({ provider: 'no-laptop', poolAlive: true }).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['stored-home'],
+    });
     // An agent runs there, or the read cannot say: unknown is never taken for empty.
     for (const provider of ['running', 'unknown'] as const) expect(blind({ provider }).next.action).toBeNull();
   });
@@ -1773,6 +1785,48 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       // An error of the move's own is another problem, and so is another move.
       expect(classifyEmployee(move('The original Docker journal changed')).fingerprint).not.toBe(first.fingerprint);
       expect(classifyEmployee(move(POOL, { id: 'move-2' })).fingerprint).not.toBe(first.fingerprint);
+    });
+
+    it('spends no probe against a pool the office sees down, and probes and then closes once it is back', () => {
+      const POOL_WAIT = 'the shared pool, which the office is recovering after a host restart';
+      const seen = (laptop: Partial<SupervisorObservation['laptop']>): SupervisorObservation => {
+        const base = move(POOL);
+        return { ...base, laptop: { ...base.laptop, poolAlive: false, ...laptop } };
+      };
+      const fingerprint = classifyEmployee(seen({})).fingerprint;
+      const HOUR = 60 * MINUTE;
+      // Down: the cause is seen, so nothing is probed and nothing is closed, with no time of its own.
+      for (const minutes of [1, 20, 31, 240]) {
+        const waiting = assessEmployee(seen({ pool: 'down' }), since(START, fingerprint), ON, START + minutes * MINUTE);
+        expect(waiting.next, String(minutes)).toEqual({ action: null, waitingFor: POOL_WAIT, preconditions: [] });
+        expect(waiting.needsHuman).toBeUndefined();
+      }
+      // Not even with probes that were made before the office saw the pool down and with the wait long over.
+      const probed = since(START, fingerprint, { attempts: tried('continue-move', 3, START + 30 * MINUTE) });
+      expect(assessEmployee(seen({ pool: 'down' }), probed, ON, START + 4 * HOUR).next.action).toBeNull();
+      // Back after four hours. The probes follow each other, since their times are long past, and then it is closed.
+      const back = seen({ pool: 'up' });
+      expect(assessEmployee(back, since(START, fingerprint), ON, START + 4 * HOUR).next).toMatchObject({
+        action: 'continue-move',
+      });
+      const two = since(START, fingerprint, { attempts: tried('continue-move', 2, START + 4 * HOUR + 2 * MINUTE) });
+      expect(assessEmployee(back, two, ON, START + 4 * HOUR + 7 * MINUTE).next).toMatchObject({ action: 'continue-move' });
+      const three = since(START, fingerprint, { attempts: tried('continue-move', 3, START + 4 * HOUR + 7 * MINUTE) });
+      expect(assessEmployee(back, three, ON, START + 4 * HOUR + 10 * MINUTE).next).toMatchObject({
+        action: 'abandon-move',
+      });
+      // Another laptop that is attached says the pool is alive, whatever the look found: the probes go on.
+      expect(
+        assessEmployee(seen({ pool: 'down', poolAlive: true }), since(START, fingerprint), ON, START + 2 * MINUTE).next
+      ).toMatchObject({ action: 'continue-move' });
+      // A pool that is up, or could not be read, leaves the spread probes as they are.
+      for (const pool of ['up', 'unknown', 'none'] as const) {
+        const one = since(START, fingerprint, { attempts: tried('continue-move', 1, START + MINUTE) });
+        expect(assessEmployee(seen({ pool }), one, ON, START + 5 * MINUTE).next, pool).toMatchObject({
+          action: null,
+          at: START + 10 * MINUTE,
+        });
+      }
     });
 
     it('is abandoned when the thirty minutes are over if its record offers no continue to probe with', () => {
@@ -2527,5 +2581,311 @@ describe('employee supervisor: no path ends for good', () => {
         expect(until(savedLeft, left, up, rebuilds)).toBe(30 * MINUTE);
       });
     });
+  });
+});
+
+describe('employee supervisor: after a host restart', () => {
+  const HOUR = 60 * MINUTE;
+  /** A finished laptop as every one reads after the host restarted: its storage holder is not running. */
+  const restarted = (laptop: Partial<SupervisorObservation['laptop']> = {}) => {
+    const base = held('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+    return {
+      ...base,
+      laptop: {
+        ...base.laptop,
+        record: { phase: 'ready', version: 2, operationId: 'op-1' },
+        restoration: { state: 'held' as const, code: 'DOCKER_CONTINUATION_DESTINATION_STOPPED' },
+        continuation: { ...base.laptop.continuation!, phase: 'ready' },
+        poolAlive: false,
+        ...laptop,
+      },
+    };
+  };
+  const history = since(0, 'code:DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+  const assess = (laptop: Partial<SupervisorObservation['laptop']> = {}, at = 10 * MINUTE, flags = ON) =>
+    assessEmployee(restarted(laptop), history, flags, at);
+
+  it('reads a laptop whose storage holder is not running as one to rebuild, and names no approval route', () => {
+    const seen = classifyEmployee(restarted());
+    expect(seen).toMatchObject({ condition: 'held-needs-rebuild', code: 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED' });
+    expect(seen.needsHuman).toBeUndefined();
+    expect(supervisorCodeKind('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('rebuild');
+    // A held plan move that stopped on it is a laptop step: continued, then abandoned, never left for good.
+    expect(classifyMoveError('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('laptop-step');
+  });
+
+  it('asks what runs in the laptop first, then waits for the shared pool, for as long as it is down', () => {
+    expect(assess().next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
+    for (const pool of [undefined, 'down', 'unknown'] as const)
+      for (const at of [10 * MINUTE, 6 * HOUR, 72 * HOUR]) {
+        const waiting = assess({ provider: 'no-laptop', ...(pool ? { pool } : {}) }, at);
+        expect(waiting.next, `${pool} at ${at}`).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+        expect(waiting.needsHuman).toBeUndefined();
+        expect(waiting.condition).toBe('held-needs-rebuild');
+      }
+  });
+
+  it('never takes an unread laptop or an unread pool for a stopped one', () => {
+    expect(assess({ provider: 'unknown' }).next).toMatchObject({
+      action: null,
+      waitingFor: 'a confirmed read of what is running in the laptop',
+    });
+    expect(assess({ provider: 'running', pool: 'up' }).next.action).toBeNull();
+    expect(assess({ provider: 'no-laptop', pool: 'unknown' }).next.action).toBeNull();
+  });
+
+  it('reads the stored home once the pool is up, and rebuilds when it is the recorded one or cannot be compared', () => {
+    expect(assess({ provider: 'no-laptop', pool: 'up' }).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['stored-home'],
+    });
+    // Another laptop that is attached says the same as the office's own look.
+    expect(assess({ provider: 'no-laptop', poolAlive: true }).next.preconditions).toEqual(['stored-home']);
+    // Read, and nothing found against it: the step is told that it was asked for, and reads it again itself.
+    for (const storedHome of ['verified', 'unchecked'] as const)
+      expect(assess({ provider: 'no-laptop', pool: 'up', storedHome }).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['stored-home'],
+      });
+  });
+
+  it('does not rebuild onto a home that is renumbered without proof or is another directory, and goes on reading', () => {
+    const renumbered = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'renumbered' });
+    expect(renumbered.next.action).toBeNull();
+    expect(renumbered.needsHuman).toMatch(/new device number.*acceptStorageRenumbering.*docker-storage\/device-approval/);
+    expect(renumbered.needsHuman).toMatch(/reads the home again about every ten minutes and rebuilds the laptop by itself/);
+    const different = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'different' });
+    expect(different.next.action).toBeNull();
+    expect(different.needsHuman).toMatch(/not the one their laptop was built on.*will not start them on it/);
+    expect(different.needsHuman).toMatch(/rebuilds the laptop by itself/);
+    // The finding is known before anything in the laptop is read again, and a failed read is waited for.
+    expect(assess({ storedHome: 'different' }).next.action).toBeNull();
+    expect(assess({ provider: 'no-laptop', pool: 'up', storedHome: 'unknown' }).next).toMatchObject({
+      action: null,
+      waitingFor: "a read of the laptop's stored home directory",
+    });
+    // Nothing was spent: the same observation with a verified home is rebuilt at once.
+    expect(assess({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 72 * HOUR).next.action).toBe(
+      'rebuild-laptop'
+    );
+  });
+
+  it('asks for no stored home where no finished laptop is stopped', () => {
+    // A laptop that runs with no agent in it, and one whose set-up never finished.
+    expect(assess({ provider: 'absent', pool: 'up' }).next.preconditions).toEqual([]);
+    const unfinished = { phase: 'resources-issued', version: 2, operationId: 'op-1' };
+    expect(assess({ provider: 'no-laptop', pool: 'up', record: unfinished }).next.preconditions).toEqual([]);
+  });
+
+  it('starts no fresh laptop while the pool is known to be down, and as before where the office is not looking', () => {
+    const fresh = (laptop: Partial<SupervisorObservation['laptop']>) =>
+      assessEmployee(
+        observed({
+          session: { available: false, viewerHealth: 'disconnected' },
+          laptop: { record: null, restoration: undefined, source: 'stopped', poolAlive: false, ...laptop },
+        }),
+        since(0, 'source-stopped'),
+        ON,
+        10 * MINUTE
+      );
+    expect(fresh({}).next.action).toBe('start-continuation');
+    expect(fresh({ pool: 'up' }).next.action).toBe('start-continuation');
+    // No laptop record names a pool, as in an office that never finished a laptop: the set-up creates it.
+    expect(fresh({ pool: 'none' }).next.action).toBe('start-continuation');
+    expect(fresh({ pool: 'down', poolAlive: true }).next.action).toBe('start-continuation');
+    expect(fresh({ pool: 'down' }).next).toMatchObject({
+      action: null,
+      waitingFor: expect.stringMatching(/the shared pool/),
+    });
+    // A pool the office could not read holds no start: the set-up finds out, as it did before the office looked.
+    expect(fresh({ pool: 'unknown' }).next.action).toBe('start-continuation');
+  });
+
+  it('keeps its switch: with repairs off the rebuild is named and nothing is waited for on the owner\'s behalf', () => {
+    const off = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 10 * MINUTE, { ...ON, autoRepair: false });
+    expect(off.next.action).toBeNull();
+    expect(off.needsHuman).toMatch(/supervisorAutoRepair.*docker-rebuild/);
+  });
+
+  describe('the limit of rebuilds per day', () => {
+    const DAY = 24 * HOUR;
+    // Two rebuilds earlier today, both counted.
+    const capped = (at: number) => since(0, 'code:DOCKER_CONTINUATION_STORAGE_UNCONFIRMED', { rebuilds: [at - 3 * HOUR, at - HOUR] });
+    const now = 30 * HOUR;
+    const ready = { provider: 'no-laptop' as const, pool: 'up' as const, storedHome: 'verified' as const };
+
+    it('does not hold back a laptop that was stopped together with its storage holder, as after a host restart', () => {
+      const third = assessEmployee(restarted(ready), capped(now), ON, now);
+      expect(third.next).toMatchObject({ action: 'rebuild-laptop', uncounted: true, preconditions: ['stored-home'] });
+      expect(third.next.waitingFor).toBeUndefined();
+      // Before the read that says whether anything runs, the limit is not asked either: the read is.
+      expect(assessEmployee(restarted({ pool: 'up' }), capped(now), ON, now).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['no-agent-running'],
+      });
+    });
+
+    it('still holds for a laptop that stopped by itself, and for one that runs', () => {
+      // The laptop stopped and its holder still runs: the laptop did not hold.
+      const alone = { ...restarted(ready) };
+      const crashed = {
+        ...alone,
+        laptop: { ...alone.laptop, continuation: { ...alone.laptop.continuation!, code: 'DOCKER_CONTINUATION_CONTAINER_STOPPED' } },
+      };
+      const stopped = assessEmployee(crashed, { ...capped(now), fingerprint: 'code:DOCKER_CONTINUATION_CONTAINER_STOPPED' }, ON, now);
+      expect(stopped.next).toMatchObject({ action: null, at: now - 3 * HOUR + DAY });
+      expect(stopped.next.waitingFor).toMatch(/^the daily limit on rebuilds of one laptop \(2\)/);
+      // The holder is stopped but a laptop of the employee runs: a rebuild would discard it, and that is counted.
+      for (const provider of ['running', 'unknown'] as const) {
+        const occupied = assessEmployee(restarted({ ...ready, provider }), capped(now), ON, now);
+        expect(occupied.next.action, provider).toBeNull();
+        expect(occupied.next.waitingFor, provider).toMatch(/^the daily limit on rebuilds of one laptop \(2\)/);
+      }
+      // Without the limit reached, a stopped laptop whose holder runs is rebuilt and counted.
+      expect(assessEmployee(crashed, since(0, 'code:DOCKER_CONTINUATION_CONTAINER_STOPPED'), ON, now).next.uncounted).toBeUndefined();
+    });
+
+    it('is not counted against by such a rebuild, and is by every other', () => {
+      const issued = issueSupervisorAttempt(capped(now), 'rebuild-laptop', now, true);
+      expect(issued.lastAction).toEqual({ action: 'rebuild-laptop', at: now, outcome: 'issued', uncounted: true });
+      const done = settleSupervisorAttempt(issued, 'done', 'rebuilt x');
+      expect(done.rebuilds).toEqual([now - 3 * HOUR, now - HOUR]);
+      expect(done.lastAction).toMatchObject({ outcome: 'done', uncounted: true });
+      // It is still an attempt of its round.
+      expect(done.attempts['rebuild-laptop']).toEqual({ count: 1, lastAt: now });
+      const counted = settleSupervisorAttempt(issueSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'rebuild-laptop', now), 'done');
+      expect(counted.rebuilds).toEqual([now]);
+      // The mark belongs to a rebuild alone.
+      expect(issueSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'resend-continuation', now, true).lastAction).toEqual({
+        action: 'resend-continuation',
+        at: now,
+        outcome: 'issued',
+      });
+    });
+
+    it('lets three host restarts in one day bring the employee back each time', () => {
+      let history = since(0, 'code:DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+      for (const at of [1 * HOUR, 5 * HOUR, 9 * HOUR, 13 * HOUR]) {
+        // A new episode each time: the employee had been healthy in between.
+        history = { ...history, attempts: {}, since: at - 4 * MINUTE };
+        const step = assessEmployee(restarted(ready), history, ON, at);
+        expect(step.next, String(at)).toMatchObject({ action: 'rebuild-laptop', uncounted: true });
+        history = settleSupervisorAttempt(issueSupervisorAttempt(history, 'rebuild-laptop', at, step.next.uncounted), 'done');
+      }
+      expect(history.rebuilds).toEqual([]);
+    });
+  });
+
+  describe('the rules the other repairs brought', () => {
+    const stalled = (laptop: Partial<SupervisorObservation['laptop']>) => {
+      const base = restarted({ continuation: { state: 'pending', phase: 'resources-issued', allowedActions: ['observe'] }, ...laptop });
+      const history = { ...since(0, ''), transitSince: 0, transitOf: 'starting' };
+      return assessEmployee({ ...base, laptop: { ...base.laptop, record: { phase: 'resources-issued', version: 2, operationId: 'op-1' } } }, history, ON, 20 * MINUTE);
+    };
+
+    it('does not rebuild a laptop that has been starting for fifteen minutes before the pool is back', () => {
+      expect(classifyEmployee(restarted({ continuation: { state: 'pending', phase: 'resources-issued', allowedActions: ['observe'] } })).condition).toBe('starting');
+      expect(stalled({}).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
+      for (const pool of ['down', 'unknown'] as const)
+        expect(stalled({ provider: 'no-laptop', pool }).next, pool).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+      expect(stalled({ provider: 'no-laptop', pool: 'up' }).next.action).toBe('rebuild-laptop');
+    });
+
+    it('does not rebuild for a code it does not recognize before the pool is back, however long the code stood', () => {
+      const odd = (laptop: Partial<SupervisorObservation['laptop']>, at: number) => {
+        const base = restarted(laptop);
+        const seen = { ...base, laptop: { ...base.laptop, continuation: { ...base.laptop.continuation!, code: 'DOCKER_SOMETHING_NEW' } } };
+        return assessEmployee(seen, since(0, 'code:DOCKER_SOMETHING_NEW'), ON, at);
+      };
+      expect(odd({ provider: 'no-laptop', pool: 'down' }, 10 * MINUTE).next.waitingFor).toMatch(/the code to clear by itself/);
+      for (const at of [31 * MINUTE, 5 * HOUR])
+        expect(odd({ provider: 'no-laptop', pool: 'down' }, at).next).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+      expect(odd({ provider: 'no-laptop', pool: 'up', storedHome: 'verified' }, 31 * MINUTE).next.action).toBe('rebuild-laptop');
+    });
+
+    it('sends no set-up request again while the pool is known to be down, and spends no attempt on it', () => {
+      const offered = (laptop: Partial<SupervisorObservation['laptop']>) => {
+        const base = restarted(laptop);
+        return assessEmployee(
+          { ...base, laptop: { ...base.laptop, continuation: { ...base.laptop.continuation!, allowedActions: ['observe', 'continue'] } } },
+          history,
+          ON,
+          10 * MINUTE
+        );
+      };
+      expect(offered({ pool: 'down' }).next).toMatchObject({
+        action: null,
+        waitingFor: 'the shared pool, which the office is recovering after a host restart',
+      });
+      for (const pool of ['up', 'unknown', 'none'] as const) expect(offered({ pool }).next.action, pool).toBe('resend-continuation');
+      // Another laptop that is attached says the pool is alive, whatever an earlier look found.
+      expect(offered({ pool: 'down', poolAlive: true }).next.action).toBe('resend-continuation');
+    });
+
+    it('reads the stored home for a stopped laptop on the paths of a held terminal input and of a parked screen', () => {
+      const held = observed({
+        session: { available: true, viewerHealth: 'connected', runtimeHealth: 'unknown', inputHeld: true, turn: 'unknown' },
+        laptop: {
+          restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' },
+          continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] },
+          provider: 'no-laptop',
+          poolAlive: true,
+        },
+      });
+      const refused = since(0, 'code:DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED', {
+        attempts: { 'reconnect-viewer': { count: 1, lastAt: MINUTE } },
+        lastAction: { action: 'reconnect-viewer', at: MINUTE, outcome: 'refused' },
+      });
+      expect(assessEmployee(held, refused, ON, 10 * MINUTE).next).toMatchObject({
+        action: 'rebuild-laptop',
+        preconditions: ['stored-home'],
+      });
+      const different = { ...held, laptop: { ...held.laptop, storedHome: 'different' as const } };
+      const stopped = assessEmployee(different, refused, ON, 10 * MINUTE);
+      expect(stopped.next.action).toBeNull();
+      expect(stopped.needsHuman).toMatch(/not the one their laptop was built on/);
+    });
+
+    it('neither continues nor closes a held plan move while the pool is known to be down, and does both once it is back', () => {
+      const moving = (laptop: Partial<SupervisorObservation['laptop']>, at: number, patch: Partial<SupervisorHistory> = {}) => {
+        const base = move('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED');
+        const seen = { ...base, laptop: { ...base.laptop, poolAlive: false, ...laptop } };
+        return assessEmployee(seen, since(0, classifyEmployee(seen).fingerprint, patch), ON, at);
+      };
+      // The holder of a laptop does not come back by continuing, so this is a step of the move and not a wait for
+      // something every laptop shares.
+      expect(classifyMoveError('DOCKER_CONTINUATION_STORAGE_UNCONFIRMED')).toBe('laptop-step');
+      for (const at of [5 * MINUTE, 40 * MINUTE, 3 * HOUR]) {
+        const waiting = moving({ pool: 'down' }, at);
+        expect(waiting.next, String(at)).toMatchObject({
+          action: null,
+          waitingFor: 'the shared pool, which the office is recovering after a host restart',
+        });
+        expect(waiting.needsHuman).toBeUndefined();
+        // With every continue used as well, it is still not closed before the pool is back.
+        const used = { attempts: tried('continue-move', 3, 2 * MINUTE) };
+        expect(moving({ pool: 'down' }, at + 30 * MINUTE, used).next.action, String(at)).toBeNull();
+      }
+      // The pool is back after hours: the move is continued first, and closed only after that.
+      expect(moving({ pool: 'up' }, 3 * HOUR).next).toMatchObject({ action: 'continue-move' });
+      const afterContinues = { attempts: tried('continue-move', 3, 3 * HOUR) };
+      expect(moving({ pool: 'up' }, 3 * HOUR + 10 * MINUTE, afterContinues).next).toMatchObject({ action: 'abandon-move' });
+      // A pool that could not be read holds no move.
+      expect(moving({ pool: 'unknown' }, 5 * MINUTE).next.action).toBe('continue-move');
+    });
+  });
+
+  it('says that the office keeps putting the shared pool\'s limits back where a rebuild would not help', () => {
+    const pool = held('DOCKER_CONTINUATION_POOL_UNCONFIRMED');
+    expect(classifyEmployee(pool).needsHuman).toMatch(/The office puts the approved limits of the shared pool back itself/);
   });
 });

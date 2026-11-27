@@ -256,6 +256,9 @@ export type SupervisorTurn = 'working' | 'idle' | 'unknown';
  * - `agent-parked-at-screen`: the office terminal still shows the agent on a provider start-up screen, proved by
  *   more than the screen's words, and its pane still shows no turn in progress. An agent there never reached its
  *   composer, so a relaunch or a rebuild discards no conversation.
+ * - `stored-home`: nothing runs in the laptop, and a read of its stored HOME and Nix directories
+ *   (`laptop.storedHome`) found nothing against them. A new laptop is bound to the same paths, so the step is not
+ *   taken while they no longer hold the recorded directories. It allows no discard of anything that runs.
  *
  * `terminal-input-held`, `agent-between-turns`, `agent-unreadable` and `agent-parked-at-screen` are the only
  * reasons for which a rebuild may discard a laptop its agent runs in.
@@ -266,7 +269,8 @@ export type SupervisorPrecondition =
   | 'agent-between-turns'
   | 'agent-unreadable'
   | 'laptop-held'
-  | 'agent-parked-at-screen';
+  | 'agent-parked-at-screen'
+  | 'stored-home';
 
 /** The proofs that allow a rebuild to discard the one recorded laptop while an agent may run in it. */
 export const SUPERVISOR_OCCUPIED_PROOFS: readonly SupervisorPrecondition[] = [
@@ -275,6 +279,15 @@ export const SUPERVISOR_OCCUPIED_PROOFS: readonly SupervisorPrecondition[] = [
   'agent-unreadable',
   'agent-parked-at-screen',
 ];
+
+/**
+ * The stored HOME and Nix directories of a finished laptop that is stopped, compared with what its storage holder
+ * recorded. `verified`: the same directories (under a new device number only when the office could prove or was
+ * granted that). `unchecked`: there is no stopped, finished laptop to compare, or this office has no verifier.
+ * `renumbered`: unchanged directories on a device number that nothing accepts. `different`: other directories.
+ * `unknown`: the read failed.
+ */
+export type SupervisorStoredHome = 'verified' | 'unchecked' | 'renumbered' | 'different' | 'unknown';
 
 /** Everything the office can read about one employee, already reduced to plain values. */
 export interface SupervisorObservation {
@@ -358,6 +371,15 @@ export interface SupervisorObservation {
     readonly standing?: { readonly enabled: boolean; readonly limits: boolean; readonly layout: boolean };
     /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
     readonly poolAlive?: boolean;
+    /**
+     * What the office's own look at the shared pool last found, while no laptop is attached: `up` (its anchor runs
+     * and no recovery is open), `down` (the anchor is stopped, as after a host restart, or a recovery is open) or
+     * `unknown`. `none`: no laptop record names a pool, so there is none to recover and a laptop set-up creates it.
+     * Absent while the office is not looking.
+     */
+    readonly pool?: 'up' | 'down' | 'unknown' | 'none';
+    /** A fresh read of the stopped laptop's stored directories. Only made before a rebuild is decided. */
+    readonly storedHome?: SupervisorStoredHome;
     /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
     readonly rebuildPending?: boolean;
   };
@@ -516,6 +538,8 @@ export interface SupervisorHistory {
     readonly at: number;
     readonly outcome: SupervisorOutcome;
     readonly detail?: string;
+    /** A rebuild of a laptop that was stopped from outside: it is not added to `rebuilds` when it is done. */
+    readonly uncounted?: true;
   };
 }
 
@@ -553,6 +577,11 @@ export interface SupervisorNextStep {
   readonly waitingFor?: string;
   /** What the driver must re-prove immediately before running the action. */
   readonly preconditions: readonly SupervisorPrecondition[];
+  /**
+   * The rebuild replaces a laptop that was stopped from outside together with its storage holder, as after a host
+   * restart. It is not counted against the limit of rebuilds per day (`issueSupervisorAttempt`).
+   */
+  readonly uncounted?: true;
 }
 
 export interface SupervisorAssessment {
@@ -572,8 +601,9 @@ export interface SupervisorAssessment {
  * - `wait`: a read that raced or an operation still running; observe again.
  * - `retry`: the same request sent again is the documented next step; a rebuild follows if that never helps.
  * - `rebuild`: the operation cannot advance; a fresh laptop is the reset.
- * - `stopped`: the laptop container is not running. One stopped laptop is rebuilt; when no other laptop of the box
- *   is running either, the host most likely restarted and the shared pool has to be recovered first.
+ * - `stopped`: the laptop container is not running. A stopped laptop is rebuilt. When no other laptop of the box
+ *   is running either, the host most likely restarted: the office recovers the shared pool first, by itself, and
+ *   the rebuild waits for that (`rebuildGate`).
  * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop.
  * - `provider`: the laptop runs but no agent of this employee is confirmed in it.
  * - `viewer`: the agent may be fine; the office terminal is not attached.
@@ -695,7 +725,12 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     'retry-owner',
     'Nothing on record confirms the limits of the shared resource pool.',
   ],
-  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED: ['retry-owner', "{name}'s home storage could not be verified."],
+  // The small container that holds the laptop's home and Nix directories open is not running, as after a host
+  // restart, and nothing starts it again. A fresh laptop gets a new one.
+  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED: [
+    'rebuild',
+    "The container that holds {name}'s home storage for their laptop is not running, so the laptop cannot be confirmed.",
+  ],
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE: [
     'retry-owner',
     'The office is configured with a limits helper image that the container engine does not have.',
@@ -723,9 +758,15 @@ const SHARED_POOL_CODES: ReadonlySet<string> = new Set([
 const RESENDABLE: readonly string[] = ['continue', 'retry', 'repair', 'repair-pool'];
 /** Codes that say a fresh laptop is the reset. A re-send refused with one of them has nothing left to re-send. */
 const FRESH_LAPTOP_KINDS: readonly (SupervisorCodeKind | undefined)[] = ['rebuild', 'stopped'];
+export function sharedPoolCode(code: string | undefined): boolean {
+  return code !== undefined && SHARED_POOL_CODES.has(code);
+}
 const REPAIR_POOL_BY_HAND =
-  'Put the approved limits of the shared pool back: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
+  'The office puts the approved limits of the shared pool back itself and tries again about every ten minutes. ' +
+  'The same by hand: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
   '(or …/docker-pool/reconcile when the status offers that instead). No laptop is stopped.';
+/** Shown while a rebuild or a start waits for the pool that the office is recovering after a host restart. */
+const POOL_WAIT = 'the shared pool, which the office is recovering after a host restart';
 /** A refused local-model launch check: its code carries the reason after this prefix and its message says the rest. */
 const LOCAL_MODEL_PREFIX = 'DOCKER_CONTINUATION_LOCAL_MODEL_';
 
@@ -734,8 +775,6 @@ const OWNER_STEPS: Readonly<Record<string, string>> = {
     'Approve the resource limits: PUT /api/company/employees/:id/docker-policy, then continue the laptop.',
   DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: REPAIR_POOL_BY_HAND,
   DOCKER_CONTINUATION_POOL_UNCONFIRMED: REPAIR_POOL_BY_HAND,
-  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED:
-    'After a host restart, approve the storage device change: POST …/docker-storage/device-approval.',
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE:
     'Load the configured helper image or correct the office setting, then continue the laptop.',
 };
@@ -801,18 +840,26 @@ const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking
  * How long a held move is kept for a cause that lies outside the move, before it is abandoned like any other.
  *
  * Two causes are outside: an operation that only has to finish (`wait`), and something every laptop shares
- * (`owner`: the pool, the storage, the office's own configuration). Continuing such a move again finds the same
+ * (`owner`: the pool's limits, the office's own configuration). Continuing such a move again finds the same
  * thing, and the office repairs each of them by another path, so the move is given thirty minutes from the moment
- * the problem was first seen. That covers the recovery of the shared pool after a host restart. After it the move
- * is abandoned: the employee is not kept out of work for a move that cannot finish.
+ * the problem was first seen. That covers the repair of the pool's limits. After it the move is abandoned: the
+ * employee is not kept out of work for a move that cannot finish.
  *
  * Only a continue can tell whether such a cause is gone: the laptop of an employee who is being moved is not read,
- * and nothing else the office observes says that the pool's limits are confirmed again. So the three continues of
- * a round are spread as probes over that time instead of being spent in its first minutes: one at once, one not
- * before `outsideProbeMs`, and the last not before the thirty minutes are over. The move is abandoned only after
- * that last probe has found the cause still there. A move is therefore never abandoned because all its probes fell
- * inside an outage that then ended. For as long as the cause is outside the move it is one problem, whichever code
- * names it at the moment, so a second code of the same outage does not start the thirty minutes again.
+ * and the office's look at the pool says whether its anchor runs, not whether its limits are confirmed again. So
+ * the three continues of a round are spread as probes over that time instead of being spent in its first minutes:
+ * one at once, one not before `outsideProbeMs`, and the last not before the thirty minutes are over. The move is
+ * abandoned only after that last probe has found the cause still there. A move is therefore never abandoned
+ * because all its probes fell inside an outage that then ended. For as long as the cause is outside the move it is
+ * one problem, whichever code names it at the moment, so a second code of the same outage does not start the
+ * thirty minutes again.
+ *
+ * A host restart is not one of these and is not given a time, because there the office does see the cause. While
+ * its own look finds the pool down (`poolDown`), a move is neither continued nor closed, whatever its error and
+ * for as long as that lasts: see `abandonMoveGate`. No probe is spent against a pool that is known to be down;
+ * the probes above are for the causes that look does not show. A move that stopped because a laptop's storage
+ * holder is not running (`DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`) is a step of the move itself: nothing starts
+ * a holder again, so no other repair would let that move go on.
  *
  * A move that stopped at the sign-in screen of its new session is NOT such a cause, whatever the office reports
  * about the plan. That screen is only reached after the move has launched the agent in the candidate laptop, and
@@ -917,6 +964,9 @@ function continueMoveGate(
 ): Gate {
   const move = observed.move;
   if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
+  // A move cannot go on while the anchor of the pool is stopped: its laptops are stopped with it. No continue is
+  // spent against that, and the wait has no end of its own (see `abandonMoveGate`).
+  if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
   const outside = moveCauseOutside(observed);
   if (!outside || history.since <= 0) return { kind: 'ok' };
   const at = outsideProbeAt(history, policy);
@@ -952,7 +1002,13 @@ function abandonMoveGate(
 ): Gate {
   const move = observed.move;
   if (!move) return { kind: 'skip' };
-  const outside = move.docker ? moveCauseOutside(observed) : undefined;
+  if (!move.docker) return { kind: 'ok' };
+  // While the office's own look says the pool is down, as after a host restart, a move is not closed: nothing was
+  // tried for it with a pool that works, and closing it would not bring the employee back any sooner, because no
+  // laptop can be rebuilt or started either. Once the pool is back the move is continued as often as any other,
+  // and closed after that if it is still held.
+  if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+  const outside = moveCauseOutside(observed);
   if (!outside) return { kind: 'ok' };
   if (!moveCauseOverdue(history, now)) return outsideCauseWait(outside, history);
   if (!move.allowedActions.includes('continue-original') || probedAfterWait(history)) return { kind: 'ok' };
@@ -1016,14 +1072,14 @@ function classifyCode(
       { code, fingerprint }
     );
   if (kind === 'owner') return classifyOwnerCode(code, sentence);
-  if (kind === 'stopped' && observed.laptop.poolAlive !== true)
-    return classified('needs-owner', `${sentence} No other laptop of this office is running either.`, {
-      code,
-      fingerprint,
-      needsHuman:
-        'After a host restart, recover the shared pool first: GET …/docker-pool/cold-preview, then POST ' +
-        '…/docker-pool/cold-recover. Then rebuild this laptop.',
-    });
+  // What a host restart looks like. Nobody is asked for anything: the office recovers the shared pool itself and
+  // the rebuild rung waits for it.
+  if (kind === 'stopped' && !poolUsable(observed))
+    return classified(
+      'held-needs-rebuild',
+      `${sentence} No other laptop of this office is running either, so the office recovers the shared pool first.`,
+      { code, fingerprint }
+    );
   if (kind === 'retry-owner') {
     const offered = observed.laptop.continuation?.allowedActions.some((action) => RESENDABLE.includes(action));
     return offered
@@ -1232,7 +1288,12 @@ export const SUPERVISOR_STALLED_PATH: readonly SupervisorAction[] = ['resend-con
 const DAY = 24 * 60 * MINUTE;
 
 type Gate =
-  | { readonly kind: 'ok'; readonly preconditions?: readonly SupervisorPrecondition[] }
+  /** `uncounted`: the rebuild this allows is not counted against the limit per day; see `stoppedFromOutside`. */
+  | {
+      readonly kind: 'ok';
+      readonly preconditions?: readonly SupervisorPrecondition[];
+      readonly uncounted?: boolean;
+    }
   | { readonly kind: 'skip' }
   /** `at`: when the wait ends by itself, where that is known. */
   | { readonly kind: 'wait'; readonly waitingFor: string; readonly at?: number }
@@ -1276,16 +1337,19 @@ function layoutGate(observed: SupervisorObservation, byHand: string): Gate | und
 /**
  * The two limits every automatic rebuild keeps, whatever its reason. Undefined when both allow one. The limit per
  * day is a pause and not an end: it says when the next rebuild may run, and the ladder goes on from there.
+ *
+ * `daily: false` leaves the limit per day out. It is for one rebuild only: see `stoppedFromOutside`.
  */
 function rebuildLimit(
   observed: SupervisorObservation,
   history: SupervisorHistory,
   now: number,
   policy: SupervisorPolicy,
-  byHand: string
+  byHand: string,
+  daily = true
 ): Gate | undefined {
   const layout = layoutGate(observed, byHand);
-  if (layout) return layout;
+  if (layout || !daily) return layout;
   const today = history.rebuilds.filter((at) => now - at < DAY);
   if (today.length < policy.rebuildsPerDay) return undefined;
   const at = today[today.length - policy.rebuildsPerDay]! + DAY;
@@ -1494,7 +1558,10 @@ function rebuildGate(
   policy: SupervisorPolicy,
   base?: Pick<SupervisorClassification, 'code' | 'fingerprint'>
 ): Gate {
-  const limit = rebuildLimit(observed, history, now, policy, REBUILD_BY_HAND);
+  // The limit per day is not asked of a laptop that may have been stopped from outside until the read that says
+  // whether anything of this employee runs has been made: with a laptop running, it holds as for any other.
+  const outside = holderStopped(observed) && (observed.laptop.provider ?? 'no-laptop') === 'no-laptop';
+  const limit = rebuildLimit(observed, history, now, policy, REBUILD_BY_HAND, !outside);
   if (limit) return limit;
   const watched = watchedSince(history),
     settles = watched + policy.unrecognizedAfterMs;
@@ -1510,16 +1577,88 @@ function rebuildGate(
   if (provider === 'running' || provider === 'unknown')
     return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', ...laptopHeld(observed)]);
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
-  // looks like, and then the shared pool has to be recovered before any laptop is built.
-  if (provider === 'no-laptop' && observed.laptop.poolAlive === false)
-    return {
-      kind: 'human',
-      needsHuman:
-        'No laptop of this office is running. After a host restart, recover the shared pool first: GET ' +
-        '…/docker-pool/cold-preview, then POST …/docker-pool/cold-recover. ' +
-        REBUILD_BY_HAND,
-    };
-  return { kind: 'ok', preconditions: provider === undefined ? ['no-agent-running'] : [] };
+  // looks like. The office recovers the shared pool itself, and no laptop is rebuilt before that: a rebuild
+  // retires the laptop record the recovery reads, and a fresh laptop could not be set up without the pool.
+  if (provider === 'no-laptop' && observed.laptop.poolAlive === false && !poolUsable(observed))
+    return { kind: 'wait', waitingFor: POOL_WAIT };
+  // A finding that stops the rebuild is known without asking again what runs in the laptop.
+  const stored = observed.laptop.storedHome;
+  if (stored !== undefined && storedHomeGate(stored).kind !== 'ok') return storedHomeGate(stored);
+  if (provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
+  // Only a finished laptop that is stopped has a stored home to compare with what its holder recorded.
+  const finished = ['ready', 'provider-issued'].includes(observed.laptop.record?.phase ?? '');
+  const allowed: Gate = provider === 'no-laptop' && finished ? storedHomeGate(stored) : { kind: 'ok' };
+  return allowed.kind === 'ok' && stoppedFromOutside(observed) ? { ...allowed, uncounted: true } : allowed;
+}
+
+const STORAGE_UNCONFIRMED = 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED';
+
+/** The laptop's own read says the container that holds its home and Nix directories open is not running. */
+function holderStopped(observed: SupervisorObservation): boolean {
+  const seen = observed.laptop.continuation;
+  return seen?.state === 'held' && seen.code === STORAGE_UNCONFIRMED;
+}
+
+/**
+ * A laptop that was stopped from outside: a fresh read finds no laptop of this employee running, and the laptop's
+ * storage holder is stopped as well. A holder runs nothing of the employee's and never stops with its laptop: a
+ * laptop that crashes, is killed for memory or is stopped by hand leaves its holder running. Both are down
+ * together after the host or the container engine restarted.
+ *
+ * Rebuilding such a laptop discards nothing that runs and says nothing about whether an earlier rebuild held: the
+ * laptop did hold, and the host went down. So it is neither held back by the limit of rebuilds per day nor
+ * counted against it (`uncounted`). Without this, a third host restart within a day would keep every employee out
+ * of the office until the first of that day's rebuilds was a day old. Everything else a rebuild needs still
+ * holds: the layout, the pool, the stored home, the attempts of a round and the switch for repairs.
+ */
+function stoppedFromOutside(observed: SupervisorObservation): boolean {
+  return observed.laptop.provider === 'no-laptop' && holderStopped(observed);
+}
+
+const STORED_HOME_RENUMBERED =
+  "The filesystem this employee's home is on has a new device number since their laptop was built, and the office " +
+  'holds no earlier record of that filesystem to prove it is the same one. It reads the home again about every ' +
+  'ten minutes and rebuilds the laptop by itself once this is settled. To settle it, either set the company ' +
+  'setting acceptStorageRenumbering (PUT /api/company/settings), which accepts a new device number while both ' +
+  'recorded directories are otherwise unchanged, or approve this one laptop: POST ' +
+  '/api/company/employees/:id/docker-storage/device-approval.';
+const STORED_HOME_DIFFERENT =
+  "The directory at this employee's home path is not the one their laptop was built on (another inode, owner or " +
+  'mode), which is what a different or missing disk at that path looks like. The office will not start them on ' +
+  'it. Once the right filesystem is mounted, the office finds the recorded directory at its next read, about ' +
+  'every ten minutes, and rebuilds the laptop by itself. To accept the directory that is there now instead: ' +
+  REBUILD_BY_HAND;
+
+/**
+ * A rebuilt laptop is bound to the home path of the laptop it replaces. Before a stopped laptop is rebuilt, the
+ * office reads whether that path still holds the recorded directory. Only a positive finding stops the rebuild,
+ * and it is read again later: nothing here is final.
+ *
+ * This gate is asked for the laptop a fresh read found stopped. A rebuild that reaches a stopped laptop by another
+ * way (a laptop the office could not read for hours is rebuilt as one an agent may run in) meets the same read in
+ * the step itself (`DockerSupervisorLaptops.rebuild`), which makes it for every stopped, finished laptop.
+ */
+function storedHomeGate(stored: SupervisorStoredHome | undefined): Gate {
+  if (stored === 'renumbered') return { kind: 'human', needsHuman: STORED_HOME_RENUMBERED };
+  if (stored === 'different') return { kind: 'human', needsHuman: STORED_HOME_DIFFERENT };
+  if (stored === 'unknown') return { kind: 'wait', waitingFor: "a read of the laptop's stored home directory" };
+  // Not read yet, or read and nothing found against it: the driver reads it where it has not, and the step is
+  // told that it was asked for and reads it once more itself.
+  return { kind: 'ok', preconditions: ['stored-home'] };
+}
+
+/**
+ * The office's own look found the pool's anchor stopped, or a recovery of it open, and no other laptop of the box
+ * is attached. A pool it could not read is not known to be down.
+ */
+function poolDown(observed: SupervisorObservation): boolean {
+  return observed.laptop.pool === 'down' && observed.laptop.poolAlive !== true;
+}
+
+/** Another laptop of the box is attached, or the office's own look found the pool's anchor running, or found
+ * that no laptop record names a pool at all, so that there is nothing to wait for. */
+function poolUsable(observed: SupervisorObservation): boolean {
+  return observed.laptop.poolAlive === true || observed.laptop.pool === 'up' || observed.laptop.pool === 'none';
 }
 
 /**
@@ -1579,12 +1718,15 @@ function gate(
     case 'resend-continuation': {
       // Offered by the operation itself, and never for a plan move's private record.
       const offered = seen?.allowedActions.filter((name) => RESENDABLE.includes(name)) ?? [];
-      return observed.laptop.record &&
-        observed.laptop.record.version !== 3 &&
-        offered.length &&
-        !resendAnswered(offered, seen?.code, history)
-        ? { kind: 'ok' }
-        : { kind: 'skip' };
+      if (
+        !observed.laptop.record ||
+        observed.laptop.record.version === 3 ||
+        !offered.length ||
+        resendAnswered(offered, seen?.code, history)
+      )
+        return { kind: 'skip' };
+      // No step of a set-up and no repair in place gets past a stopped anchor, so none is spent against one.
+      return poolDown(observed) ? { kind: 'wait', waitingFor: POOL_WAIT } : { kind: 'ok' };
     }
     case 'apply-standing-limits': {
       // The owner's standing default is the most restrictive limits approved for the other employees
@@ -1602,6 +1744,9 @@ function gate(
       };
     }
     case 'start-continuation':
+      // A fresh laptop cannot be set up while the pool's anchor is stopped or a recovery of it is open. Only a
+      // look that found exactly that holds the start: a pool the office could not read is tried, as it always was.
+      if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
@@ -1633,7 +1778,8 @@ function gate(
     case 'abandon-move':
       return abandonMoveGate(observed, history, now, policy);
     case 'rebuild-laptop':
-      // A new laptop would join the same pool and be held by the same thing.
+      // A new laptop would join the same pool and be held by the same thing. The office goes on putting the
+      // pool's limits back in place (see `EmployeeSupervisor`); the sentence is shown while it does.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };
       if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return heldInput
@@ -1793,7 +1939,11 @@ export function assessEmployee(
     if (observed.busy) return result(idle(BUSY[observed.busy]), action, placing(action));
     if (allowed.kind === 'wait') return result(idle(allowed.waitingFor, allowed.at), action);
     const at = Math.max(clock.since + rung.dwellMs, tried.count ? tried.lastAt + backoff(rung, tried.count) : 0);
-    return result({ action, at, preconditions: allowed.preconditions ?? [] }, action, placing(action));
+    return result(
+      { action, at, preconditions: allowed.preconditions ?? [], ...(allowed.uncounted ? { uncounted: true } : {}) },
+      action,
+      placing(action)
+    );
   }
   // Every rung is used or does not apply. The ladder does not end here: it starts again, and says when.
   const again = ladderRestartAt(history, policy);
@@ -1907,13 +2057,20 @@ export function resumeSupervisorHistory(history: SupervisorHistory): SupervisorH
 export function issueSupervisorAttempt(
   history: SupervisorHistory,
   action: SupervisorAction,
-  at: number
+  at: number,
+  /** `SupervisorNextStep.uncounted` of the step that is issued. */
+  uncounted = false
 ): SupervisorHistory {
   const before = history.attempts[action]?.count ?? 0;
   return {
     ...history,
     attempts: { ...history.attempts, [action]: { count: before + 1, lastAt: at } },
-    lastAction: { action, at, outcome: 'issued' },
+    lastAction: {
+      action,
+      at,
+      outcome: 'issued',
+      ...(uncounted && action === 'rebuild-laptop' ? { uncounted: true as const } : {}),
+    },
   };
 }
 
@@ -1933,10 +2090,16 @@ export function settleSupervisorAttempt(
         ? { ...history.attempts, [last.action]: { count: Math.max(0, spent.count - 1), lastAt: spent.lastAt } }
         : history.attempts,
     rebuilds:
-      last.action === 'rebuild-laptop' && outcome === 'done'
+      last.action === 'rebuild-laptop' && outcome === 'done' && !last.uncounted
         ? [...history.rebuilds, last.at].slice(-8)
         : history.rebuilds,
-    lastAction: { action: last.action, at: last.at, outcome, ...(detail ? { detail: clip(detail, 300) } : {}) },
+    lastAction: {
+      action: last.action,
+      at: last.at,
+      outcome,
+      ...(detail ? { detail: clip(detail, 300) } : {}),
+      ...(last.uncounted ? { uncounted: true as const } : {}),
+    },
   };
 }
 
