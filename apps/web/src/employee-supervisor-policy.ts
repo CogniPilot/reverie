@@ -352,6 +352,8 @@ export type SupervisorStoredHomeCause =
   | 'verifier-refused'
   | 'absent-no-record-no-grant'
   | 'absent-record-unreadable'
+  | 'grant-withdrawn'
+  | 'absent-grant-withdrawn'
   | 'verifier-image-missing'
   | 'verifier-lacks-command'
   | 'verifier-timed-out'
@@ -2228,9 +2230,26 @@ const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
     'The office holds no record of its own of the filesystem their home is on, so nothing proves that the ' +
     'directory at the recorded path is their home, and the company setting acceptStorageRenumbering is off, so the ' +
     'laptop is not rebuilt onto it. Set acceptStorageRenumbering to true (PUT /api/company/settings) and the ' +
-    "office rebuilds the laptop at its next read, within ten minutes, when the directory belongs to the laptop's " +
-    'user. Or rebuild this one laptop onto the directory that is there: ' +
+    'office rebuilds the laptop at its next read, within ten minutes, when what is at the two paths is what the ' +
+    'laptop ran with: the home and the Nix directory real directories on one ext4 filesystem, and the home owned ' +
+    "by the laptop's user and group. Or rebuild this one laptop onto the directory that is there: " +
     REBUILD_BY_HAND,
+  'absent-grant-withdrawn':
+    STORED_HOME_ABSENT_FACT +
+    'The office holds no record of its own of the filesystem their home is on. It accepted this home earlier under ' +
+    "the company setting acceptStorageRenumbering, and that acceptance is the setting's word, not a proof; the " +
+    'setting is off now, so the laptop is not rebuilt onto it. Set acceptStorageRenumbering to true again (PUT ' +
+    '/api/company/settings) and the office rebuilds the laptop at its next read, within ten minutes. Or rebuild ' +
+    'this one laptop onto the directory that is there: ' +
+    REBUILD_BY_HAND,
+  'grant-withdrawn':
+    STORED_HOME_RENUMBERED_FACT +
+    'The office holds no record of its own of that filesystem. It accepted these directories earlier under the ' +
+    "company setting acceptStorageRenumbering, and that acceptance is the setting's word, not a proof; the setting " +
+    'is off now, so the laptop is not rebuilt onto it. Set acceptStorageRenumbering to true again (PUT ' +
+    '/api/company/settings) and the office rebuilds the laptop at its next read, within ten minutes; or ' +
+    APPROVE_ONE_LAPTOP +
+    '.',
   'absent-record-unreadable':
     STORED_HOME_ABSENT_FACT +
     "The office's record of employee storage (docker-storage-identity.jsonl in the office data directory) holds a " +

@@ -358,7 +358,9 @@ export type DockerRenumberedReason =
   | 'record-unreadable'
   | 'verifier-refused'
   | 'absent-no-record-no-grant'
-  | 'absent-record-unreadable';
+  | 'absent-record-unreadable'
+  | 'grant-withdrawn'
+  | 'absent-grant-withdrawn';
 
 /** Where a rebuild of a laptop would bind its HOME and Nix directories from, and the user it would run as. */
 export interface DockerStoredHomeLayout {
@@ -913,6 +915,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         failed = helper.failures(row);
       if (verdict === 'different') return { state: 'different' };
       if (verdict === 'renumbered') return { state: 'renumbered', reason: 'no-record-no-grant' };
+      if (verdict === 'renumbered-grant-withdrawn') return { state: 'renumbered', reason: 'grant-withdrawn' };
       if (verdict === 'renumbered-stale-record') return { state: 'renumbered', reason: 'record-names-other-directories' };
       if (verdict === 'renumbered-unverifiable') return { state: 'renumbered', reason: 'not-one-ext4-filesystem' };
       if (verdict === 'renumbered-record-unreadable') return { state: 'renumbered', reason: 'record-unreadable' };
@@ -991,6 +994,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (found === 'proved' || found === 'granted') return { state: 'verified' };
     if (found === 'different') return { state: 'different' };
     if (found === 'no-record') return { state: 'renumbered', reason: 'absent-no-record-no-grant' };
+    if (found === 'grant-withdrawn') return { state: 'renumbered', reason: 'absent-grant-withdrawn' };
     if (found === 'record-unreadable') return { state: 'renumbered', reason: 'absent-record-unreadable' };
     return { state: 'unconfirmed', cause: VERIFIER_CAUSES[helper.failures(row).observe ?? 'failed'] };
   }

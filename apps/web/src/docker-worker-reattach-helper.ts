@@ -75,9 +75,11 @@ export type DockerStoredHomeVerdict =
   | 'renumbered-stale-record'
   | 'renumbered-unverifiable'
   | 'renumbered-record-unreadable'
+  | 'renumbered-grant-withdrawn'
   | 'absent-proved'
   | 'absent-granted'
   | 'absent-no-record'
+  | 'absent-grant-withdrawn'
   | 'absent-record-unreadable'
   | 'different'
   | 'unobserved';
@@ -147,6 +149,7 @@ const ABSENT_VERDICTS = {
   granted: 'absent-granted',
   different: 'different',
   'no-record': 'absent-no-record',
+  'grant-withdrawn': 'absent-grant-withdrawn',
 } as const;
 
 /**
@@ -313,7 +316,16 @@ export class DockerWorkerReattachHelper {
       single && (!recorded || (!independent && sameDirectories)) && this.renumbering?.granted(row.owner) === true;
     if (!proved && !granted) {
       const stale = independent || (!!recorded && !sameDirectories);
-      this.#decided(row, !single ? 'renumbered-unverifiable' : stale ? 'renumbered-stale-record' : 'renumbered');
+      this.#decided(
+        row,
+        !single
+          ? 'renumbered-unverifiable'
+          : stale
+            ? 'renumbered-stale-record'
+            : recorded
+              ? 'renumbered-grant-withdrawn'
+              : 'renumbered'
+      );
       return { observation: historical };
     }
     this.#decided(row, proved ? 'renumbered-proved' : 'renumbered-granted');
@@ -344,7 +356,7 @@ export class DockerWorkerReattachHelper {
     row: DockerEmployeeContinuationRecord,
     layout: Readonly<{ home: string; nix: string; user: string }>,
     current: () => void
-  ): Promise<'proved' | 'granted' | 'different' | 'no-record' | 'record-unreadable' | 'unobserved'> {
+  ): Promise<'proved' | 'granted' | 'grant-withdrawn' | 'different' | 'no-record' | 'record-unreadable' | 'unobserved'> {
     if (!row.destination) return refuse();
     const source: ReferenceSource = {
       Id: row.destination.containerId,
@@ -374,7 +386,7 @@ export class DockerWorkerReattachHelper {
         kept.filesystemId === identity.filesystemId;
       // A record the grant accepted is the grant's word, never a proof: it holds while the grant does. What
       // contradicts it is refused all the same; only a record a running laptop gives replaces it.
-      const verdict = !same ? 'different' : !held.granted ? 'proved' : granted ? 'granted' : 'no-record';
+      const verdict = !same ? 'different' : !held.granted ? 'proved' : granted ? 'granted' : 'grant-withdrawn';
       this.#decided(row, ABSENT_VERDICTS[verdict]);
       return verdict;
     }

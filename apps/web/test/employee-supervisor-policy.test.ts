@@ -3462,3 +3462,32 @@ describe('employee supervisor: after a host restart', () => {
     expect(classifyEmployee(pool).needsHuman).toMatch(/The office puts the approved limits of the shared pool back itself/);
   });
 });
+
+describe('what the office says of a home that only the storage grant had accepted', () => {
+  const stopped = (cause: string): SupervisorObservation =>
+    ({
+      ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED'),
+      laptop: {
+        ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED').laptop,
+        provider: 'no-laptop',
+        poolAlive: true,
+        storedHome: 'renumbered',
+        storedHomeDetail: { cause, since: 0, reads: 1 },
+      },
+    }) as SupervisorObservation;
+  const said = (cause: string) =>
+    assessEmployee(stopped(cause), since(0, 'code:DOCKER_CONTINUATION_CONTAINER_STOPPED'), ON, 10 * MINUTE).needsHuman;
+
+  it('names the withdrawn grant, not a missing record, once the grant is off', () => {
+    for (const cause of ['grant-withdrawn', 'absent-grant-withdrawn']) {
+      expect(said(cause), cause).toMatch(/accepted (this home|these directories) earlier under the company setting acceptStorageRenumbering/);
+      expect(said(cause), cause).toMatch(/Set acceptStorageRenumbering to true again/);
+    }
+  });
+
+  it('names everything the grant asks of a home with no record', () => {
+    expect(said('absent-no-record-no-grant')).toMatch(
+      /the home and the Nix directory real directories on one ext4 filesystem, and the home owned by the laptop's user and group/
+    );
+  });
+});

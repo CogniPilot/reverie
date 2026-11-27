@@ -3241,8 +3241,8 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       expect(w.state.grantsRemembered).toEqual([identity(w.f, '4')]);
       // The record stands for the grant and proves nothing by itself: with the grant withdrawn it accepts nothing.
       w.state.granted = false;
-      await expect(w.read(layout)).resolves.toBe('renumbered:absent-no-record-no-grant');
-      expect(w.helper.verdict(w.f.row)).toBe('absent-no-record');
+      await expect(w.read(layout)).resolves.toBe('renumbered:absent-grant-withdrawn');
+      expect(w.helper.verdict(w.f.row)).toBe('absent-grant-withdrawn');
       w.state.granted = true;
       await expect(w.read(layout)).resolves.toBe('verified');
       expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
@@ -3309,8 +3309,8 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       const seed = await restarted();
       const w = await restarted({ accepted: identity(seed.f, '4') });
       w.renumber('7');
-      // Without the grant it is what no record is.
-      await expect(w.read()).resolves.toBe('renumbered:no-record-no-grant');
+      // Without the grant it proves nothing, and is said to be what the grant had accepted.
+      await expect(w.read()).resolves.toBe('renumbered:grant-withdrawn');
       // Under the grant it is accepted again, as granted; a record a running laptop gives would prove it.
       const granted = await restarted({ granted: true, accepted: identity(seed.f, '4') });
       granted.renumber('7');
