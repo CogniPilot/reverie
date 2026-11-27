@@ -691,3 +691,21 @@ it('keeps closed server placement without a new browser script dependency',()=>{
  expect(encode(binding)).toBe(JSON.stringify([1,binding.operationId,binding.containerId,binding.imageId,binding.credentialId,binding.sessionId,1,binding.originalDigest,binding.policyDigest]));
  for(const invalid of [{...binding,containerId:[binding.containerId]},{...binding,sessionGeneration:'1'},{...binding,imageId:'latest'},null])expect(encode(invalid)).toBeUndefined();
 });
+
+it('says on the card of a running laptop that its limits were not put back, with the supervisor sentence in the tooltip', async () => {
+ const held='The approved limits of this laptop have not been put back since 2026-11-27 10:00 UTC: the laptop holds 20.0 GiB that reclaim cannot give back, more than its approved soft limit of 16.0 GiB and its hard limit of 48.0 GiB. Writing them would make the kernel reclaim from the working agent or end one of its processes, so the office asks again about every ten minutes and writes them once the laptop holds less.';
+ const shown=async(supervisor:unknown)=>{
+  const {h,employee}=await fixture({health:'healthy',working:false});
+  Object.assign(employee,{supervisor});
+  await h.shell.openCompany();
+  const card=h.document.querySelector('[data-employee-id="expert"]');
+  return {card,reason:card.querySelector('.ca-company-reason'),controls:card.querySelectorAll('button,a,input,select').length};
+ };
+ const plain=await shown({condition:'healthy',sentence:'Alex is running.'});
+ expect(plain.reason?.textContent ?? '').toBe('');
+ const limits=await shown({condition:'healthy',sentence:'Alex is running. '+held,limitsHeld:held,code:'healthy'});
+ expect(limits.reason.textContent).toBe('Running; limits not put back');
+ expect(limits.reason.title).toContain('the laptop holds 20.0 GiB that reclaim cannot give back');
+ // A sentence and a tooltip only: the card gains no control.
+ expect(limits.controls).toBe(plain.controls);
+});

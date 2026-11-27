@@ -1877,12 +1877,15 @@ export class EmployeeSupervisor {
     waitingFor: string | undefined = assessment.next.waitingFor
   ): void {
     const problem = assessment.fingerprint !== '';
+    // Limits that the laptop's memory has kept from being put back are said in the sentence too, which is what the
+    // company card shows.
+    const held = this.#limitsHeld(employee.id, now);
     const report: SupervisorReport = {
       employeeId: employee.id,
       sessionId: employee.sessionId,
       sessionGeneration: employee.sessionGeneration,
       condition: assessment.condition,
-      sentence: assessment.sentence,
+      sentence: held.limitsHeld ? `${assessment.sentence} ${held.limitsHeld}` : assessment.sentence,
       ...(assessment.code ? { code: assessment.code } : {}),
       ...(problem && history.since > 0 ? { since: history.since } : {}),
       checkedAt: now,
@@ -1894,7 +1897,7 @@ export class EmployeeSupervisor {
         : {}),
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
       ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
-      ...this.#limitsHeld(employee.id, now),
+      ...held,
       ...(this.#pool && assessment.condition !== 'owner-stopped' ? { pool: this.#pool } : {}),
       ...(this.ports.storedHomeCheck && assessment.condition !== 'owner-stopped'
         ? { storedHomeCheck: this.ports.storedHomeCheck() }

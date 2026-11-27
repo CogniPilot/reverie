@@ -1890,9 +1890,12 @@ describe('EmployeeSupervisor: limits that a laptop holds too much memory for', (
     expect(w.report('a').limitsHeld).toMatch(
       /^The approved limits of this laptop have not been put back since .* UTC: the laptop holds 20\.0 GiB that reclaim cannot give back, more than its approved soft limit of 16\.0 GiB and its hard limit of 48\.0 GiB\. /
     );
+    // The sentence says it as well: it is what the company card shows.
+    expect(w.report('a').sentence).toBe(`${w.report('a').sentence.split(' The approved limits')[0]} ${w.report('a').limitsHeld}`);
     expect(w.report('a').needsHuman).toBeUndefined();
     held = false;
     await w.run(11);
     expect(w.report('a').limitsHeld).toBeUndefined();
+    expect(w.report('a').sentence).not.toContain('The approved limits');
   });
 });

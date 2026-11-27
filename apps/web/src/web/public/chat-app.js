@@ -694,7 +694,10 @@ const CA_SUPERVISOR_SCREENS = new Set(['needs-sign-in', 'stuck-first-run-screen'
 /** The supervisor's reading of an employee, when it found a problem: its sentence, what it will do and what it needs. */
 function caSupervisorCheck(employee) {
   const seen = employee?.supervisor;
-  if (!seen || typeof seen.sentence !== 'string' || !Object.hasOwn(CA_SUPERVISOR_SHORT, seen.condition)) return;
+  // Limits that the laptop's memory keeps from being put back are said in the sentence of a laptop that runs.
+  const limitsHeld = seen?.condition === 'healthy' && typeof seen.limitsHeld === 'string';
+  if (!seen || typeof seen.sentence !== 'string') return;
+  if (!limitsHeld && !Object.hasOwn(CA_SUPERVISOR_SHORT, seen.condition)) return;
   const needs = typeof seen.needsHuman === 'string' ? seen.needsHuman : '';
   const next = seen.next?.action ? `The office will try “${String(seen.next.action).replaceAll('-', ' ')}” next.` : '';
   const waiting = typeof seen.waitingFor === 'string' ? `Waiting for ${seen.waitingFor}.` : '';
@@ -702,14 +705,17 @@ function caSupervisorCheck(employee) {
     text: seen.sentence.replace(/\.$/, ''),
     more: needs || next || waiting,
     // The office works on a start-up screen by itself. The one thing it cannot do is sign a plan in.
-    short: CA_SUPERVISOR_SCREENS.has(seen.condition)
-      ? seen.code === 'plan-signed-out'
-        ? 'Needs a sign-in'
-        : CA_SUPERVISOR_SHORT[seen.condition]
-      : needs
-        ? 'Needs you'
-        : CA_SUPERVISOR_SHORT[seen.condition],
+    short: limitsHeld
+      ? 'Running; limits not put back'
+      : CA_SUPERVISOR_SCREENS.has(seen.condition)
+        ? seen.code === 'plan-signed-out'
+          ? 'Needs a sign-in'
+          : CA_SUPERVISOR_SHORT[seen.condition]
+        : needs
+          ? 'Needs you'
+          : CA_SUPERVISOR_SHORT[seen.condition],
     code: String(seen.code || seen.condition),
+    ...(limitsHeld ? { whileRunning: true } : {}),
   };
 }
 /** The held recovery check for an employee's current binding, in plain words; the raw `code` is for tooltips only. */
@@ -906,7 +912,8 @@ const CA_EMPLOYEE_STATUS = {
   unknown: { tone: 'unknown', label: 'Unknown' },
   gone: { tone: 'off', label: 'Offline' },
 };
-function caEmployeeStatus(health, presence, lastCheck) {
+/** `note`: what the supervisor says of an employee whose agent runs, shown in place of an empty reason. */
+function caEmployeeStatus(health, presence, lastCheck, note) {
   if (health.moving) return { tone: 'moving', label: health.label, reason: health.reason };
   if (health.stoppedByChoice) return { tone: 'off', label: health.label, reason: '' };
   // The card's own health is the ceiling: roster presence only refines an employee that health already calls connected.
@@ -916,7 +923,7 @@ function caEmployeeStatus(health, presence, lastCheck) {
   if (status.fine)
     return health.viewerUnavailable
       ? { ...status, reason: 'Viewer unavailable', viewerWarning: true }
-      : { ...status, reason: '' };
+      : { ...status, reason: note || '' };
   const troubled = ['dead', 'disconnected', 'viewer-unavailable', 'unknown'].includes(key);
   return { ...status, reason: (troubled && lastCheck) || health.reason || status.reason || '' };
 }
@@ -9242,7 +9249,12 @@ class ReverieChatApp {
    */
   paintEmployeeCard(card, node, employee, health, recovery) {
     const lastCheck = caLastRecoveryCheck(this.company, employee);
-    const status = caEmployeeStatus(health, this.employeePresence(employee), lastCheck?.short);
+    const status = caEmployeeStatus(
+      health,
+      this.employeePresence(employee),
+      lastCheck?.short,
+      lastCheck?.whileRunning ? lastCheck.short : undefined
+    );
     const detail = [
       health.detail,
       recovery ? this.viewerReconnectDescription(recovery) : '',

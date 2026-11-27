@@ -1637,7 +1637,10 @@ owner and to an agent with a current `recoverEmployees` grant:
    asks again about every ten minutes. Above the soft limit the kernel would
    throttle the working agent and reclaim hard; above the hard one it would
    kill a process of the laptop. Once that has lasted an hour, the employee's
-   report says so in `supervisor.limitsHeld`, with the numbers and since when;
+   report says so in `supervisor.limitsHeld`, with the numbers and since when; the
+   same words are added to its `sentence`, so the company card of a laptop
+   that otherwise runs shows “Running; limits not put back”, with the sentence
+   in its tooltip;
    nothing is asked of anybody, and the laptop stays under the shared pool's
    limit meanwhile.
 
