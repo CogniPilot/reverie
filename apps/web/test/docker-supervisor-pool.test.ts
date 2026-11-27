@@ -736,15 +736,17 @@ describe('what else runs in a laptop besides its agent', () => {
     expect((await w.laptops.otherWork(A, guard)).cpu).toBeUndefined();
   });
 
-  it('reports unknown as unknown, never as none', async () => {
+  it('reports unknown as unknown, never as none, and a recorded laptop that does not run as holding nothing', async () => {
     const w = world();
     const unknown = { otherWork: 'unknown', at: 1_000_000 };
     // The read gave no answer.
     w.state.work = () => new Error('exec failed');
     await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
-    // The laptop on record does not run.
+    // The laptop on record does not run, by the Engine's own listing: nothing of the employee runs in it, which is
+    // a finding and not a failure to read. It is what a laptop shows whose only running laptops are the empty
+    // candidates of abandoned plan moves, and such a laptop is rebuilt at once.
     w.state.work = () => undefined;
-    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual(unknown);
+    await expect(w.laptops.otherWork(A, guard)).resolves.toEqual({ otherWork: false, processes: 0, at: 1_000_000 });
     // The supervisor may no longer act for this employee.
     w.state.work = () => ({ otherWork: false, processes: 0, names: [], agent: true });
     await expect(

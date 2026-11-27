@@ -501,8 +501,9 @@ export class DockerSupervisorLaptops {
    * Whether anything of the employee runs in their recorded laptop besides the agent and the laptop's own fixed
    * processes: a job that was started detached, a tmux server of their own. A rebuild would end it without a
    * word, and nothing else the office reads shows it. This is a plain fact for the policy and for the report; no
-   * step is decided here. `unknown`: the laptop on record does not run, the office cannot read inside it, or the
-   * read gave no answer. It is never reported as `false` then.
+   * step is decided here. A recorded laptop that the Engine lists as not running, or not at all, holds nothing:
+   * `false`. `unknown`: there is no laptop on record, the office cannot read inside it, or the read gave no answer.
+   * It is never reported as `false` then.
    *
    * `cpu` is what the whole laptop used of the CPU between this read and the one before it of the same laptop,
    * from the laptop's own cgroup: how busy it has been, whoever was busy. Absent on a first read.
@@ -515,7 +516,8 @@ export class DockerSupervisorLaptops {
     try {
       this.#authority(employee, guard).require();
       const seen = await read(row);
-      if (!seen) return { otherWork: 'unknown', at };
+      // The Engine lists the recorded laptop as not running, or not at all: nothing of the employee runs in it.
+      if (!seen) return { otherWork: false, processes: 0, at };
       const before = this.#cpuSeen.get(employee.id),
         containerId = row.destination.containerId;
       if (seen.cpuUsedMs === undefined) this.#cpuSeen.delete(employee.id);

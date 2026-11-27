@@ -49,6 +49,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  mayHoldOtherWork,
   moveOwnsLaptop,
   newSupervisorRound,
   officeReading,
@@ -428,8 +429,11 @@ export class EmployeeSupervisor {
   readonly #readings = new Map<string, { at: number; operationId: string; reading: SupervisorLaptopReading }>();
   /** The observation being assessed reused a kept laptop reading. Only read within one pass. */
   #reused = false;
-  /** The last read that found a laptop occupied or unreadable. Never one that found it empty. */
-  readonly #occupied = new Map<string, { at: number; presence: 'running' | 'unknown' }>();
+  /**
+   * The last read that found a laptop occupied or unreadable, or an exited agent beside work that may still run in
+   * the laptop. Never one that allows a rebuild at once.
+   */
+  readonly #occupied = new Map<string, { at: number; presence: SupervisorProviderPresence }>();
   /** The last read of other work in each employee's running laptop, made with the read of what runs there. */
   readonly #otherWork = new Map<string, SupervisorOtherWork>();
   /** The last limits check of each employee, and when the next one is due. In memory: a restart checks again. */
@@ -465,6 +469,8 @@ export class EmployeeSupervisor {
   readonly #causes = new Map<string, string>();
   /** Since when each cause has been shared by more than one employee in the office. In memory. */
   readonly #sharedSince = new Map<string, number>();
+  /** For each cause that several employees share whose agents exited: the laptop last rebuilt as its probe. */
+  readonly #exitProbes = new Map<string, { readonly id: string; readonly at: number }>();
   /** Since when the office has read none of its laptops while something holds an employee. In memory. */
   #blindSince?: number;
   #restartAnswer?: 'pending' | 'refused';
@@ -1152,11 +1158,11 @@ export class EmployeeSupervisor {
       storedHome: entry.found,
       storedHomeDetail: { ...(entry.cause ? { cause: entry.cause } : {}), since: entry.since, reads: entry.reads },
     });
+    const kept = !!occupied && now - occupied.at < this.limits.idleReadMs;
     const withOccupied = (seen: SupervisorObservation): SupervisorObservation => {
-      const kept = occupied && now - occupied.at < this.limits.idleReadMs;
       const laptop = {
         ...seen.laptop,
-        ...(kept ? { provider: occupied.presence } : {}),
+        ...(kept && occupied ? { provider: occupied.presence } : {}),
         // Read with the reading above. It is shown on every pass until a later read replaces it, so that the time
         // such work is given is counted from when it was first seen and not from every read anew.
         ...this.#otherWorkSeen(employee.id, now),
@@ -1183,15 +1189,21 @@ export class EmployeeSupervisor {
       this.#report(employee, assessment, history, now);
       return false;
     }
-    if (assessment.next.preconditions.includes('no-agent-running')) {
+    // A kept reading of an exited agent beside work that may run is one that forbade the rebuild: a rebuild it
+    // would now allow is decided again on a fresh read.
+    const stale = kept && (occupied?.presence === 'exited' || occupied?.presence === 'absent');
+    if (
+      assessment.next.preconditions.includes('no-agent-running') ||
+      (stale && assessment.next.action === 'rebuild-laptop')
+    ) {
       // The one read a rebuild depends on is made last, and the decision is taken again with it.
       const provider = await this.ports
         .readProvider(employee, this.#guard(employee, 'repair'))
         .catch(() => 'unknown' as const);
-      if (provider === 'running' || provider === 'unknown')
+      await this.#readOtherWork(employee, provider, now);
+      if (this.#keepsPresence(employee.id, provider, now))
         this.#occupied.set(employee.id, { at: now, presence: provider });
       else this.#occupied.delete(employee.id);
-      await this.#readOtherWork(employee, provider, now);
       observed = { ...observed, laptop: { ...observed.laptop, provider, ...this.#otherWorkSeen(employee.id, now) } };
       this.#noteReading(employee, observed, now);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
@@ -1243,7 +1255,7 @@ export class EmployeeSupervisor {
         return false;
       }
     }
-    const braked = this.#officeBrake(employee, assessment, now);
+    const braked = this.#officeBrake(employee, assessment, observed, now);
     if (braked) {
       this.#report(employee, { ...assessment, next: { action: null, ...braked, preconditions: [] } }, history, now);
       return false;
@@ -1390,9 +1402,10 @@ export class EmployeeSupervisor {
   #officeBrake(
     employee: SupervisedEmployee,
     assessment: SupervisorAssessment,
+    observed: SupervisorObservation,
     now: number
   ): { readonly waitingFor: string; readonly at?: number } | undefined {
-    if (!this.#workingAgentRebuild(assessment)) return undefined;
+    if (!this.#workingAgentRebuild(assessment)) return this.#exitBrake(employee, assessment, observed, now);
     const last = this.#lastWorkingAgentRebuild(),
       spacing = this.#resolved.occupiedRebuildSpacingMs;
     if (last && now - last.at < spacing)
@@ -1437,6 +1450,43 @@ export class EmployeeSupervisor {
           `the laptop of ${probe.name} to come back healthy: it was rebuilt as a probe for what several employees ` +
           'share, and no other laptop is touched before that',
       };
+    return undefined;
+  }
+
+  /**
+   * The office-wide brake on rebuilding laptops whose agent has exited, for a cause that several employees in the
+   * office share. Agents that all exit at once point at what they share (the provider, an update of its client),
+   * and a rebuild of every laptop would only end what else runs in them for nothing. So one laptop is rebuilt as a
+   * probe, at once, since an exited agent comes back by nothing else, and no other laptop that shares the cause is
+   * rebuilt until that one is healthy again. Then the next one is the probe, and so on. Such a rebuild discards no
+   * agent, so the limit of one an hour does not apply. A probe that does not come back keeps its own ladder and its
+   * own limit per day; the others wait and are told whom they wait for.
+   */
+  #exitBrake(
+    employee: SupervisedEmployee,
+    assessment: SupervisorAssessment,
+    observed: SupervisorObservation,
+    now: number
+  ): { readonly waitingFor: string } | undefined {
+    if (assessment.next.action !== 'rebuild-laptop' || observed.laptop.provider !== 'exited') return undefined;
+    const cause = causeOf(assessment),
+      inOffice = this.#inOffice();
+    if (!cause || !inOffice.some((row) => row.id !== employee.id && this.#causes.get(row.id) === cause))
+      return undefined;
+    const since = this.#sharedSince.get(cause) ?? now,
+      probe = this.#exitProbes.get(cause),
+      other =
+        probe && probe.at >= since && probe.id !== employee.id
+          ? inOffice.find((row) => row.id === probe.id)
+          : undefined;
+    if (other && this.#reports.get(other.id)?.condition !== 'healthy')
+      return {
+        waitingFor:
+          `the laptop of  to come back healthy: its agent exited as this employee's did, it was ` +
+          'rebuilt first, and no other laptop is rebuilt for the same cause before that',
+      };
+    // This laptop is the probe now. A step that finds the employee busy tries nothing, and it stays the probe.
+    this.#exitProbes.set(cause, { id: employee.id, at: now });
     return undefined;
   }
 
@@ -1524,12 +1574,25 @@ export class EmployeeSupervisor {
   }
 
   /**
-   * With a read that found a laptop of the employee running: whether anything else of theirs runs in it. A plain
-   * fact, kept for the observation and the report. A laptop that does not run has no reading.
+   * A read of what runs in a laptop that forbids its rebuild, and is kept for `idleReadMs` instead of being made on
+   * every pass: an agent runs there or may, or it exited and the read inside the laptop did not show that nothing
+   * else runs.
+   */
+  #keepsPresence(employeeId: string, provider: SupervisorProviderPresence, now: number): boolean {
+    if (provider === 'running' || provider === 'unknown') return true;
+    if (provider !== 'exited' && provider !== 'absent') return false;
+    return mayHoldOtherWork({ laptop: this.#otherWorkSeen(employeeId, now) });
+  }
+
+  /**
+   * With a read that found a laptop of the employee running, whether its agent runs or has exited: whether anything
+   * else of theirs runs in it. A plain fact, kept for the observation and the report. An agent that exited may have
+   * left a detached job behind, and a rebuild would end that as well. Where no laptop of the employee runs there is
+   * nothing to read.
    */
   async #readOtherWork(employee: SupervisedEmployee, provider: SupervisorProviderPresence, now: number): Promise<void> {
     const read = this.ports.readOtherWork?.bind(this.ports);
-    if (provider !== 'running' || !read) {
+    if (provider === 'no-laptop' || !read) {
       this.#otherWork.delete(employee.id);
       return;
     }

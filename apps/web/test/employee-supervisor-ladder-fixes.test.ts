@@ -603,7 +603,12 @@ function officeOf(
     readSource: async () => 'unknown',
     readProvider: async (employee) => desks.get(employee.id)!.provider,
     ...(options.otherWork
-      ? { readOtherWork: async (employee: SupervisedEmployee) => ({ otherWork: options.otherWork!(employee.id), at: state.now }) }
+      ? {
+          readOtherWork: async (employee: SupervisedEmployee) => ({
+            otherWork: options.otherWork!(employee.id),
+            at: state.now,
+          }),
+        }
       : {}),
     actions: {
       'rebuild-laptop': async (employee, _guard, _move, proved) => {
@@ -1097,5 +1102,71 @@ describe('a read inside the laptop that could not say what else runs there', () 
     expect(o.rebuilt).toEqual([]);
     expect(o.report('a').waitingFor).toBe('the work the agent left running to finish');
     expect(o.report('a').waitingUntil).toBeGreaterThan(o.state.now + 3 * HOUR);
+  });
+});
+
+describe('a laptop whose agent exited while other work may still run in it', () => {
+  const EXITED: Session = {
+    available: true,
+    runtimeHealth: 'healthy',
+    viewerHealth: 'connected',
+    providerHealth: 'dead',
+  };
+  const exited = (ids: string[], found: true | false | 'unknown') =>
+    officeOf(
+      ids,
+      () => ({
+        session: EXITED,
+        restoration: { state: 'attached' },
+        reading: heldAt('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'),
+        provider: 'exited',
+      }),
+      { otherWork: () => found }
+    );
+  const back = (target: Desk) => {
+    healthy(target);
+    target.provider = 'running';
+  };
+
+  it.each<[true | 'unknown']>([[true], ['unknown']])(
+    'with the read inside the laptop saying %s, is given four hours before it is rebuilt',
+    async (found) => {
+      const o = exited(['a'], found);
+      o.afterRebuild.set('a', back);
+      await o.run(60);
+      expect(o.rebuilt).toEqual([]);
+      expect(o.report('a').waitingFor).toBe(
+        'the work that still runs in the laptop, beside an agent that has exited, to finish'
+      );
+      expect(o.report('a').needsHuman).toBeUndefined();
+      await o.run(4 * 60);
+      expect(o.rebuilt).toHaveLength(1);
+      expect(o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(235);
+      expect(o.rebuilt[0]!.minute).toBeLessThanOrEqual(250);
+    }
+  );
+
+  it('is rebuilt at once when the read found nothing beside the agent', async () => {
+    const o = exited(['a'], false);
+    o.afterRebuild.set('a', back);
+    await o.run(15);
+    expect(o.rebuilt.map((row) => row.id)).toEqual(['a']);
+  });
+
+  it('rebuilds one of five laptops whose agents exited at once, and the next only once that one is healthy', async () => {
+    const FIVE = ['a', 'b', 'c', 'd', 'e'];
+    const stuck = exited(FIVE, false);
+    await stuck.run(2 * 60);
+    // The probe did not come back: nobody else is touched, and everybody says whom they wait for.
+    expect(new Set(stuck.rebuilt.map((row) => row.id)).size).toBe(1);
+    const probe = stuck.rebuilt[0]!.id;
+    for (const id of FIVE.filter((other) => other !== probe)) {
+      expect(stuck.report(id).waitingFor).toMatch(/to come back healthy: its agent exited as this employee's did/);
+      expect(stuck.report(id).needsHuman).toBeUndefined();
+    }
+    const fine = exited(FIVE, false);
+    for (const id of FIVE) fine.afterRebuild.set(id, back);
+    await fine.run(30);
+    expect(fine.rebuilt.map((row) => row.id).sort()).toEqual(FIVE);
   });
 });

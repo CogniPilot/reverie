@@ -235,6 +235,19 @@ fault in every laptop:
 The worst case is therefore one working agent's turn lost per hour across the
 office, and for one laptop two a day.
 
+Agents that exit in several laptops at once point at what they share: the
+provider, or an update of its client. A rebuild of a laptop whose agent exited
+discards no agent, so the limit of one an hour does not apply to it, but the
+same probe does: when more than one employee in the office is held for the
+same cause and the read finds this one's agent exited, one laptop is rebuilt at
+once as the probe, and no other laptop held for that cause is rebuilt until the
+probe is healthy again. Then the next one is the probe. The others' `waitingFor`
+names the employee they wait for. A probe that does not come back keeps its own
+steps and its own limit per day. The office's crash wake does not restart an
+exited agent: it only attaches a terminal to a provider that already runs, for
+the one employee chosen for it, at most three times in fifteen minutes. The
+rebuild is the first step that brings such an agent back.
+
 A laptop code the office does not recognize is not acted on at once: it may be
 a state of a newer laptop runtime that settles by itself. The recorded request
 is sent again when the laptop offers that. When the code still stands after
@@ -756,6 +769,15 @@ left running to finish`). The reading is shown to the policy on every pass
 until a later read replaces it, for up to ten minutes, so those four hours
 count from the first sighting and not from every read anew. A later read that
 finds none, with a pane that shows none, ends the wait at once.
+
+The read is made whenever a laptop of the employee runs, also when its agent
+has exited or was never started: a job the agent started detached can outlive
+it. Such a laptop used to be rebuilt at once. Now it is rebuilt at once only
+when the read found nothing beside the agent. When it found work, or could not
+say, the laptop is given the same four hours, with `waitingFor` “the work that
+still runs in the laptop, beside an agent that has exited, to finish”, and is
+rebuilt after that. A recorded laptop that the Engine lists as not running, or
+not at all, holds nothing, and the read says `false`.
 
 `unknown` means the read could not be made or gave no answer: the supervisor
 may not act for the employee, or the program refused. It is never reported as

@@ -1441,11 +1441,7 @@ export function sightEmployee(
 ): SupervisorClassification & { readonly background?: boolean } {
   const { turn, background } = observed.session;
   const left =
-    mayHoldOtherWork(observed) || (turn === 'idle' && background === true)
-      ? true
-      : turn === 'idle'
-        ? false
-        : undefined;
+    mayHoldOtherWork(observed) || (turn === 'idle' && background === true) ? true : turn === 'idle' ? false : undefined;
   return { ...classifyEmployee(observed), ...(left === undefined ? {} : { background: left }) };
 }
 
@@ -1453,7 +1449,9 @@ export function sightEmployee(
  * The read made inside the laptop found work besides the agent, or could not say whether there is any. Absent,
  * where no such read is made, says nothing.
  */
-export function mayHoldOtherWork(observed: Pick<SupervisorObservation, 'laptop'>): boolean {
+export function mayHoldOtherWork(observed: {
+  readonly laptop: Pick<SupervisorObservation['laptop'], 'otherWork'>;
+}): boolean {
   const other = observed.laptop.otherWork;
   return other === true || other === 'unknown';
 }
@@ -2126,10 +2124,39 @@ function rebuildGate(
       storedHomeGate(found, observed.laptop.storedHomeDetail, now, policy);
   if (stored !== undefined && home(stored).kind !== 'ok') return home(stored);
   if (provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
+  const left = exitedBesideWork(observed, history, now, policy);
+  if (left) return left;
   // Only a finished laptop that is stopped has a stored home to compare with what its holder recorded.
   const finished = ['ready', 'provider-issued'].includes(observed.laptop.record?.phase ?? '');
   const allowed: Gate = provider === 'no-laptop' && finished ? home(stored) : { kind: 'ok' };
   return allowed.kind === 'ok' && stoppedFromOutside(observed) ? { ...allowed, uncounted: true } : allowed;
+}
+
+const EXITED_WORK_WAIT = 'the work that still runs in the laptop, beside an agent that has exited, to finish';
+
+/**
+ * The laptop runs and its agent does not (`exited`, `absent`), but the read inside the laptop found other work
+ * there, or could not say whether there is any (`mayHoldOtherWork`): a job the agent started detached before it
+ * ended, a tmux server of the employee's own. A rebuild would end it without a word. It is given the grace of work
+ * an agent left running, from when the office first saw it (`backgroundSince`), and the laptop is rebuilt after
+ * that. Only a read that found nothing beside the agent lets the laptop be rebuilt at once. Where the office makes
+ * no such read at all, nothing is known either way and the laptop is rebuilt as before.
+ */
+function exitedBesideWork(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy
+): Gate | undefined {
+  const provider = observed.laptop.provider;
+  if ((provider !== 'exited' && provider !== 'absent') || !mayHoldOtherWork(observed)) return undefined;
+  const since = history.backgroundSince;
+  if (since !== undefined && now - since >= policy.backgroundGraceMs) return undefined;
+  return {
+    kind: 'wait',
+    waitingFor: EXITED_WORK_WAIT,
+    ...(since === undefined ? {} : { at: since + policy.backgroundGraceMs }),
+  };
 }
 
 const STORAGE_UNCONFIRMED = 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED';
