@@ -34,6 +34,14 @@
  * rebuilds and starts wait for the pool instead of spending attempts against it. The service behind the port
  * refuses to recover a pool cold while any laptop of the box runs; the supervisor never decides that, and never
  * takes a read that failed for a stopped pool.
+ *
+ * Keeping the office from rebuilding every laptop at once. The policy decides for one employee and knows nothing of
+ * the others, so a fault of the office itself, or of something all laptops share, looks to it like the same fault
+ * in each laptop. The driver knows all employees and holds a brake on the one step that can cost a working agent
+ * its turn, the rebuild of a laptop an agent runs in (`#officeBrake`): one such rebuild an hour across the office,
+ * kept across restarts; none for a pane the office cannot read while it reads no laptop at all, in which case it
+ * asks for its own restart; and for a cause that several employees share, one laptop as a probe, and no other
+ * before that one is healthy again.
  */
 import {
   EMPTY_SUPERVISOR_HISTORY,
@@ -151,6 +159,16 @@ export interface EmployeeSupervisorPorts {
   openMove(employee: SupervisedEmployee): Promise<SupervisorMove | undefined>;
   planSignedIn?(accountId: string): Promise<boolean | undefined>;
   /**
+   * The office's own restart, for a fault that looks like the office's and not any laptop's: it reads none of its
+   * laptops. `request` is called on every pass while that stands; the restart keeps its own conditions and limits
+   * (office-self-restart.ts), and `refused` says that this office never restarts itself. `lastAt` is when it last
+   * did, from the record that survives the restart. Absent where the office cannot restart itself at all.
+   */
+  readonly officeRestart?: {
+    request(reason: string): 'pending' | 'refused';
+    lastAt(): number | undefined;
+  };
+  /**
    * Whether the last read of the employee's plan sign-in copies found a usable one in their laptop. From memory:
    * no read is made for it. `undefined` when no recent read says.
    */
@@ -221,6 +239,14 @@ export interface EmployeeSupervisorLimits {
   readonly poolBackoffMs?: readonly number[];
   /** How long a finding that stops a rebuild for the stored home (renumbered, different) stands before it is read again. */
   readonly storedHomeReadMs?: number;
+  /** Least time, across the office, between two rebuilds of laptops that an agent runs in or may run in. */
+  readonly occupiedRebuildSpacingMs?: number;
+  /** A cause that several employees share must have been shared this long before one laptop is rebuilt as a probe. */
+  readonly sharedCauseProbeMs?: number;
+  /** After this long without reading any laptop, the office asks for its own restart. */
+  readonly officeBlindRestartMs?: number;
+  /** A restart of the office no longer ago than this counts as tried for the fault that stands now. */
+  readonly officeRestartTriedMs?: number;
 }
 export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   actionsPerTick: 2,
@@ -232,6 +258,10 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   poolDwellMs: 60_000,
   poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000],
   storedHomeReadMs: 10 * 60_000,
+  occupiedRebuildSpacingMs: 60 * 60_000,
+  sharedCauseProbeMs: 30 * 60_000,
+  officeBlindRestartMs: 30 * 60_000,
+  officeRestartTriedMs: 6 * 60 * 60_000,
 };
 /** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
 const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
@@ -246,6 +276,22 @@ const POOL_REPAIR_NOTE =
   '…/docker-pool/cold-resume for a recovery that did not finish)';
 /** Findings about a stored home that stop a rebuild, and the one that says nothing was read. */
 const STORED_HOME_HELD = new Set<SupervisorStoredHome>(['renumbered', 'different', 'unknown']);
+/** The proofs under which a rebuild discards a laptop whose agent may be in a conversation. */
+const WORKING_AGENT_PROOFS: readonly SupervisorPrecondition[] = [
+  'terminal-input-held',
+  'agent-between-turns',
+  'agent-unreadable',
+];
+const OFFICE_BLIND = 'the office reads none of its laptops although they should be running';
+/** A time as a sentence names it, as the policy writes it. */
+function when(at: number): string {
+  return new Date(at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+/** What holds one employee, as the office compares it between employees. Empty for one nothing holds. */
+function causeOf(assessment: Pick<SupervisorAssessment, 'condition' | 'fingerprint' | 'code'>): string {
+  if (assessment.condition === 'healthy' || assessment.condition === 'owner-stopped') return '';
+  return assessment.fingerprint || 'state:' + (assessment.code ?? assessment.condition);
+}
 /** A limits check that found the employee busy is asked again this soon. */
 const LIMITS_BUSY_RETRY_MS = 60_000;
 
@@ -325,6 +371,15 @@ export class EmployeeSupervisor {
   /** The last read of a stored home that stopped a rebuild or failed. Never one that allowed it. */
   readonly #storedHome = new Map<string, { at: number; found: SupervisorStoredHome }>();
   readonly #resolved: Required<EmployeeSupervisorLimits>;
+  /** What holds each employee in the office, from their last report. Compared between employees. In memory. */
+  readonly #causes = new Map<string, string>();
+  /** Since when each cause has been shared by more than one employee in the office. In memory. */
+  readonly #sharedSince = new Map<string, number>();
+  /** Since when the office has read none of its laptops while something holds an employee. In memory. */
+  #blindSince?: number;
+  #restartAnswer?: 'pending' | 'refused';
+  /** Whether the office read each employee's laptop at their last look. In memory. */
+  readonly #read = new Map<string, boolean>();
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -404,6 +459,7 @@ export class EmployeeSupervisor {
         place.get(a.id)! - place.get(b.id)!
     );
     if (!this.#closed) await this.#keepPool(employees);
+    this.#lookAtOffice(employees);
     let seats = this.limits.actionsPerTick;
     for (const employee of order) {
       if (this.#closed) break;
@@ -843,6 +899,7 @@ export class EmployeeSupervisor {
       },
     });
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
+    this.#read.set(employee.id, this.#readable(observed));
     let history = rollSupervisorHistory(previous, sightEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
     this.#remember(employee.id, history);
@@ -904,8 +961,16 @@ export class EmployeeSupervisor {
         return false;
       }
     }
+    const braked = this.#officeBrake(employee, assessment, now);
+    if (braked) {
+      this.#report(employee, { ...assessment, next: { action: null, ...braked, preconditions: [] } }, history, now);
+      return false;
+    }
     const action = assessment.next.action!;
     history = issueSupervisorAttempt(history, action, now, assessment.next.uncounted);
+    // The office-wide limit counts from the moment the step is issued, and the mark is saved before its effect.
+    const marked = this.#workingAgentRebuild(assessment) ? { before: history.occupiedRebuildAt } : undefined;
+    if (marked) history = { ...history, occupiedRebuildAt: now };
     this.#remember(employee.id, history);
     await this.#persist();
     this.#report(
@@ -915,8 +980,140 @@ export class EmployeeSupervisor {
       now,
       'the step that is running'
     );
-    await this.#act(employee, action, assessment, observed.move as SupervisorMove | undefined);
+    await this.#act(employee, action, assessment, observed.move as SupervisorMove | undefined, marked);
     return true;
+  }
+
+  /** The employees who should be in the office now. Only they are compared with each other. */
+  #inOffice(employees: readonly SupervisedEmployee[] = this.ports.employees()): SupervisedEmployee[] {
+    return employees.filter((row) => row.desiredRunning === true && !row.onVacation && !row.bindingMigration);
+  }
+
+  /** The office terminal is attached to this employee's laptop, or reads its agent's pane. */
+  #readable({ session, laptop }: SupervisorObservation): boolean {
+    if (session.turn === 'working' || session.turn === 'idle') return true;
+    return laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected';
+  }
+
+  /**
+   * Once per pass, before any employee is looked at: which causes are shared, and whether the office reads any of
+   * its laptops at all. Both are judged from what the last pass reported, so they are half a minute old.
+   *
+   * An office that reads none of its laptops, while something holds an employee, takes the fault for its own. After
+   * `officeBlindRestartMs` it asks for its own restart on every pass, for as long as that stands.
+   */
+  #lookAtOffice(employees: readonly SupervisedEmployee[]): void {
+    const now = this.ports.now(),
+      inOffice = this.#inOffice(employees),
+      present = new Set(inOffice.map((row) => row.id));
+    for (const id of [...this.#causes.keys()]) if (!present.has(id)) this.#causes.delete(id);
+    const holders = new Map<string, number>();
+    for (const cause of this.#causes.values()) holders.set(cause, (holders.get(cause) ?? 0) + 1);
+    for (const [cause, count] of holders)
+      if (count > 1 && !this.#sharedSince.has(cause)) this.#sharedSince.set(cause, now);
+    for (const cause of [...this.#sharedSince.keys()])
+      if ((holders.get(cause) ?? 0) < 2) this.#sharedSince.delete(cause);
+    for (const id of [...this.#read.keys()]) if (!present.has(id)) this.#read.delete(id);
+    const blind = this.#causes.size > 0 && ![...this.#read.values()].some(Boolean);
+    if (!blind) {
+      this.#blindSince = undefined;
+      this.#restartAnswer = undefined;
+      return;
+    }
+    this.#blindSince ??= now;
+    if (now - this.#blindSince < this.#resolved.officeBlindRestartMs) return;
+    try {
+      this.#restartAnswer = this.ports.officeRestart?.request(OFFICE_BLIND);
+    } catch {
+      this.#restartAnswer = undefined;
+    }
+  }
+
+  /** The step is a rebuild that discards a laptop whose agent may be in a conversation. */
+  #workingAgentRebuild(assessment: SupervisorAssessment): boolean {
+    return (
+      assessment.next.action === 'rebuild-laptop' &&
+      assessment.next.preconditions.some((name) => WORKING_AGENT_PROOFS.includes(name))
+    );
+  }
+
+  /** The newest rebuild, across the office, of a laptop that an agent ran in or may have run in. */
+  #lastWorkingAgentRebuild(): { readonly id: string; readonly at: number } | undefined {
+    let last: { id: string; at: number } | undefined;
+    for (const [id, history] of this.#histories) {
+      const at = history.occupiedRebuildAt;
+      if (at !== undefined && (!last || at > last.at)) last = { id, at };
+    }
+    return last;
+  }
+
+  /**
+   * The office-wide brake on rebuilding laptops that agents run in. The policy decides for one employee and knows
+   * nothing of the others; one fault of the office or of something all laptops share would otherwise look like the
+   * same fault in every laptop, and every one of them would be rebuilt within a minute. Returns why the step is not
+   * taken now, or undefined when it may be.
+   *
+   * - One such rebuild an hour, across the office and across office restarts. The worst case is one working agent
+   *   lost per hour, with every other laptop watched meanwhile.
+   * - A pane the office cannot read is no reason while the office reads none of its laptops: that is the office's
+   *   fault. It asks for its own restart instead (`#lookAtOffice`). Only once a restart has been tried, or this
+   *   office cannot restart itself, is the cause treated as one that several employees share.
+   * - A cause that more than one employee in the office shares is the office's or their shared ground's fault
+   *   until shown otherwise. No laptop is rebuilt for it at first. After `sharedCauseProbeMs` one laptop is rebuilt
+   *   as a probe, and no other laptop is touched until that one is healthy. Then the next one follows, an hour
+   *   later at the earliest. A probe that does not come back healthy keeps every other laptop as it is.
+   */
+  #officeBrake(
+    employee: SupervisedEmployee,
+    assessment: SupervisorAssessment,
+    now: number
+  ): { readonly waitingFor: string; readonly at?: number } | undefined {
+    if (!this.#workingAgentRebuild(assessment)) return undefined;
+    const last = this.#lastWorkingAgentRebuild(),
+      spacing = this.#resolved.occupiedRebuildSpacingMs;
+    if (last && now - last.at < spacing)
+      return {
+        at: last.at + spacing,
+        waitingFor:
+          'the limit of one rebuild an hour, across the office, of a laptop that an agent runs in; the next may run ' +
+          `at ${when(last.at + spacing)}`,
+      };
+    const cause = causeOf(assessment),
+      inOffice = this.#inOffice(),
+      sharing = inOffice.filter((row) => row.id !== employee.id && this.#causes.get(row.id) === cause);
+    const blind = assessment.next.preconditions.includes('agent-unreadable') && this.#blindSince !== undefined;
+    if (blind) {
+      const restart = this.ports.officeRestart,
+        restarted = restart?.lastAt(),
+        tried =
+          !restart ||
+          this.#restartAnswer === 'refused' ||
+          (restarted !== undefined && now - restarted < this.#resolved.officeRestartTriedMs);
+      if (!tried || now - this.#blindSince! < this.#resolved.officeBlindRestartMs)
+        return {
+          waitingFor: `the office to read at least one laptop again: ${OFFICE_BLIND}, so the fault is taken to be the office's own and it restarts itself before any laptop is rebuilt for a pane it cannot read`,
+        };
+    }
+    if (!sharing.length && !blind) return undefined;
+    const since = this.#sharedSince.get(cause) ?? (blind ? this.#blindSince! : now),
+      probeAt = since + this.#resolved.sharedCauseProbeMs,
+      others = sharing.length;
+    if (now < probeAt)
+      return {
+        at: probeAt,
+        waitingFor:
+          `the office to see whether this is one laptop's fault: this employee shares what holds them with ${others} ` +
+          `other${others === 1 ? '' : 's'} in the office, so one laptop is rebuilt as a probe at ${when(probeAt)}`,
+      };
+    const probe =
+      last && last.at >= since && last.id !== employee.id ? inOffice.find((row) => row.id === last.id) : undefined;
+    if (probe && this.#reports.get(probe.id)?.condition !== 'healthy')
+      return {
+        waitingFor:
+          `the laptop of ${probe.name} to come back healthy: it was rebuilt as a probe for what several employees ` +
+          'share, and no other laptop is touched before that',
+      };
+    return undefined;
   }
 
   #flags(employee: SupervisedEmployee) {
@@ -931,7 +1128,9 @@ export class EmployeeSupervisor {
     employee: SupervisedEmployee,
     action: SupervisorAction,
     assessment: SupervisorAssessment,
-    move: SupervisorMove | undefined
+    move: SupervisorMove | undefined,
+    /** Set for a rebuild that counts against the office-wide limit: the mark the employee carried before it. */
+    marked?: { readonly before: number | undefined }
   ): Promise<void> {
     const tier = this.policy.ladder[action].tier;
     const run = this.ports.actions[action]!;
@@ -947,11 +1146,17 @@ export class EmployeeSupervisor {
       }
     })().then((result) => {
       this.#acting.delete(employee.id);
-      const settled = settleSupervisorAttempt(
+      const ended = settleSupervisorAttempt(
         this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY,
         result.outcome,
         result.detail
       );
+      // A step that found the employee busy tried nothing, so it does not count against the office either.
+      const { occupiedRebuildAt: _mark, ...unmarked } = ended;
+      const settled: SupervisorHistory =
+        marked && result.outcome === 'busy'
+          ? { ...unmarked, ...(marked.before === undefined ? {} : { occupiedRebuildAt: marked.before }) }
+          : ended;
       this.#remember(employee.id, settled);
       const report = this.#reports.get(employee.id);
       if (report) this.#reports.set(employee.id, { ...report, last: settled.lastAction });
@@ -1022,6 +1227,9 @@ export class EmployeeSupervisor {
       ...(this.#pool && assessment.condition !== 'owner-stopped' ? { pool: this.#pool } : {}),
     };
     this.#reports.set(employee.id, report);
+    const cause = causeOf(assessment);
+    if (cause) this.#causes.set(employee.id, cause);
+    else this.#causes.delete(employee.id);
     // One console line when an employee starts to need a person, and one when that ends.
     const key = assessment.needsHuman
       ? `${assessment.condition}\0${assessment.fingerprint}\0${assessment.needsHuman}`

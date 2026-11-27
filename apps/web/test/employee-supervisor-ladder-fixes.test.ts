@@ -4,6 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  EmployeeSupervisor,
+  type EmployeeSupervisorPorts,
+  type SupervisedEmployee,
+  type SupervisorLaptopReading,
+} from '../src/employee-supervisor.js';
+import {
   EMPTY_SUPERVISOR_HISTORY,
   SUPERVISOR_POLICY,
   assessEmployee,
@@ -17,6 +23,7 @@ import {
   type SupervisorFlags,
   type SupervisorHistory,
   type SupervisorObservation,
+  type SupervisorProviderPresence,
 } from '../src/employee-supervisor-policy.js';
 
 const MINUTE = 60_000;
@@ -428,5 +435,319 @@ describe('work an agent left running when its turn ended', () => {
     const after = dueAfter(EMPTY_SUPERVISOR_HISTORY, parked, T)!;
     expect(after).toBeGreaterThanOrEqual(30 * MINUTE);
     expect(after).toBeLessThan(HOUR);
+  });
+});
+
+// ─── The driver: rules that hold across the whole office ───────────────────────
+
+type Session = SupervisorObservation['session'];
+interface Desk {
+  employee: SupervisedEmployee;
+  session: Session;
+  restoration: SupervisorObservation['laptop']['restoration'];
+  reading: SupervisorLaptopReading | undefined;
+  provider: SupervisorProviderPresence;
+}
+const ATTACHED_IDLE: Session = {
+  available: true,
+  runtimeHealth: 'healthy',
+  viewerHealth: 'connected',
+  turn: 'idle',
+  idleSince: 0,
+};
+const UNREADABLE: Session = { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' };
+const READY: SupervisorLaptopReading = { state: 'ready', phase: 'ready', allowedActions: ['observe'] };
+const heldAt = (code: string): SupervisorLaptopReading => ({
+  state: 'held',
+  phase: 'ready',
+  code,
+  allowedActions: ['observe'],
+});
+const VIEW_LOST = { state: 'held' as const, code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' };
+
+/** An office of laptops driven by the real supervisor, with a clock the test moves. */
+function officeOf(
+  ids: string[],
+  desk: (id: string) => Pick<Desk, 'session' | 'restoration' | 'reading' | 'provider'>,
+  options: {
+    saved?: Map<string, SupervisorHistory>;
+    officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number };
+  } = {}
+) {
+  const start = 1_800_000_000_000;
+  const state = { now: start, saved: options.saved ?? new Map<string, SupervisorHistory>() };
+  const desks = new Map<string, Desk>(
+    ids.map((id) => [
+      id,
+      {
+        employee: {
+          id,
+          name: id.toUpperCase(),
+          owner: undefined,
+          sessionId: 's-' + id,
+          sessionGeneration: 1,
+          desiredRunning: true,
+          onVacation: false,
+          bindingMigration: false,
+        },
+        ...desk(id),
+      },
+    ])
+  );
+  const rebuilt: Array<{ id: string; minute: number; proved: string }> = [];
+  /** What a rebuild does to the laptop, per employee. Left alone, the laptop comes back exactly as it was. */
+  const afterRebuild = new Map<string, (target: Desk) => void>();
+  const ports: EmployeeSupervisorPorts = {
+    now: () => state.now,
+    ready: () => true,
+    employees: () => [...desks.values()].map((row) => row.employee),
+    flags: () => ({ enabled: true, autoRepair: true }),
+    glance: (employee) => {
+      const row = desks.get(employee.id)!;
+      return {
+        employeeId: employee.id,
+        name: employee.name,
+        desiredRunning: employee.desiredRunning,
+        onVacation: employee.onVacation,
+        bindingMigration: false,
+        boxed: true,
+        session: row.session,
+        laptop: {
+          record: { phase: 'ready', version: 2, operationId: 'op-' + employee.id },
+          bound: true,
+          policyApproved: true,
+          templateOnRecord: true,
+          ...(row.restoration ? { restoration: row.restoration } : {}),
+          poolAlive: true,
+        },
+      };
+    },
+    openMove: async () => undefined,
+    readLaptop: async (employee) => desks.get(employee.id)!.reading,
+    readSource: async () => 'unknown',
+    readProvider: async (employee) => desks.get(employee.id)!.provider,
+    actions: {
+      'rebuild-laptop': async (employee, _guard, _move, proved) => {
+        rebuilt.push({
+          id: employee.id,
+          minute: Math.round((state.now - start) / MINUTE),
+          proved: (proved ?? []).join(),
+        });
+        afterRebuild.get(employee.id)?.(desks.get(employee.id)!);
+        return { outcome: 'done', detail: 'rebuilt' };
+      },
+      'reconnect-viewer': async () => ({ outcome: 'refused', detail: 'not-attached' }),
+    },
+    ...(options.officeRestart
+      ? {
+          officeRestart: {
+            request: (reason: string) => {
+              options.officeRestart!.asked.push(reason);
+              return options.officeRestart!.answer;
+            },
+            lastAt: () => options.officeRestart!.lastAt,
+          },
+        }
+      : {}),
+    load: () => state.saved,
+    save: async (histories) => void (state.saved = new Map(histories)),
+    audit: () => {},
+    log: () => {},
+  };
+  const limits = {
+    actionsPerTick: 2,
+    startupGraceMs: 0,
+    actionWaitMs: 50,
+    idleReadMs: 2 * MINUTE,
+    limitsCheckMs: 10 * MINUTE,
+  };
+  let supervisor = new EmployeeSupervisor(ports, undefined, limits);
+  const run = async (minutes: number) => {
+    for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+      state.now += 30_000;
+      await supervisor.tick();
+    }
+  };
+  return {
+    state,
+    start,
+    desks,
+    rebuilt,
+    afterRebuild,
+    run,
+    report: (id: string) => supervisor.reports(undefined).find((row) => row.employeeId === id)!,
+    /** The office process ends and a new one starts on what was saved. */
+    restart: () => void (supervisor = new EmployeeSupervisor(ports, undefined, limits)),
+  };
+}
+const healthy = (target: Desk) => {
+  target.session = ATTACHED_IDLE;
+  target.restoration = { state: 'attached' };
+  target.reading = READY;
+};
+
+describe('one cause that every laptop of the office shares', () => {
+  const FIVE = ['a', 'b', 'c', 'd', 'e'];
+  /** Every laptop reports the same code the table does not list; every pane is attached, idle and silent. */
+  const sameCode = () =>
+    officeOf(FIVE, () => ({
+      session: ATTACHED_IDLE,
+      restoration: VIEW_LOST,
+      reading: heldAt('DOCKER_SOMETHING_NOBODY_LISTED'),
+      provider: 'running',
+    }));
+
+  it('does not rebuild five laptops within a minute: one is rebuilt as a probe, and no other while it is not healthy', async () => {
+    const o = sameCode();
+    await o.run(30);
+    // The code is watched for thirty minutes, and it must have been shared for as long before anything is tried.
+    expect(o.rebuilt).toEqual([]);
+    await o.run(8 * 60);
+    expect(o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(30);
+    // The probe did not come back healthy, so nobody else was touched. The probe keeps its own limit of two a day.
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+    expect(o.rebuilt.length).toBeLessThanOrEqual(2);
+    const probe = o.rebuilt[0]!.id;
+    for (const id of FIVE.filter((other) => other !== probe)) {
+      expect(o.report(id).waitingFor).toMatch(/to come back healthy.*no other laptop is touched before that$/);
+      expect(o.report(id).needsHuman).toBeUndefined();
+    }
+  });
+
+  it('goes on to the next laptop once the probe is healthy, one laptop an hour', async () => {
+    const o = sameCode();
+    for (const id of FIVE) o.afterRebuild.set(id, healthy);
+    await o.run(7 * 60);
+    expect(o.rebuilt.map((row) => row.id).sort()).toEqual(FIVE);
+    const minutes = o.rebuilt.map((row) => row.minute);
+    for (let index = 1; index < minutes.length; index++)
+      expect(minutes[index]! - minutes[index - 1]!).toBeGreaterThanOrEqual(60);
+    expect(o.rebuilt.every((row) => row.proved === 'agent-between-turns,laptop-held')).toBe(true);
+  });
+});
+
+describe('an office that can read none of its laptops', () => {
+  const FIVE = ['a', 'b', 'c', 'd', 'e'];
+  /** No terminal is attached and no laptop can be read, although an agent runs in each. */
+  const blind = (options: Parameters<typeof officeOf>[2] = {}) =>
+    officeOf(
+      FIVE,
+      () => ({
+        session: UNREADABLE,
+        restoration: VIEW_LOST,
+        reading: { state: 'held', phase: 'ready', code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: [] },
+        provider: 'running',
+      }),
+      options
+    );
+
+  it('rebuilds no laptop for a pane it cannot read, and asks for its own restart after thirty minutes', async () => {
+    const officeRestart = { asked: [] as string[], answer: 'pending' as const };
+    const o = blind({ officeRestart });
+    await o.run(29);
+    expect(officeRestart.asked).toEqual([]);
+    await o.run(2);
+    expect(officeRestart.asked.length).toBeGreaterThan(0);
+    expect(officeRestart.asked[0]).toMatch(/reads none of its laptops/);
+    await o.run(6 * 60);
+    expect(o.rebuilt).toEqual([]);
+    for (const id of FIVE) {
+      expect(o.report(id).waitingFor).toMatch(/the office reads none of its laptops/);
+      expect(o.report(id).needsHuman).toBeUndefined();
+    }
+  });
+
+  it('after a restart that did not help, rebuilds one laptop as a probe and touches no other while it is not healthy', async () => {
+    // This office process started after the office had restarted itself for this, twenty minutes ago.
+    const officeRestart = {
+      asked: [] as string[],
+      answer: 'pending' as const,
+      lastAt: 1_800_000_000_000 - 20 * MINUTE,
+    };
+    const o = blind({ officeRestart });
+    await o.run(135);
+    expect(o.rebuilt).toEqual([]);
+    await o.run(6 * 60);
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+    expect(o.rebuilt[0]!.proved).toMatch(/agent-unreadable/);
+    expect(o.rebuilt.length).toBeLessThanOrEqual(2);
+  });
+
+  it('treats an office that cannot restart itself as one whose restart was tried', async () => {
+    const o = blind({ officeRestart: { asked: [], answer: 'refused' } });
+    await o.run(8 * 60);
+    expect(new Set(o.rebuilt.map((row) => row.id)).size).toBe(1);
+  });
+
+  it('still rebuilds the one laptop it cannot read while it reads the others', async () => {
+    const o = officeOf(['a', 'b', 'c'], (id) =>
+      id === 'a'
+        ? {
+            session: UNREADABLE,
+            restoration: VIEW_LOST,
+            reading: { state: 'held', phase: 'ready', code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: [] },
+            provider: 'running',
+          }
+        : { session: ATTACHED_IDLE, restoration: { state: 'attached' }, reading: READY, provider: 'running' }
+    );
+    await o.run(3 * 60);
+    expect(o.rebuilt.map((row) => [row.id, row.proved])).toEqual([['a', 'laptop-held,agent-unreadable']]);
+    expect(o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(135);
+  });
+});
+
+describe('rebuilding laptops that agents run in, across the office', () => {
+  /** Two laptops, each held for a cause of its own that a rebuild settles, each with an idle, silent pane. */
+  const two = (saved?: Map<string, SupervisorHistory>) =>
+    officeOf(
+      ['a', 'b'],
+      (id) => ({
+        session: ATTACHED_IDLE,
+        restoration: VIEW_LOST,
+        reading: heldAt(id === 'a' ? 'DOCKER_RESOURCE_HELPER_FAILED' : 'DOCKER_CONTINUATION_IDENTITY_UNCONFIRMED'),
+        provider: 'running',
+      }),
+      { ...(saved ? { saved } : {}) }
+    );
+
+  it('is done at most once an hour, whatever the causes', async () => {
+    const o = two();
+    for (const id of ['a', 'b']) o.afterRebuild.set(id, healthy);
+    await o.run(30);
+    expect(o.rebuilt).toHaveLength(1);
+    const waiting = o.report(o.rebuilt[0]!.id === 'a' ? 'b' : 'a');
+    expect(waiting.waitingFor).toMatch(
+      /^the limit of one rebuild an hour, across the office, of a laptop that an agent runs in/
+    );
+    expect(Math.abs(waiting.waitingUntil! - (o.start + (o.rebuilt[0]!.minute + 60) * MINUTE))).toBeLessThanOrEqual(
+      30_000
+    );
+    await o.run(45);
+    expect(o.rebuilt).toHaveLength(2);
+    expect(o.rebuilt[1]!.minute - o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(60);
+  });
+
+  it('keeps that hour across an office restart', async () => {
+    const o = two();
+    for (const id of ['a', 'b']) o.afterRebuild.set(id, healthy);
+    await o.run(10);
+    expect(o.rebuilt).toHaveLength(1);
+    o.restart();
+    await o.run(45);
+    expect(o.rebuilt).toHaveLength(1);
+    await o.run(10);
+    expect(o.rebuilt).toHaveLength(2);
+  });
+
+  it('does not count a laptop that a read showed to be empty', async () => {
+    const o = officeOf(['a', 'b'], (id) => ({
+      session: UNREADABLE,
+      restoration: VIEW_LOST,
+      reading: heldAt(id === 'a' ? 'DOCKER_RESOURCE_HELPER_FAILED' : 'DOCKER_CONTINUATION_IDENTITY_UNCONFIRMED'),
+      provider: 'exited',
+    }));
+    for (const id of ['a', 'b']) o.afterRebuild.set(id, healthy);
+    await o.run(10);
+    expect(o.rebuilt.map((row) => row.id).sort()).toEqual(['a', 'b']);
   });
 });

@@ -84,6 +84,8 @@ export interface OfficeSupervisorDeps {
   ready(): boolean;
   /** What the office is doing about not being ready, when that takes a while; see `EmployeeSupervisorPorts`. */
   notReady?(): string | undefined;
+  /** The office's own restart, for a fault that looks like the office's; see `EmployeeSupervisorPorts`. */
+  readonly officeRestart?: EmployeeSupervisorPorts['officeRestart'];
   /** Present only under the boxed laptop runtime. */
   readonly laptops?: DockerSupervisorLaptops;
   /** The laptop runtime's own last attempt to attach each office terminal. */
@@ -344,6 +346,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     now,
     ready: () => deps.ready(),
     ...(deps.notReady ? { notReady: () => deps.notReady!() } : {}),
+    ...(deps.officeRestart ? { officeRestart: deps.officeRestart } : {}),
     employees,
     flags,
     glance,

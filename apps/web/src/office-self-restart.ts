@@ -47,6 +47,9 @@ export const OFFICE_SELF_RESTART_LIMITS: OfficeSelfRestartLimits = {
   spacingMs: 60 * MINUTE,
 };
 
+/** A request of the supervisor that was not repeated for this long no longer stands. It asks every half minute. */
+const REQUEST_LAPSE_MS = 2 * MINUTE;
+
 /** Restart policies under which Docker starts a container again after its process ended with status 0. */
 const RESTARTS_AFTER_CLEAN_EXIT: readonly string[] = ['always', 'unless-stopped'];
 
@@ -85,6 +88,10 @@ export class OfficeSelfRestart {
   #said?: string;
   #flight?: Promise<void>;
   #exiting = false;
+  /** The supervisor's finding that the office itself is at fault, and when it was first and last made. */
+  #asked?: { readonly reason: string; readonly first: number; readonly last: number };
+  /** The last look found that this office does not restart itself, whatever is asked of it. */
+  #never = false;
 
   constructor(
     private readonly deps: OfficeSelfRestartDeps,
@@ -97,6 +104,25 @@ export class OfficeSelfRestart {
    */
   status(): string | undefined {
     return this.#status;
+  }
+
+  /**
+   * The supervisor found a fault that looks like the office's own and not any laptop's (it reads none of its
+   * laptops). It asks on every pass while that stands; a request that is not repeated lapses. The restart keeps
+   * every condition and limit of this file. `refused`: this office does not restart itself, so nothing should wait
+   * for it.
+   */
+  request(reason: string): 'pending' | 'refused' {
+    const now = this.deps.now(),
+      before = this.#asked,
+      running = before && before.reason === reason && now - before.last <= REQUEST_LAPSE_MS;
+    this.#asked = { reason, first: running ? before.first : now, last: now };
+    return this.#never ? 'refused' : 'pending';
+  }
+
+  /** When the office last restarted itself, by the record that survives it. */
+  lastAt(): number | undefined {
+    return this.deps.load().at(-1);
   }
 
   /** One look. A look that is still running is joined, never doubled. Never rejects. */
@@ -115,10 +141,11 @@ export class OfficeSelfRestart {
     this.#status = status;
     if (status === this.#said) return;
     this.#said = status;
+    const stale = this.deps.stale();
     this.deps.log(
       status
-        ? `[supervisor] the office's laptop configuration changed while it was running; every employee waits for ${status}`
-        : "[supervisor] the office's laptop configuration is current again"
+        ? `[supervisor] ${stale ? "the office's laptop configuration changed while it was running" : 'the office itself looks at fault'}; every employee waits for ${status}`
+        : "[supervisor] the office's laptop configuration is current again, and nothing asks for an office restart"
     );
   }
 
@@ -137,49 +164,79 @@ export class OfficeSelfRestart {
 
   async #look(): Promise<void> {
     if (this.#exiting || !this.deps.started()) return;
-    if (!this.deps.stale()) {
+    const now = this.deps.now(),
+      stale = this.deps.stale();
+    // The supervisor's finding stands only while it goes on asking; a changed configuration needs no asking.
+    const asked = () =>
+      this.#asked && this.deps.now() - this.#asked.last <= REQUEST_LAPSE_MS ? this.#asked : undefined;
+    const request = stale ? undefined : asked();
+    if (!stale && !request) {
       this.#since = undefined;
       this.#stamp = undefined;
+      this.#never = false;
       return this.#say(undefined);
     }
-    const now = this.deps.now(),
-      stamp = this.deps.stamp();
+    const stamp = request ? 'asked:' + request.reason : this.deps.stamp();
     if (this.#since === undefined || stamp !== this.#stamp) {
-      this.#since = now;
+      this.#since = request ? request.first : now;
       this.#stamp = stamp;
     }
     const due = this.#since + this.limits.settleMs;
-    if (!this.deps.allowed())
+    if (!this.deps.allowed()) {
+      this.#never = true;
       return this.#say(
         'an office restart, which the office does not do by itself while automatic repairs are switched off ' +
           '(company setting supervisorAutoRepair)'
       );
-    if (now < due) return this.#say(`the office to restart itself at ${when(due)} and read its configuration again`);
+    }
+    if (now < due)
+      return this.#say(
+        request
+          ? `the office to restart itself at ${when(due)}: ${request.reason}`
+          : `the office to restart itself at ${when(due)} and read its configuration again`
+      );
     const times = this.deps.load();
     const paced = this.#paced(times, now);
     if (paced) return this.#say(paced);
-    if (!this.deps.startable())
+    if (!this.deps.startable()) {
+      this.#never = true;
       return this.#say(
         'a laptop configuration and key that the office would accept at start: what is in place now would be ' +
           'refused, so the office does not restart itself into it'
       );
+    }
     const policy = await this.deps.restartPolicy();
-    if (!policy || !RESTARTS_AFTER_CLEAN_EXIT.includes(policy))
+    if (!policy || !RESTARTS_AFTER_CLEAN_EXIT.includes(policy)) {
+      this.#never = true;
       return this.#say(
         'an office restart: the container engine does not say that it starts this container again after an exit ' +
           `(restart policy ${policy ? `“${policy.slice(0, 40)}”` : 'unreadable'}), so the office does not end itself`
       );
+    }
+    this.#never = false;
     // Read once more after the await: nothing is ended for a fault that is gone or still moving.
-    if (!this.deps.stale() || this.deps.stamp() !== stamp || !this.deps.allowed()) return;
+    const stands = request
+      ? !this.deps.stale() && asked()?.reason === request.reason
+      : this.deps.stale() && this.deps.stamp() === stamp;
+    if (!stands || !this.deps.allowed()) return;
     this.deps.save([...times.filter((at) => now - at < DAY), now].slice(-8));
     this.#exiting = true;
-    this.#say('the office, which is restarting now to read its laptop configuration again');
+    this.#say(
+      request
+        ? `the office, which is restarting now: ${request.reason}`
+        : 'the office, which is restarting now to read its laptop configuration again'
+    );
     try {
       this.deps.audit({
         admin: 'office supervisor',
         action: 'supervisor_restart_office',
         target: 'office',
-        detail: { reason: 'DOCKER_CONTINUATION_RUNTIME_CHANGED', restartPolicy: policy, since: this.#since, at: now },
+        detail: {
+          reason: request ? request.reason : 'DOCKER_CONTINUATION_RUNTIME_CHANGED',
+          restartPolicy: policy,
+          since: this.#since,
+          at: now,
+        },
       });
     } catch {
       /* best-effort */

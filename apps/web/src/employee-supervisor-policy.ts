@@ -551,6 +551,11 @@ export interface SupervisorHistory {
    * work is given counts from here and from nothing else (`backgroundGraceMs`).
    */
   readonly backgroundSince?: number;
+  /**
+   * When a rebuild of this employee's laptop was last issued while an agent ran in it, or may have. Written by the
+   * driver, which keeps an office-wide limit by it (`EmployeeSupervisor`), and kept across office restarts for a day.
+   */
+  readonly occupiedRebuildAt?: number;
   readonly attempts: Readonly<Partial<Record<SupervisorAction, SupervisorAttempt>>>;
   /** Times of this employee's automatic rebuilds within the last day. */
   readonly rebuilds: readonly number[];
@@ -2117,7 +2122,13 @@ export function rollSupervisorHistory(
   policy: SupervisorPolicy = SUPERVISOR_POLICY
 ): SupervisorHistory {
   const rebuilds = history.rebuilds.filter((at) => now - at < DAY),
-    last = history.lastAction ? { lastAction: history.lastAction } : {},
+    // What every branch below carries on: the last step, and for a day the driver's office-wide mark.
+    last = {
+      ...(history.lastAction ? { lastAction: history.lastAction } : {}),
+      ...(history.occupiedRebuildAt !== undefined && now - history.occupiedRebuildAt < DAY
+        ? { occupiedRebuildAt: history.occupiedRebuildAt }
+        : {}),
+    },
     again = ladderRestartAt(history, policy),
     attempts = again !== undefined && now >= again ? {} : history.attempts;
   if (seen.condition === 'owner-stopped') return { fingerprint: '', since: now, attempts: {}, rebuilds, ...last };

@@ -298,3 +298,64 @@ describe('reading the restart policy of the office’s own container', () => {
     expect(await ownRestartPolicy(engine({}).run, 'not a name', '')).toBeNull();
   });
 });
+
+describe('the office restarting itself because it reads none of its laptops', () => {
+  const REASON = 'the office reads none of its laptops although they should be running';
+  /** The laptop runtime is current; the supervisor asks on every look, as it does on every pass. */
+  const asking = (record: number[] = []) => {
+    const o = office(record);
+    o.state.stale = false;
+    const run = async (minutes: number, ask = true) => {
+      for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+        o.state.now += 30_000;
+        if (ask) o.restart.request(REASON);
+        await o.restart.tick();
+      }
+    };
+    return { ...o, run };
+  };
+
+  it('does so ten minutes after it was first asked, under every condition of any other restart', async () => {
+    const o = asking();
+    await o.run(9.5);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toMatch(/^the office to restart itself at .* UTC: the office reads none of its laptops/);
+    await o.run(1);
+    expect(o.state.exits).toBe(1);
+    expect(o.state.audits[0]).toMatchObject({ action: 'supervisor_restart_office', detail: { reason: REASON } });
+    expect(o.state.record).toHaveLength(1);
+  });
+
+  it('lets a request lapse that is not repeated', async () => {
+    const o = asking();
+    await o.run(5);
+    await o.run(30, false);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toBeUndefined();
+  });
+
+  it('says when this office never restarts itself, so that the supervisor does not wait for it', async () => {
+    const off = asking();
+    off.state.allowed = false;
+    await off.run(1);
+    expect(off.restart.request(REASON)).toBe('refused');
+    const fixed = asking();
+    fixed.state.policy = 'no';
+    expect(fixed.restart.request(REASON)).toBe('pending');
+    await fixed.run(12);
+    expect(fixed.state.exits).toBe(0);
+    expect(fixed.restart.request(REASON)).toBe('refused');
+  });
+
+  it('keeps the limits of any restart, and says when it last restarted', async () => {
+    const start = 100 * HOUR;
+    const o = asking([start - 20 * MINUTE]);
+    expect(o.restart.lastAt()).toBe(start - 20 * MINUTE);
+    expect(o.restart.request(REASON)).toBe('pending');
+    await o.run(39);
+    expect(o.state.exits).toBe(0);
+    await o.run(2);
+    expect(o.state.exits).toBe(1);
+    expect(asking().restart.lastAt()).toBeUndefined();
+  });
+});
