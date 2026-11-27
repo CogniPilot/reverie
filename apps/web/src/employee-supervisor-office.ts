@@ -65,6 +65,7 @@ import {
   type SupervisorScreenReading,
 } from './employee-supervisor-policy.js';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoveRecord, type PlanMoves } from './plan-move.js';
+import type { PlanMoveOwedHandoffs } from './plan-move-owed-handoff.js';
 import { viewerHealth } from './worker-provider-health.js';
 
 interface OfficeSession extends SupervisedScreenTerminal {
@@ -94,6 +95,11 @@ export interface OfficeSupervisorDeps {
     PlanMoves,
     'list' | 'get' | 'continueDocker' | 'abandonHeldDockerMove' | 'resolve' | 'settleRetiredMove'
   >;
+  /**
+   * The handoff a closed plan move still owes its employee, and the one way to type it (`PlanMoveOwedHandoffs`).
+   * Without it the office closes no move that has switched its employee and not typed its handoff.
+   */
+  readonly handoffs?: Pick<PlanMoveOwedHandoffs, 'owed' | 'deliver'>;
   /** A plan move executor that can only continue the original of a held move, while `current` holds. */
   moveExecutor(employee: SupervisedEmployee, current: () => boolean): PlanMoveExecutor;
   planSignedIn(accountId: string): Promise<boolean | undefined>;
@@ -286,6 +292,17 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         oldest,
         (oldest.allowedActions ?? []).filter((name) => open.length === 1 || name === 'abandon')
       );
+    // A closed move that switched the employee to the session they are on and never typed its handoff there. It
+    // gates no laptop; the policy looks at it beside the laptop's own state.
+    const owed = await deps.handoffs?.owed(employee);
+    if (owed)
+      return {
+        id: owed.moveId,
+        docker: true,
+        phase: owed.state === 'owed' ? 'handoff-owed' : 'handoff-unconfirmed',
+        busy: false,
+        allowedActions: [],
+      };
     // Closing one is a repair. With repairs switched off it stays out of sight, as it always was: shown, it would
     // only stand in front of the laptop's own retries.
     if (!deps.laptops || !flags(employee.owner).autoRepair) return undefined;
@@ -421,6 +438,11 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
       'continue-move': async (employee, guard, move) => {
         if (!move) return { outcome: 'refused', detail: 'no held move' };
         guard();
+        // What is left to continue of a closed move is its handoff: typed once, into an idle and empty composer.
+        if (move.phase === 'handoff-owed')
+          return deps.handoffs
+            ? deps.handoffs.deliver(employee, move.id, holds(guard))
+            : { outcome: 'refused', detail: 'the office has no way to type a handoff' };
         try {
           const record = await deps.moves.get(move.id, employee.owner);
           if (
@@ -462,6 +484,14 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
           if (record?.employeeId === employee.id && ['completed', 'failed'].includes(record.phase))
             return { outcome: 'done', detail: 'already closed ' + move.id };
           if (!move.docker) return await closeRetired(employee, guard, record, move);
+          // Closing this move leaves the employee on a session that was never told what to carry on with. That is
+          // allowed only because the handoff stays owed and the office types it afterwards.
+          if (record?.handoffState === 'owed' && !deps.handoffs)
+            return {
+              outcome: 'refused',
+              detail:
+                'the move has switched the employee to the new session and its handoff could not be typed afterwards',
+            };
           await deps.moves.abandonHeldDockerMove(
             move.id,
             employee.id,

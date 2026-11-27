@@ -2157,6 +2157,95 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     });
   });
 
+  describe('the handoff a closed move still owes', () => {
+    const owedMove = { id: 'move-1', docker: true, phase: 'handoff-owed', busy: false, allowedActions: [] };
+    const owing = (seen: SupervisorObservation): SupervisorObservation => ({ ...seen, move: owedMove });
+    const idle = owing(observed({ session: { turn: 'idle', idleSince: START } }));
+    const HANDOFF_WAIT = 'the agent to be idle at an empty composer, where the handoff is typed';
+
+    it('is never hidden behind healthy, and asks nobody for anything', () => {
+      expect(classifyEmployee(observed({ session: { turn: 'idle' } })).condition).toBe('healthy');
+      const said = classifyEmployee(idle);
+      expect(said).toMatchObject({ condition: 'move-held-retryable', code: 'move-handoff-owed' });
+      expect(said.sentence).toMatch(/^Stan is on the new session, but the handoff of their plan move has not been typed there yet/);
+      expect(said.needsHuman).toBeUndefined();
+      expect(said.fingerprint).not.toBe('');
+    });
+
+    it('is typed by the continue step once the office sees the agent idle, and not while it works', () => {
+      const history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(idle), START);
+      expect(assessEmployee(idle, history, ON, START).next).toMatchObject({ action: 'continue-move', at: START + MINUTE });
+      for (const session of [{ turn: 'working' as const }, {}]) {
+        const busy = owing(observed({ session }));
+        expect(assessEmployee(busy, history, ON, START + 5 * MINUTE).next).toEqual({
+          action: null,
+          waitingFor: HANDOFF_WAIT,
+          preconditions: [],
+        });
+        expect(classifyEmployee(busy).condition).toBe('move-held-retryable');
+      }
+    });
+
+    it('is never given up: no step closes it, and every round tries to type it again', () => {
+      const run = timeline(idle, 13 * 60);
+      expect(new Set(run.actions.map(([, action]) => action))).toEqual(new Set(['continue-move']));
+      expect(run.actions.map(([minute]) => minute)).toEqual([1, 3, 8, 368, 370, 375, 735, 737, 742]);
+      expect(run.asked).toEqual([]);
+      expect(run.condition).toBe('move-held-retryable');
+    });
+
+    it('starts with attempts of its own, whatever the held move had used', () => {
+      const heldMove = move('x');
+      const used = since(START, classifyEmployee(heldMove).fingerprint, {
+        watchSince: START,
+        attempts: { ...tried('continue-move', 3, START + 8 * MINUTE), ...tried('abandon-move', 1, START + 15 * MINUTE) },
+      });
+      const rolled = rollSupervisorHistory(used, classifyEmployee(idle), START + 16 * MINUTE);
+      expect(rolled.attempts).toEqual({});
+      expect(assessEmployee(idle, rolled, ON, START + 17 * MINUTE).next).toMatchObject({ action: 'continue-move' });
+    });
+
+    it('waits behind a laptop that needs a repair, whose sentence says that the handoff is owed as well', () => {
+      const cases: SupervisorObservation[] = [
+        { ...held('DOCKER_RESOURCE_HELPER_FAILED'), laptop: { ...held('DOCKER_RESOURCE_HELPER_FAILED').laptop, provider: 'absent' } },
+        observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
+        observed({ session: { viewerHealth: 'disconnected' } }),
+      ];
+      for (const laptop of cases) {
+        const alone = classifyEmployee(laptop),
+          withDebt = classifyEmployee(owing(laptop));
+        expect(withDebt).toEqual({
+          ...alone,
+          sentence: alone.sentence + ' The handoff of their plan move is still owed; the office types it once the session is ready.',
+        });
+        // The laptop's own step, at its own time.
+        const history = since(START, alone.fingerprint, { watchSince: START });
+        expect(assessEmployee(owing(laptop), history, ON, START + 20 * MINUTE).next).toEqual(
+          assessEmployee(laptop, history, ON, START + 20 * MINUTE).next
+        );
+      }
+    });
+
+    it('says that a handoff of unknown outcome is not confirmed, and takes no step for it', () => {
+      const unknown = { ...observed({ session: { turn: 'idle' } }), move: { ...owedMove, phase: 'handoff-unconfirmed' } };
+      const said = classifyEmployee(unknown);
+      expect(said.condition).toBe('healthy');
+      expect(said.sentence).toBe(
+        'Stan is running. The handoff of their plan move was typed into the new session, but nothing confirmed that it was submitted. It is never typed twice.'
+      );
+      expect(assessEmployee(unknown, EMPTY_SUPERVISOR_HISTORY, ON, START).next.action).toBeNull();
+    });
+
+    it('is nobody’s to close: the abandon step skips what is not a held move', () => {
+      const used = since(START, classifyEmployee(idle).fingerprint, {
+        watchSince: START,
+        attempts: tried('continue-move', 3, START + 8 * MINUTE),
+      });
+      for (const minutes of [12, 30, 300])
+        expect(assessEmployee(idle, used, ON, START + minutes * MINUTE).next.action, String(minutes)).toBeNull();
+    });
+  });
+
   describe('the attempts of the move steps', () => {
     const first = move('x'),
       second = move('x', { id: 'move-2' });

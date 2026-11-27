@@ -480,6 +480,7 @@ record offers. No sentence about a held move asks for a person.
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; each move has its own attempts |
 | A held move from before the laptop runtime | Closes it (below). A laptop that needs a repair comes first | After the employee has been running normally for 15 minutes |
+| A closed move that switched the employee to the session they are on and never typed its handoff | Types the handoff once, when the agent is idle at an empty composer (below) | Three attempts in a round, again every round; never closed |
 | A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
 The thirty minutes cover the repair of the pool's limits and the other causes
@@ -631,8 +632,52 @@ immediately before it launches the agent there.
   replaced is never revived. From then on they are an ordinary employee on
   that plan, and the repairs that the held move stood in front of apply to
   them: putting the plan's sign-in back, the start-up screens, the rebuild. The
-  handoff text the move had not typed yet is not typed. The stopped laptop of
-  the old plan is removed by the next rebuild, as after a move that finished.
+  handoff the move had not typed yet stays owed and the office types it
+  (below). The stopped laptop of the old plan is removed by the next rebuild,
+  as after a move that finished.
+
+**The handoff is never dropped.** The handoff is the text a move types into
+the new session so that the agent there carries on from where the old one
+was. A move types it last, after it has switched the employee to the new
+session and launched the agent. A move that is closed between those two
+points would leave the employee on a session that was never told anything,
+and the laptop would read as running normally. So the handoff of such a move
+stays owed, whoever closed the move (the supervisor, the owner's
+`POST /api/plans/moves/:id/abandon`, or a rebuild that closed it):
+
+- The employee is not reported as running normally. While nothing else is
+  wrong, their `condition` is `move-held-retryable` with the code
+  `move-handoff-owed` and a sentence that says the handoff has not been typed.
+  While the laptop needs a repair, that repair comes first and its sentence
+  says that the handoff is owed as well.
+- The office types exactly the move's text, once, into that same session, when
+  the agent is next idle at an empty composer: the conditions under which the
+  move itself types it, through the same guarded writer. It is the
+  `continue-move` step, three attempts in a round and again every round, and
+  it is never given up. An attempt that finds the agent working or the
+  composer in use types nothing and is not counted.
+- Exactly once is kept the way a move keeps it. `issued` is written to
+  `plan-move-handoffs.json` in the office data directory before the first key,
+  `delivered` once the terminal confirmed the prompt. From then on the
+  employee is reported as running normally.
+- A handoff that was issued and not confirmed is never typed again, and
+  neither is one the move itself had begun to type. Its outcome is not known.
+  The employee's sentence goes on saying so for as long as they are on that
+  session: this is the one state the office cannot settle, and reading the
+  conversation tells whether the handoff is in it.
+- Nothing is owed for a move that was closed before the office first kept that
+  file, for a session the employee has left since, or for a move that had not
+  yet switched the employee. A file that cannot be read means nothing is
+  typed.
+
+What the new session knows without the handoff depends on the provider. A
+move between two plans of the same provider carries the old conversation
+over: it installs the conversation into the new plan's folder and the new
+session resumes it by its identifier, so a rebuilt laptop on the new plan
+resumes that same conversation as long as its transcript is in the home
+directory. A move to another provider starts an empty conversation, and the
+handoff is all the new agent is told. In both cases the old conversation
+stays on disk in the home directory; closing a move deletes nothing.
 
 **A held move from before the laptop runtime** has no laptop journal. It gates
 no laptop, but it keeps its employee locked against every later plan move. The

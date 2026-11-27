@@ -374,6 +374,8 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import { PlanMoveHandoffStore } from '../plan-move-handoff-store.js';
+import { PlanMoveOwedHandoffs } from '../plan-move-owed-handoff.js';
 import { dockerPlanSourceRetirementSubject, dockerPlanSourceViewRetired, requireDockerPlanSourceRetirement } from '../docker-plan-source-retirement.js';
 import {
   captureDockerPlanMoveRequester,
@@ -2678,6 +2680,13 @@ export class WebServer extends EventEmitter {
       });
       this.officeSelfRestart = officeSelfRestart;
       const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
+      // The handoff a closed plan move still owes: typed once, through the terminal's own guarded writer.
+      const owedHandoffs = new PlanMoveOwedHandoffs({
+        moves: planMoves,
+        store: new PlanMoveHandoffStore(dataPath('plan-move-handoffs.json')),
+        session: (id) => this.sessions.get(id),
+        capturePane: (muxName) => this.mux?.capturePaneText?.(muxName, undefined, { escapes: true }),
+      });
       this.employeeSupervisor = new EmployeeSupervisor(
         officeSupervisorPorts({
           company: this.companyService,
@@ -2714,6 +2723,7 @@ export class WebServer extends EventEmitter {
           ...(this.planSignIn ? { signIn: this.planSignIn } : {}),
           planSignedIn: async (accountId) =>
             (await this.planService.rows()).accounts.find((account) => account.id === accountId)?.signedIn,
+          handoffs: owedHandoffs,
           wake: (id, options) => this.companyWake.wakeOne(id, options),
           load: () => supervisorStore.load(),
           save: (histories) => supervisorStore.save(histories),

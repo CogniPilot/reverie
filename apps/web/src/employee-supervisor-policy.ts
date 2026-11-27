@@ -971,6 +971,10 @@ function continueMoveGate(
   policy: SupervisorPolicy
 ): Gate {
   const move = observed.move;
+  // What is left of a closed move is its handoff. It is typed only where the office sees the agent idle; the step
+  // itself reads the composer once more and types nothing unless it is empty.
+  if (move?.phase === HANDOFF_OWED)
+    return observed.session.turn === 'idle' ? { kind: 'ok' } : { kind: 'wait', waitingFor: HANDOFF_WAIT };
   if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
   // A move cannot go on while the anchor of the pool is stopped: its laptops are stopped with it. No continue is
   // spent against that, and the wait has no end of its own (see `abandonMoveGate`).
@@ -1016,7 +1020,8 @@ function abandonMoveGate(
   policy: SupervisorPolicy
 ): Gate {
   const move = observed.move;
-  if (!move) return { kind: 'skip' };
+  // Only a held move can be closed. What a closed move still owes is typed, never given up.
+  if (!move || move.phase !== 'recovery-required') return { kind: 'skip' };
   // While the office's own look says the pool is down, as after a host restart, a move is not closed: nothing was
   // tried for it with a pool that works, and closing it would not bring the employee back any sooner, because no
   // laptop can be rebuilt or started either. The outage is a problem of its own (`classifyMove`), so the move's
@@ -1195,7 +1200,9 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
  */
 function besideTheLaptop(observed: SupervisorObservation, base: SupervisorClassification): SupervisorClassification {
   const move = observed.move;
-  if (!move || base.condition !== 'healthy') return base;
+  if (!move || base.condition === 'owner-stopped') return base;
+  if (move.phase === HANDOFF_OWED || move.phase === HANDOFF_UNCONFIRMED) return withHandoff(observed, base);
+  if (base.condition !== 'healthy') return base;
   if (move.phase === 'recovery-required' && !move.docker) {
     const error = clip(move.error ?? 'no reason was recorded', 300);
     return classified(
@@ -1205,6 +1212,47 @@ function besideTheLaptop(observed: SupervisorObservation, base: SupervisorClassi
     );
   }
   return base;
+}
+
+/**
+ * The phases a closed plan move is shown under while its handoff is not on record as delivered. The move switched
+ * the employee to the new session and was closed before it typed there what the agent was to carry on with.
+ * `handoff-owed`: the office still types it. `handoff-unconfirmed`: it was typed, or may have been, and nothing
+ * confirmed it; it is never typed twice.
+ */
+const HANDOFF_OWED = 'handoff-owed';
+const HANDOFF_UNCONFIRMED = 'handoff-unconfirmed';
+const HANDOFF_WAIT = 'the agent to be idle at an empty composer, where the handoff is typed';
+
+/**
+ * An employee whose closed move still owes its handoff is never reported as simply running. While the laptop needs
+ * a repair, that repair comes first and its sentence says that the handoff is owed as well. Once the employee is
+ * otherwise in order, the owed handoff is the problem that is worked on: the continue step types it
+ * (`continueMoveGate`). A handoff whose outcome is not known has no step; the sentence goes on saying so.
+ */
+function withHandoff(observed: SupervisorObservation, base: SupervisorClassification): SupervisorClassification {
+  const move = observed.move!,
+    name = observed.name;
+  if (move.phase === HANDOFF_UNCONFIRMED)
+    return {
+      ...base,
+      sentence:
+        `${base.sentence} The handoff of their plan move was typed into the new session, but nothing confirmed that ` +
+        'it was submitted. It is never typed twice.',
+    };
+  if (base.condition !== 'healthy')
+    return {
+      ...base,
+      sentence: `${base.sentence} The handoff of their plan move is still owed; the office types it once the session is ready.`,
+    };
+  return classified(
+    'move-held-retryable',
+    `${name} is on the new session, but the handoff of their plan move has not been typed there yet. The office ` +
+      'types it once, as soon as the agent is idle at an empty composer.',
+    // A problem of its own, with attempts of its own: the continues that were spent on the held move say nothing
+    // about typing its handoff (`moveAttemptsAfter` counts by what follows `move:`).
+    { code: 'move-handoff-owed', fingerprint: `move:${move.id}+handoff:owed` }
+  );
 }
 
 function classifyAlone(observed: SupervisorObservation): SupervisorClassification {
