@@ -10,6 +10,7 @@ import {
   issueSupervisorAttempt,
   resumeSupervisorHistory,
   rollSupervisorHistory,
+  supervisorCodeKind,
   type SupervisorAction,
   type SupervisorFlags,
   type SupervisorHistory,
@@ -207,5 +208,97 @@ describe('a laptop whose own read says it is ready, with an agent running in it'
       laptop: { continuation: { state: 'ready', phase: 'ready', allowedActions: ['observe'] }, provider: 'running' },
     } as Patch);
     expect(until(EMPTY_SUPERVISOR_HISTORY, parked, T, rebuilds)).toBeDefined();
+  });
+});
+
+describe('a laptop that reports a code while an agent runs in it', () => {
+  /** An agent runs in the held laptop; the office terminal is attached and has shown the pane idle for a long time. */
+  const reachable = (seen: SupervisorObservation) => withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0 });
+  /** The same, with no reading of the pane at all. */
+  const unreachable = (seen: SupervisorObservation) => withLaptop(seen, { provider: 'running' });
+
+  it('is rebuilt between turns for a code the table lists as settled by a rebuild', () => {
+    for (const code of ['DOCKER_RESOURCE_HELPER_FAILED', 'DOCKER_CONTINUATION_FOREIGN_PROVIDER'])
+      expect([code, until(EMPTY_SUPERVISOR_HISTORY, reachable(held(code)), T, rebuilds)]).toEqual([code, 3 * MINUTE]);
+  });
+
+  it('is rebuilt for a code the table does not list only when the laptop’s own read reports it, after thirty minutes', () => {
+    const own = reachable(held('DOCKER_SOMETHING_NOBODY_LISTED'));
+    expect(until(EMPTY_SUPERVISOR_HISTORY, own, T, rebuilds)).toBe(30 * MINUTE);
+    // The same code in the office's attach report, with no read of the laptop that bears it out: never.
+    const reported = observed({
+      session: { available: false, turn: 'idle', idleSince: 0 },
+      laptop: { restoration: { state: 'held', code: 'DOCKER_SOMETHING_NOBODY_LISTED' }, provider: 'running' },
+    });
+    expect(classifyEmployee(reported)).toMatchObject({ code: 'DOCKER_SOMETHING_NOBODY_LISTED' });
+    expect(until(EMPTY_SUPERVISOR_HISTORY, reported, T, rebuilds)).toBeUndefined();
+  });
+
+  const others: Array<[string, SupervisorObservation]> = [
+    ['a step to send again', held('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED')],
+    ['an agent that is not confirmed', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED')],
+    ['a read that never succeeds', held('DOCKER_CONTINUATION_UNCONFIRMED')],
+    [
+      'a set-up that stopped between two steps',
+      observed({
+        session: { available: false },
+        laptop: {
+          record: { phase: 'pool-ready', version: 2, operationId: 'op-1' },
+          continuation: { state: 'pending', phase: 'pool-ready', allowedActions: ['observe'] },
+        },
+      }),
+    ],
+  ];
+
+  it.each(others)('is never rebuilt for %s while the office can reach its agent', (_title, seen) => {
+    expect(until(EMPTY_SUPERVISOR_HISTORY, reachable(seen), T, rebuilds)).toBeUndefined();
+    const history = watch(EMPTY_SUPERVISOR_HISTORY, reachable(seen), T, T + 3 * HOUR);
+    const waiting = assessEmployee(reachable(seen), history, ON, T + 3 * HOUR);
+    expect(waiting.next.action).toBeNull();
+    expect(waiting.needsHuman).toBeUndefined();
+    // A turn in progress changes nothing about that.
+    const working = withLaptop(seen, { provider: 'running' }, { turn: 'working' });
+    expect(until(EMPTY_SUPERVISOR_HISTORY, working, T, rebuilds)).toBeUndefined();
+  });
+
+  it.each(others)('is rebuilt for %s only after two hours in which the office had no reading of its pane', (_title, seen) => {
+    const after = until(EMPTY_SUPERVISOR_HISTORY, unreachable(seen), T, rebuilds)!;
+    expect(after).toBeGreaterThanOrEqual(2 * HOUR);
+    expect(after).toBeLessThanOrEqual(2 * HOUR + 15 * MINUTE);
+  });
+
+  it('says why a laptop the office can reach is kept', () => {
+    const seen = reachable(held('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED'));
+    const history = watch(EMPTY_SUPERVISOR_HISTORY, seen, T, T + HOUR);
+    expect(assessEmployee(seen, history, ON, T + HOUR).next.waitingFor).toMatch(
+      /its agent runs and the office can reach it.*so the laptop is kept$/
+    );
+  });
+
+  it('reads plainly transient results of a read as waits, not as codes it does not know', () => {
+    for (const code of [
+      'DOCKER_RESOURCE_OBSERVATION_CHANGED',
+      'DOCKER_RESOURCE_MEMBERS_CHANGED',
+      'DOCKER_RESOURCE_MEMBERS_UNKNOWN',
+      'DOCKER_RESOURCE_LEAF_CENSUS_CHANGED',
+      'DOCKER_RESOURCE_CONTAINER_UNKNOWN',
+      'DOCKER_RESOURCE_PROBE_PROCESS_EXITED',
+      'DOCKER_CONTINUATION_CONTAINER_STATE_UNKNOWN',
+      'DOCKER_CONTINUATION_DESTINATION_STATE_UNKNOWN',
+    ]) {
+      expect([code, supervisorCodeKind(code)]).toEqual([code, 'wait']);
+      const seen = classifyEmployee(held(code));
+      expect([code, seen.condition]).toEqual([code, 'starting']);
+      expect(seen.sentence).not.toMatch(/does not recognize|undefined|\{name\}/);
+    }
+  });
+
+  it('watches a hold that names no code at all for thirty minutes, like any code it does not know', () => {
+    const nameless = observed({
+      session: { available: false },
+      laptop: { record: { phase: 'resources-issued', version: 2, operationId: 'op-1' }, restoration: { state: 'held', code: '' }, provider: 'exited' },
+    });
+    expect(classifyEmployee(nameless).condition).toBe('held-needs-rebuild');
+    expect(until(EMPTY_SUPERVISOR_HISTORY, nameless, T, rebuilds)).toBe(30 * MINUTE);
   });
 });

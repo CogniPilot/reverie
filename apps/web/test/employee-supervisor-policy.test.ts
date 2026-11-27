@@ -2391,12 +2391,8 @@ describe('employee supervisor: no path ends for good', () => {
       ['a failed limits helper', failed, since(T, FAILED)],
       ['a code the office does not recognize', held('DOCKER_CONTINUATION_SOMETHING_NEW'), since(T, 'code:DOCKER_CONTINUATION_SOMETHING_NEW')],
       ['something the office did not start', held('DOCKER_CONTINUATION_FOREIGN_PROVIDER'), since(T, 'code:DOCKER_CONTINUATION_FOREIGN_PROVIDER')],
-      ['an agent that is not confirmed', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), since(T, 'code:DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED')],
-      [
-        'a start that never finishes',
-        held('DOCKER_CONTINUATION_BUSY'),
-        rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, classifyEmployee(held('DOCKER_CONTINUATION_BUSY')), T),
-      ],
+      // A hold that a rebuild is not known to settle (an agent that is not confirmed, a start that never finishes)
+      // is no reason to rebuild a laptop whose pane the office reads: employee-supervisor-ladder-fixes.test.ts.
       [
         'a held terminal input',
         observed({

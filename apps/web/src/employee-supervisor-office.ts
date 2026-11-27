@@ -245,7 +245,10 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         ...(report
           ? {
               restoration:
-                report.state === 'attached' ? { state: 'attached' } : { state: 'held', code: report.code ?? '' },
+                report.state === 'attached'
+                  ? { state: 'attached' }
+                  : // An attach that failed without naming why says only that the laptop could not be confirmed.
+                    { state: 'held', code: report.code || 'DOCKER_CONTINUATION_UNCONFIRMED' },
             }
           : {}),
         // Another laptop of this box is attached to a live terminal, so the pool they share is alive.

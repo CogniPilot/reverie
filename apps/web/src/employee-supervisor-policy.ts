@@ -600,14 +600,19 @@ export interface SupervisorAssessment {
 
 /**
  * How a recognized laptop code is handled:
- * - `wait`: a read that raced or an operation still running; observe again.
- * - `retry`: the same request sent again is the documented next step; a rebuild follows if that never helps.
- * - `rebuild`: the operation cannot advance; a fresh laptop is the reset.
+ * - `wait`: a read that raced or an operation still running; observe again. One that never ends is treated as a
+ *   laptop that never finished starting.
+ * - `retry`: the same request sent again is the documented next step. A laptop nothing runs in is rebuilt if that
+ *   never helps; one whose agent runs and can be reached is kept (`rebuildGate`).
+ * - `rebuild`: the operation cannot advance; a fresh laptop is the reset. Only this kind is a reason to rebuild a
+ *   laptop whose agent runs and can be reached, and then between that agent's turns.
  * - `stopped`: the laptop container is not running. A stopped laptop is rebuilt. When no other laptop of the box
  *   is running either, the host most likely restarted: the office recovers the shared pool first, by itself, and
  *   the rebuild waits for that (`rebuildGate`).
- * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop.
- * - `provider`: the laptop runs but no agent of this employee is confirmed in it.
+ * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop and the office
+ *   works on it there (the shared pool, the stored home), or says what only a person can change.
+ * - `provider`: the laptop runs but no agent of this employee is confirmed in it. The agent is started again in
+ *   place where the office can do that; a laptop a read shows to be empty is rebuilt.
  * - `viewer`: the agent may be fine; the office terminal is not attached.
  * - `owner`: recognized, and once left to the owner. Each now has its own way forward (`classifyOwnerCode`); a
  *   plan move that is held by one is still not abandoned for it.
@@ -646,6 +651,25 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
   ],
   DOCKER_RESOURCE_INIT_UNKNOWN: ['wait', 'The office could not read the first process of a laptop just now.'],
   DOCKER_RESOURCE_INIT_CHANGED: ['wait', "A laptop's first process changed while the office was reading it."],
+  // More results of those reads that say nothing about any one laptop: something moved while it was read, or a
+  // container was between two states. Unlisted, each would count as a code the office does not know.
+  DOCKER_RESOURCE_OBSERVATION_CHANGED: ['wait', "A laptop's processes changed while the office was reading them."],
+  DOCKER_RESOURCE_MEMBERS_CHANGED: ['wait', 'A laptop started or stopped while the shared pool was being read.'],
+  DOCKER_RESOURCE_MEMBERS_UNKNOWN: ['wait', 'The office could not read which laptops are in the shared pool just now.'],
+  DOCKER_RESOURCE_LEAF_CENSUS_CHANGED: [
+    'wait',
+    'The limits helpers of the shared pool changed while the office was reading them.',
+  ],
+  DOCKER_RESOURCE_CONTAINER_UNKNOWN: ['wait', 'A laptop was between two states while the office was reading it.'],
+  DOCKER_RESOURCE_PROBE_PROCESS_EXITED: ['wait', "A process ended while the office was reading a laptop's processes."],
+  DOCKER_CONTINUATION_CONTAINER_STATE_UNKNOWN: [
+    'wait',
+    "{name}'s laptop container was between two states while the office was reading it.",
+  ],
+  DOCKER_CONTINUATION_DESTINATION_STATE_UNKNOWN: [
+    'wait',
+    "{name}'s laptop container reported a state the office could not read just now.",
+  ],
 
   DOCKER_RESOURCE_HELPER_RETRY_PENDING: [
     'retry',
@@ -688,7 +712,7 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     "{name}'s laptop or its approved limits changed after the limits step failed.",
   ],
   // Both are put right in place while the laptop runs, when the read offers that; a rebuild follows only if that
-  // never helps, and never while an agent is running there.
+  // never helps, and where an agent runs there, only between its turns.
   DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED: ['rebuild', "{name}'s laptop does not show its approved resource limits."],
   DOCKER_RESOURCE_LEAF_ACK_MISSING: [
     'rebuild',
@@ -1391,8 +1415,38 @@ const READY_AND_RUNNING =
 
 /** A laptop code the office does not recognize is what holds this employee. */
 function unrecognizedCode(base: Pick<SupervisorClassification, 'code' | 'fingerprint'>): boolean {
-  return !!base.code && base.fingerprint === 'code:' + base.code && supervisorCodeKind(base.code) === undefined;
+  // Read from the fingerprint: a hold that names no code at all is one the office does not recognize either.
+  return base.fingerprint.startsWith('code:') && supervisorCodeKind(base.fingerprint.slice(5)) === undefined;
 }
+
+const FOREIGN_PROVIDER = 'DOCKER_CONTINUATION_FOREIGN_PROVIDER';
+
+/**
+ * What the laptop's own read reports is a reason to rebuild it although its agent runs and the office can reach
+ * it: a code the table lists as settled by a rebuild, something the office did not start in the laptop's terminal,
+ * or a code the table does not list, which was watched for `unrecognizedAfterMs` before it came this far. A code
+ * that only the office's attach report carries is none of these.
+ */
+function rebuildCause(
+  observed: SupervisorObservation,
+  base: Pick<SupervisorClassification, 'code' | 'fingerprint'> | undefined
+): boolean {
+  const seen = observed.laptop.continuation,
+    code = seen?.state === 'held' ? seen.code : undefined;
+  if (!code) return false;
+  const kind = supervisorCodeKind(code);
+  return kind === 'rebuild' || code === FOREIGN_PROVIDER || (kind === undefined && base?.code === code);
+}
+
+/** The office terminal is attached to the agent's pane and reads it, so the agent can be reached. */
+function paneRead(session: SupervisorObservation['session']): boolean {
+  return session.turn === 'working' || (session.turn === 'idle' && session.idleSince !== undefined);
+}
+
+/** Why a held laptop whose agent can be reached is kept. */
+const REACHABLE_AGENT =
+  "the laptop's hold to clear: its agent runs and the office can reach it, and what holds the laptop is not " +
+  'something a rebuild is known to settle, so the laptop is kept';
 
 /** The laptop's own read still says it is held or unfinished. Asked to be proved again by the step. */
 function laptopHeld(observed: SupervisorObservation): readonly SupervisorPrecondition[] {
@@ -1598,6 +1652,11 @@ function rebuildGate(
     // only the office's secondary reports (its last attach, a health reading), and none of those is a reason to
     // discard a laptop whose own read finds nothing wrong. The steps that discard nothing go on.
     if (!laptopHeld(observed).length) return { kind: 'wait', waitingFor: READY_AND_RUNNING };
+    // A working agent is given up, between its turns, for a cause a rebuild is known to settle. For any other
+    // hold (a step to send again, a read that never succeeds, a set-up that stopped) it is given up only when the
+    // office cannot reach it at all: an employee nobody can talk to is not kept for the sake of a turn nobody sees.
+    if (!rebuildCause(observed, base) && paneRead(observed.session))
+      return { kind: 'wait', waitingFor: REACHABLE_AGENT };
     return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', 'laptop-held']);
   }
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
