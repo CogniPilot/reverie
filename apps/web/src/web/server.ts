@@ -119,7 +119,7 @@ import { EmployeeSupervisor } from '../employee-supervisor.js';
 import { officeSupervisorPorts } from '../employee-supervisor-office.js';
 import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
 import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
-import { PlanSignInReconciler, type SignInHolderPort } from '../plan-signin-reconciler.js';
+import { PlanSignInReconciler, describePlanSignInNotice, type SignInHolderPort } from '../plan-signin-reconciler.js';
 import { ownerStopPending } from '../owner-stop-journal.js';
 import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
@@ -2621,6 +2621,24 @@ export class WebServer extends EventEmitter {
           }));
         },
         log: (line) => console.log(line),
+        // A plan that is signed in nowhere is told once in each owner's office room, with who runs on it, before
+        // those employees stop at a sign-in screen. Only the account holder can sign a plan in.
+        notice: ({ accountId, usable }) => {
+          const onPlan = this.companyService
+            .registeredEmployees()
+            .filter((employee) => employee.runtimeRecipe?.subscriptionProfile?.id === accountId);
+          for (const owner of new Set(onPlan.map((employee) => employee.owner))) {
+            const rows = onPlan.filter((employee) => employee.owner === owner);
+            const room = fullAccessAlertRoom(this.chatroomService.rooms(), owner);
+            if (!room || room.archivedAt) continue;
+            const line = describePlanSignInNotice(
+              rows[0]!.runtimeRecipe!.subscriptionProfile!.label,
+              rows.map((employee) => employee.name),
+              usable
+            );
+            this.chatroomService.post(room.id, { kind: 'system', name: 'Plans' }, line, 'all', { deliver: false });
+          }
+        },
       });
     }
     if (dockerRuntime) {

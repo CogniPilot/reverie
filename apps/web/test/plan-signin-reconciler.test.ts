@@ -5,8 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { OfficeSignInCopy } from '../src/plan-signin-office-copy.js';
 import {
   PlanSignInReconciler,
+  SIGNED_OUT_PASSES,
+  describePlanSignInNotice,
   laptopSignInHolderId,
   type PlanSignInLimits,
+  type PlanSignInNotice,
   type SignInHolderPort,
   type SignInWriteOutcome,
 } from '../src/plan-signin-reconciler.js';
@@ -320,5 +323,146 @@ describe('OfficeSignInCopy', () => {
     const dir = folder();
     fs.symlinkSync(join(elsewhere, '.credentials.json'), join(dir, '.credentials.json'));
     expect(await new OfficeSignInCopy(async () => dir).observe()).toBeUndefined();
+  });
+});
+
+describe('a plan that is signed in nowhere', () => {
+  function watched(holders: Copy[], notice?: (event: PlanSignInNotice) => void) {
+    const state = { now: START, events: [] as PlanSignInNotice[], lines: [] as string[] };
+    const reconciler = new PlanSignInReconciler(
+      {
+        now: () => state.now,
+        ready: () => true,
+        plans: async () => [{ accountId: plan, holders }],
+        log: (line) => state.lines.push(line),
+        notice: notice ?? ((event) => state.events.push(event)),
+      },
+      LIMITS
+    );
+    const pass = async (passes = 1) => {
+      for (let done = 0; done < passes; done++) {
+        state.now += LIMITS.idleMs;
+        await reconciler.tick();
+      }
+    };
+    return { state, reconciler, pass };
+  }
+
+  it('is told once, when two passes in a row read every holder and found no usable sign-in', async () => {
+    const office = new Copy('office', emptied),
+      burt = new Copy('laptop:burt', emptied);
+    const { state, pass } = watched([office, burt]);
+    await pass();
+    expect(state.events).toEqual([]);
+    await pass();
+    expect(state.events).toEqual([{ accountId: plan, usable: false }]);
+    await pass(30);
+    expect(state.events).toHaveLength(1);
+    expect(SIGNED_OUT_PASSES).toBe(2);
+  });
+
+  it('is known before any employee is asked: a supervisor request counts as a pass like any other', async () => {
+    const { state, reconciler, pass } = watched([new Copy('office', undefined), new Copy('laptop:burt', emptied)]);
+    await pass();
+    expect((await reconciler.reconcile(plan))?.usable).toBe(false);
+    expect(state.events).toEqual([{ accountId: plan, usable: false }]);
+  });
+
+  it('is told once more when a sign-in is held again, and the laptops get it without anybody asking', async () => {
+    const office = new Copy('office', emptied),
+      burt = new Copy('laptop:burt', emptied);
+    const { state, pass } = watched([office, burt]);
+    await pass(3);
+    // The account holder signs the plan in at the office.
+    const signedIn = file(state.now + 8 * HOUR, 9);
+    office.text = signedIn;
+    await pass();
+    expect(burt.text).toBe(signedIn);
+    expect(state.events).toEqual([
+      { accountId: plan, usable: false },
+      { accountId: plan, usable: true },
+    ]);
+    await pass(5);
+    expect(state.events).toHaveLength(2);
+    // And it is told again if the plan is lost again.
+    office.text = emptied;
+    burt.text = emptied;
+    await pass(2);
+    expect(state.events.at(-1)).toEqual({ accountId: plan, usable: false });
+    expect(state.events).toHaveLength(3);
+  });
+
+  it('says nothing for a plan that was never lost, or was lost for one pass only', async () => {
+    const live = file(START + 8 * HOUR, 2);
+    const office = new Copy('office', live),
+      burt = new Copy('laptop:burt', live);
+    const { state, pass } = watched([office, burt]);
+    await pass(3);
+    office.text = emptied;
+    burt.text = emptied;
+    await pass();
+    // The copy both lost was refused by the provider, so only a new sign-in ends it.
+    office.text = file(START + 9 * HOUR, 5);
+    await pass(3);
+    expect(state.events).toEqual([]);
+  });
+
+  it('says nothing while a holder cannot be read: that one may hold the sign-in', async () => {
+    const burt = new Copy('laptop:burt', emptied),
+      ada = new Copy('laptop:ada', file(START + 8 * HOUR, 2), false);
+    const { state, pass } = watched([new Copy('office', emptied), burt, ada]);
+    await pass(5);
+    expect(state.events).toEqual([]);
+    // Once it can be read and is empty too, the plan is signed in nowhere.
+    ada.reachable = true;
+    ada.text = emptied;
+    await pass(2);
+    expect(state.events).toEqual([{ accountId: plan, usable: false }]);
+  });
+
+  it('carries a renewed sign-in both ways, so a renewal in one place never strands another', async () => {
+    const first = file(START + HOUR, 1);
+    const office = new Copy('office', first),
+      ada = new Copy('laptop:ada', first),
+      burt = new Copy('laptop:burt', first);
+    const { state, pass } = watched([office, ada, burt]);
+    await pass();
+    // A laptop's client renews: the office and the other laptop hold a refresh token that is now spent.
+    const renewedInLaptop = file(START + 9 * HOUR, 2);
+    ada.text = renewedInLaptop;
+    await pass();
+    expect([office.text, burt.text]).toEqual([renewedInLaptop, renewedInLaptop]);
+    // The office's own client renews next: both laptops follow.
+    const renewedAtOffice = file(START + 17 * HOUR, 3);
+    office.text = renewedAtOffice;
+    await pass();
+    expect([ada.text, burt.text]).toEqual([renewedAtOffice, renewedAtOffice]);
+    expect(state.events).toEqual([]);
+  });
+
+  it('survives a notice that throws', async () => {
+    const burt = new Copy('laptop:burt', emptied);
+    const { reconciler, pass } = watched([new Copy('office', emptied), burt], () => {
+      throw new Error('room gone');
+    });
+    await pass(3);
+    expect(reconciler.report(plan)).toMatchObject({ usable: false });
+  });
+});
+
+describe('describePlanSignInNotice', () => {
+  it('names the plan and who runs on it, says who can sign it in, and what the office does then', () => {
+    const lost = describePlanSignInNotice('Claude CogniPilot', ['Ada', 'Burt'], false);
+    expect(lost).toContain('The plan “Claude CogniPilot” is signed in nowhere');
+    expect(lost).toContain('2 employees run on it: Ada, Burt.');
+    expect(lost).toContain('Only the account holder can sign a plan in (Plans).');
+    expect(lost).toContain('starts those agents again by itself');
+    expect(describePlanSignInNotice('Max', ['Ada'], false)).toContain('One employee runs on it: Ada.');
+    expect(describePlanSignInNotice('Max', [], false)).not.toContain('run on it');
+    expect(describePlanSignInNotice('Max', ['Ada'], true)).toBe(
+      'The plan “Max” is signed in again. The office is putting the sign-in back into the laptops that use it.'
+    );
+    // People read this: no holder name, digest or path.
+    for (const line of [lost, describePlanSignInNotice('Max', ['Ada'], true)]) expect(line).not.toMatch(/laptop:|[0-9a-f]{12}|\//);
   });
 });
