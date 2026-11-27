@@ -94,7 +94,7 @@ import type {
   DockerEmployeeResourcePolicy,
 } from './docker-employee-continuation-data.js';
 import { describeDockerProviderExit } from './docker-provider-exit.js';
-import { standingLayout, standingLimits } from './docker-standing-defaults.js';
+import { layoutFor, standingLayout, standingLimits, type OwnLaptop } from './docker-standing-defaults.js';
 import type {
   SupervisedEmployee,
   SupervisorActionResult,
@@ -161,6 +161,11 @@ export interface DockerSupervisorLaptopDeps {
    * (`Session.pauseCapacityRetry`, `ChatroomDelivery.pauseForMigration`); nothing new is held here.
    */
   holdInput?(sessionId: string): () => void;
+  /**
+   * What the Engine says of one laptop container: its user, binds and networks. Read only, for the layout of an
+   * employee who has none on record. Undefined, or a rejection, when the container cannot be read.
+   */
+  inspectLaptop?(containerId: string): Promise<OwnLaptop | undefined>;
   now?(): number;
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
@@ -271,29 +276,50 @@ export class DockerSupervisorLaptops {
     );
   }
 
-  /** The standing default layout for this employee; see docker-standing-defaults.ts. */
-  #standingLayout(employeeId: string, state: CompanyState): DockerLaptopTemplate | undefined {
-    return standingLayout(
-      this.#others(employeeId, state).flatMap((value) => {
-        const template = this.#head(value.id, state)?.template;
-        return template ? [template] : [];
-      })
-    );
+  /** The layouts on record for the other employees' laptops; see docker-standing-defaults.ts. */
+  #otherLayouts(employeeId: string, state: CompanyState): DockerLaptopTemplate[] {
+    return this.#others(employeeId, state).flatMap((value) => {
+      const template = this.#head(value.id, state)?.template;
+      return template ? [template] : [];
+    });
+  }
+
+  /** The container of the employee's own last laptop, and the host directory of its home, from their record. */
+  #ownLaptopRecord(employeeId: string): { readonly containerId?: string; readonly home?: string } {
+    const row = this.#row(employeeId),
+      laptop = (row?.destination ?? row?.original) as
+        | { readonly containerId?: string; readonly home?: { readonly source?: string } }
+        | undefined;
+    return {
+      ...(laptop?.containerId ? { containerId: laptop.containerId } : {}),
+      ...(laptop?.home?.source ? { home: laptop.home.source } : {}),
+    };
   }
 
   /**
    * The laptop layout a rebuild would use: the one the owner approved for this employee's most recent laptop
    * operation, verbatim. The supervisor never writes one. An employee with none on record is given the owner's
-   * standing default, while that is switched on and the other laptops have one in common.
+   * standing default, while that is switched on: what their own last laptop had, read from its container, and from
+   * the other laptops only what that cannot say (`layoutFor`). `missing` says why there is none.
    */
-  #template(employeeId: string): DockerLaptopTemplate | undefined {
+  async #layout(employeeId: string): Promise<{ readonly template?: DockerLaptopTemplate; readonly missing?: string }> {
     const state = this.deps.company.store.snapshot(),
       own = this.#head(employeeId, state)?.template;
-    if (own) return own;
+    if (own) return { template: own };
     const employee = state.employees.find((value) => value.id === employeeId);
-    return employee && this.#standingEnabled(employee.owner, state)
-      ? this.#standingLayout(employeeId, state)
-      : undefined;
+    if (!employee || !this.#standingEnabled(employee.owner, state)) return {};
+    const { containerId, home } = this.#ownLaptopRecord(employeeId),
+      inspect = this.deps.inspectLaptop?.bind(this.deps);
+    const laptop = containerId && inspect ? await inspect(containerId).catch(() => undefined) : undefined;
+    const seatProfile = employee.runtimeRecipe?.subscriptionProfile?.id;
+    const found = layoutFor({
+      employeeId,
+      ...(home ? { home } : {}),
+      ...(seatProfile ? { seatProfile } : {}),
+      ...(laptop ? { own: laptop } : {}),
+      others: this.#otherLayouts(employeeId, state),
+    });
+    return 'layout' in found ? { template: found.layout } : { missing: found.missing };
   }
 
   /** What is already in memory about the laptop. No Engine call. */
@@ -315,7 +341,10 @@ export class DockerSupervisorLaptops {
       standing: {
         enabled: this.#standingEnabled(employee?.owner, state),
         limits: !!this.#standingLimits(employeeId, state),
-        layout: !!this.#standingLayout(employeeId, state),
+        // From memory: the others share one, or the employee has a laptop of their own that can be read for one.
+        layout:
+          !!standingLayout(this.#otherLayouts(employeeId, state)) ||
+          (!!this.#ownLaptopRecord(employeeId).containerId && !!this.deps.inspectLaptop),
       },
       ...(pending ? { rebuildPending: true } : {}),
     };
@@ -419,7 +448,7 @@ export class DockerSupervisorLaptops {
   async provider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence> {
     // A pending operation already proved its containers absent or discarded them before it retired the record.
     if (this.#pending(employee.id)) return 'no-laptop';
-    const template = this.#template(employee.id);
+    const { template } = await this.#layout(employee.id);
     if (!template) return 'unknown';
     let running: readonly string[];
     try {
@@ -873,8 +902,8 @@ export class DockerSupervisorLaptops {
           ? { outcome: 'done', detail: 'finished ' + pending.operationId }
           : { outcome: 'refused', detail: resumed.code ?? resumed.state };
       }
-      const template = this.#template(employee.id);
-      if (!template) return { outcome: 'refused', detail: 'no approved laptop layout on record' };
+      const { template, missing } = await this.#layout(employee.id);
+      if (!template) return { outcome: 'refused', detail: missing ?? 'no approved laptop layout on record' };
       // The hold that the rebuild was chosen for is read once more. A laptop that has finished meanwhile is kept.
       if (proved.includes('laptop-held') && (await this.read(employee, guard))?.state === 'ready')
         return { outcome: 'refused', detail: 'the laptop is no longer held' };

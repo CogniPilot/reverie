@@ -6,7 +6,7 @@ import {
   type DockerContinuationAuthority,
 } from '../src/docker-employee-continuation.js';
 import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from '../src/docker-employee-supervisor-laptops.js';
-import { standingLayout, standingLimits } from '../src/docker-standing-defaults.js';
+import { layoutFor, ownLaptop, standingLayout, standingLimits } from '../src/docker-standing-defaults.js';
 import type { SupervisedEmployee } from '../src/employee-supervisor.js';
 
 const EMPLOYEE: SupervisedEmployee = {
@@ -103,6 +103,9 @@ function world() {
     /** The input holds taken and released for a session, in order. */
     holds: [] as string[],
     now: 10 * 60_000,
+    /** What the Engine says of the employee's own laptop, and the plan the employee is on. */
+    inspect: undefined as Record<string, unknown> | Error | undefined,
+    plan: undefined as string | undefined,
   };
   const took = (name: string, argument: unknown, authority: DockerContinuationAuthority) => {
     state.calls.push([name, argument]);
@@ -123,7 +126,12 @@ function world() {
       store: {
         snapshot: () => ({
           employees: [
-            { id: EMPLOYEE.id, dockerBinding: {}, ...(state.approved ? { dockerResourcePolicy: state.policy } : {}) },
+            {
+              id: EMPLOYEE.id,
+              dockerBinding: {},
+              ...(state.approved ? { dockerResourcePolicy: state.policy } : {}),
+              ...(state.plan ? { runtimeRecipe: { subscriptionProfile: { id: state.plan } } } : {}),
+            },
             ...state.others,
           ],
           settings: state.settings,
@@ -215,6 +223,11 @@ function world() {
     },
     sessions: { get: () => state.session },
     inputHeldOnRecord: () => state.heldOnRecord,
+    inspectLaptop: async (containerId: string) => {
+      state.calls.push(['inspect', containerId]);
+      if (state.inspect instanceof Error) throw state.inspect;
+      return state.inspect;
+    },
     holdInput: (sessionId: string) => {
       state.holds.push('hold ' + sessionId);
       return () => void state.holds.push('release ' + sessionId);
@@ -425,7 +438,8 @@ describe('reading a laptop', () => {
       bound: true,
       policyApproved: true,
       templateOnRecord: true,
-      standing: { enabled: true, limits: false, layout: false },
+      // The employee has a laptop of their own whose container can be read for a layout.
+      standing: { enabled: true, limits: false, layout: true },
     });
     w.state.retired = [];
     w.state.record = undefined;
@@ -679,7 +693,8 @@ describe('rebuilding a laptop', () => {
     w.state.preview = new DockerEmployeeContinuationError('DOCKER_REPROVISION_BUSY') as never;
     expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'busy', detail: 'DOCKER_REPROVISION_BUSY' });
     w.state.retired = [];
-    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toBe('no approved laptop layout on record');
+    // No layout on record for anyone, and the employee's own laptop could not be read for one.
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toMatch(/^no laptop layout is on record for any laptop of this office/);
     expect(w.made('rebuild')).toEqual([]);
   });
 
@@ -1073,14 +1088,112 @@ describe('the owner’s standing defaults for an employee who has no limits or n
   });
 
   describe('layout', () => {
-    it('is the user, the scratch root and the drives that every laptop with a layout has', () => {
-      expect(standingLayout([layout(), layout({ mounts: [DRIVE, PROJECT] })] as never)).toEqual(layout());
-      // Read-only where any of them has it read-only; no alias unless all of them have it.
-      expect(
-        standingLayout([layout(), layout({ mounts: [{ ...DRIVE, readOnly: true }], workspaceAlias: undefined })] as never)
-      ).toEqual({ user: '1000:1000', scratchRoot: '/host/scratch/laptops', mounts: [{ ...DRIVE, readOnly: true }] });
+    /** What the other laptops share is given read-only: nobody is given a drive to write on by somebody else's layout. */
+    const shared = (patch: Record<string, unknown> = {}) => layout({ mounts: [{ ...DRIVE, readOnly: true }], ...patch });
+
+    it('taken from the other laptops, is their user, their scratch root and the drives all of them have, read-only', () => {
+      expect(standingLayout([layout(), layout({ mounts: [DRIVE, PROJECT] })] as never)).toEqual(shared());
+      // No alias unless all of them have it.
+      expect(standingLayout([layout(), layout({ workspaceAlias: undefined })] as never)).toEqual({
+        user: '1000:1000',
+        scratchRoot: '/host/scratch/laptops',
+        mounts: [{ ...DRIVE, readOnly: true }],
+      });
       // What belongs to one employee alone is never copied.
-      expect(standingLayout([layout({ network: 'reverie-boxed-api-one', accountSource: '/host/seats/plan-a' })] as never)).toEqual(layout());
+      expect(standingLayout([layout({ network: 'reverie-boxed-api-one', accountSource: '/host/seats/plan-a' })] as never)).toEqual(shared());
+    });
+
+    const HOME = '/host/state/employees/' + EMPLOYEE.id + '/home';
+    const SEAT = '/instances/default/console/accounts/plan-a';
+    /** The employee's own last laptop, as the Engine describes it. */
+    const own = (patch: Record<string, unknown> = {}) => ({
+      user: '1000:1000',
+      mounts: [
+        { source: '/host/drive', destination: '/reverie_workspace', readOnly: false },
+        { source: '/host/drive', destination: '/workspace', readOnly: false },
+        { source: '/host/projects/x', destination: '/projects/x', readOnly: true },
+        { source: '/host/scratch/laptops/employees/' + EMPLOYEE.id, destination: '/scratch', readOnly: false },
+        { source: HOME, destination: '/home/agent', readOnly: false },
+        { source: '/host/state/nix', destination: '/nix', readOnly: false },
+        { source: '/host/seats/plan-a', destination: SEAT, readOnly: false },
+      ],
+      networks: ['bridge', 'reverie-boxed-api-stan'],
+      ...patch,
+    });
+    const mine = { employeeId: EMPLOYEE.id, home: HOME, seatProfile: 'plan-a' };
+
+    it('is read from the employee’s own last laptop first: its user, its drives as they were, its network and its seat', () => {
+      expect(layoutFor({ ...mine, own: own(), others: [] })).toEqual({
+        layout: {
+          user: '1000:1000',
+          scratchRoot: '/host/scratch/laptops',
+          mounts: [
+            { source: '/host/drive', destination: '/reverie_workspace', readOnly: false },
+            { source: '/host/projects/x', destination: '/projects/x', readOnly: true },
+          ],
+          workspaceAlias: true,
+          network: 'reverie-boxed-api-stan',
+          accountSource: '/host/seats/plan-a',
+        },
+      });
+      // The other laptops' drives are not added to what this one had.
+      const others = [layout({ mounts: [DRIVE, PROJECT] })] as never;
+      expect(layoutFor({ ...mine, own: own({ mounts: own().mounts.slice(3) }), others })).toMatchObject({ layout: { mounts: [] } });
+    });
+
+    it('names no seat folder for a seat the laptop keeps in its home, or for an employee on no plan', () => {
+      const inHome = own({
+        mounts: [...own().mounts.slice(0, 6), { source: HOME + '/.reverie/seat-auth/plan-a', destination: SEAT, readOnly: false }],
+      });
+      expect(layoutFor({ ...mine, own: inHome, others: [] })).toMatchObject({ layout: expect.not.objectContaining({ accountSource: expect.anything() }) });
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, own: own(), others: [] })).toMatchObject({
+        layout: expect.not.objectContaining({ accountSource: expect.anything() }),
+      });
+    });
+
+    it('takes from the other laptops only what its own cannot say: the scratch root of a laptop from before that layout', () => {
+      const old = own({ mounts: own().mounts.filter((mount) => mount.destination !== '/scratch') });
+      expect(layoutFor({ ...mine, own: old, others: [] })).toEqual({
+        missing: 'no laptop of this office says where scratch space is kept, and this one does not either',
+      });
+      expect(layoutFor({ ...mine, own: old, others: [layout()] as never })).toMatchObject({
+        layout: { scratchRoot: '/host/scratch/laptops', mounts: [expect.objectContaining({ readOnly: false }), expect.anything()] },
+      });
+    });
+
+    it('without a laptop of its own to read, gives what the others share, and refuses when the plan needs a seat', () => {
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, others: [layout(), layout()] as never })).toEqual({ layout: shared() });
+      expect(layoutFor({ ...mine, others: [layout()] as never })).toEqual({
+        missing:
+          "the folder of this employee's plan sign-in cannot be told: their last laptop could not be read, and a " +
+          'laptop built without it would stop at the sign-in screen',
+      });
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, others: [] })).toEqual({
+        missing: 'no laptop layout is on record for any laptop of this office, and this employee has no laptop to read one from',
+      });
+    });
+
+    it('reads a laptop from what the Engine says of its container', () => {
+      expect(
+        ownLaptop({
+          Config: { User: '1000:1000' },
+          Mounts: [
+            { Type: 'bind', Source: '/host/drive', Destination: '/workspace', RW: true },
+            { Type: 'bind', Source: '/host/tools', Destination: '/instances/default/tools', RW: false },
+            { Type: 'volume', Source: '/var/lib/docker/volumes/x/_data', Destination: '/data', RW: true },
+          ],
+          NetworkSettings: { Networks: { 'reverie-boxed-api-stan': {}, bridge: {} } },
+        })
+      ).toEqual({
+        user: '1000:1000',
+        mounts: [
+          { source: '/host/drive', destination: '/workspace', readOnly: false },
+          { source: '/host/tools', destination: '/instances/default/tools', readOnly: true },
+        ],
+        networks: ['reverie-boxed-api-stan', 'bridge'],
+      });
+      expect(ownLaptop({ Config: {} })).toBeUndefined();
+      expect(ownLaptop(null)).toBeUndefined();
     });
 
     it('does not exist where no laptop has one or they differ in user or scratch root', () => {
@@ -1096,8 +1209,43 @@ describe('the owner’s standing defaults for an employee who has no limits or n
       expect(w.laptops.glance(EMPLOYEE.id)).toMatchObject({ templateOnRecord: false, standing: { enabled: true, layout: true } });
       expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('no-laptop');
       expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'rebuilt new' });
-      expect(w.made('preview')).toEqual([layout(), layout()]);
-      expect(w.made('rebuild')).toEqual([expect.objectContaining({ template: layout() })]);
+      // No laptop of the employee could be read here, so it is what the others share, read-only.
+      expect(w.made('preview')).toEqual([shared(), shared()]);
+      expect(w.made('rebuild')).toEqual([expect.objectContaining({ template: shared() })]);
+      expect(w.made('inspect')).toEqual([DESTINATION, DESTINATION]);
+    });
+
+    it('reads the employee’s own laptop for it, and builds with what that laptop had', async () => {
+      const w = bare();
+      w.state.approved = true;
+      w.state.plan = 'plan-a';
+      w.state.record = {
+        version: 2,
+        phase: 'resources-issued',
+        request: REQUEST,
+        original: { containerId: 'a'.repeat(64), home: { source: HOME } },
+        destination: { containerId: DESTINATION, home: { source: HOME } },
+      };
+      w.state.inspect = own();
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+      expect(w.made('rebuild')).toEqual([
+        expect.objectContaining({
+          template: expect.objectContaining({
+            network: 'reverie-boxed-api-stan',
+            accountSource: '/host/seats/plan-a',
+            mounts: [expect.objectContaining({ destination: '/reverie_workspace', readOnly: false }), expect.anything()],
+          }),
+        }),
+      ]);
+      // The laptop cannot be read and the plan needs its seat: nothing is built, and the step says why.
+      w.state.inspect = new Error('No such container');
+      w.state.calls.length = 0;
+      expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({
+        outcome: 'refused',
+        detail: expect.stringMatching(/^the folder of this employee's plan sign-in cannot be told/),
+      });
+      expect(w.made('rebuild')).toEqual([]);
+      expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
     });
 
     it('never replaces a layout the employee has, and is not used once the owner switched the defaults off', async () => {

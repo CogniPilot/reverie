@@ -15,6 +15,7 @@ import {
 } from './docker-absent-reprovision.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
 import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from './docker-employee-supervisor-laptops.js';
+import { ownLaptop } from './docker-standing-defaults.js';
 import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
 import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
@@ -685,6 +686,8 @@ export class DockerEmployeeRuntime {
     if (!a) return undefined;
     return new DockerSupervisorLaptops({
       ...office,
+      inspectLaptop: async (containerId) =>
+        ownLaptop((JSON.parse(await a.command.run(['container', 'inspect', containerId])) as unknown[])[0]),
       company: a.company,
       store: a.store,
       engine: a.engine,
