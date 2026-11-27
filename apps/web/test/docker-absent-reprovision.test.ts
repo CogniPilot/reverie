@@ -2269,7 +2269,36 @@ describe('rebuild laptop', () => {
     expect(f.forgotten).toEqual([]);
     expect(f.store.record(employeeId)).toEqual(f.row);
     expect(f.entry()).toBeUndefined();
-    const result = await f.service.rebuild(employeeId, { ...request, confirmDiscardRunning: true }, f.authority);
+    // The caller is given the last word after every check of the rebuild and before the first stop. A caller that
+    // withdraws there leaves everything as it was.
+    await expect(
+      f.service.rebuild(
+        employeeId,
+        { ...request, confirmDiscardRunning: true },
+        {
+          ...f.authority,
+          discarding: () => {
+            throw new Error('a turn began');
+          },
+        }
+      )
+    ).rejects.toThrow('a turn began');
+    expect([f.engine.rebuilt, f.engine.stopped, f.forgotten]).toEqual([[], [], []]);
+    expect(f.store.record(employeeId)).toEqual(f.row);
+    const order: string[] = [];
+    const discardOne = f.engine.discardLaptopContainer.bind(f.engine);
+    f.engine.discardLaptopContainer = async (id, proof, current) => {
+      order.push('stop');
+      return discardOne(id, proof, current);
+    };
+    const result = await f.service.rebuild(
+      employeeId,
+      { ...request, confirmDiscardRunning: true },
+      { ...f.authority, discarding: () => void order.push('last word') }
+    );
+    f.engine.discardLaptopContainer = discardOne;
+    expect(order.slice(0, 2)).toEqual(['last word', 'stop']);
+    expect(order.filter((step) => step === 'last word')).toHaveLength(1);
     expect(result.state).toBe('ready');
     expect(f.engine.rebuilt).toEqual([candidateCid, destinationCid, storageCid, leafCid]);
     expect(f.engine.stopped).toEqual([candidateCid, storageCid]);

@@ -68,6 +68,45 @@ export const DOCKER_PROVIDER_VIEW_ENV = Object.freeze([
   '--env',
   'LD_LIBRARY_PATH=',
 ]);
+/**
+ * Whether a tmux process of the laptop user is alive, read from the process table. It is what stands behind the
+ * answer "no agent runs here" when the tmux socket FILE is missing: the laptop's /tmp is a bind on the scratch
+ * disk, so anything that clears it removes the file under a server that still runs, with the agent in it. A missing
+ * file alone therefore proves nothing. No tmux process of that user is a finding: the office starts an agent only
+ * inside tmux, and without a server its pane is gone. Any tmux process, or a table that cannot be read, means the
+ * probe does not know, and it says so by refusing.
+ *
+ * This function is put into `DOCKER_PROVIDER_VIEW_PROGRAM` by its text. It must not use anything from outside its
+ * own body, and it has no inner function.
+ */
+export function dockerProviderTmuxMayRun(
+  files: {
+    readdirSync(path: string): string[];
+    statSync(path: string): { uid: number };
+    readFileSync(path: string, encoding: 'utf8'): string;
+  },
+  uid: number,
+  self: number
+): boolean {
+  let names: string[];
+  try {
+    names = files.readdirSync('/proc');
+  } catch {
+    return true;
+  }
+  for (const name of names) {
+    if (!/^[1-9][0-9]*$/.test(name) || Number(name) === self) continue;
+    try {
+      if (files.statSync('/proc/' + name).uid !== uid) continue;
+      if (/^tmux/.test(files.readFileSync('/proc/' + name + '/comm', 'utf8'))) return true;
+    } catch (error) {
+      // A process that ended while it was read is gone. One that cannot be read may be the server.
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code !== 'ENOENT' && code !== 'ESRCH') return true;
+    }
+  }
+  return false;
+}
 export const DOCKER_PROVIDER_VIEW_TMUX = '/opt/reverie-worker-tools/bin/tmux';
 export const DOCKER_PROVIDER_VIEW_PROGRAM = String.raw`
 const fs = require('node:fs');
@@ -135,6 +174,9 @@ if (mode === 'presence') {
     if (!socket.isSocket() || socket.uid !== process.getuid()) refuse();
   } catch (error) {
     if (!error || error.code !== 'ENOENT') throw error;
+    // The file is gone. That alone says nothing: see dockerProviderTmuxMayRun.
+    const tmuxMayRun = (${dockerProviderTmuxMayRun.toString()})(fs, process.getuid(), process.pid);
+    if (tmuxMayRun) refuse();
     process.stdout.write('ABSENT\n');
     process.exit(0);
   }

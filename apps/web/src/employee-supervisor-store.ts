@@ -31,6 +31,8 @@ const History = z
     transitSince: time.optional(),
     transitOf: z.string().max(100).optional(),
     watchSince: time.optional(),
+    backgroundSince: time.optional(),
+    occupiedRebuildAt: time.optional(),
     attempts: z.partialRecord(
       action,
       z

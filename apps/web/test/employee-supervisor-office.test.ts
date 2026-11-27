@@ -732,3 +732,19 @@ describe('office supervisor ports: a plan move that stopped part-way', () => {
     expect(report()).toMatchObject({ condition: 'healthy' });
   });
 });
+
+describe('office supervisor ports: an attach report that names no code', () => {
+  it('is passed on as a laptop the office could not confirm, never as a hold with an empty code', () => {
+    const o = office();
+    o.state.restorations = [{ employeeId: 'a', state: 'held' }];
+    expect(o.ports.glance(o.employee()).laptop.restoration).toEqual({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_UNCONFIRMED',
+    });
+    o.state.restorations = [{ employeeId: 'a', state: 'held', code: '' }];
+    expect(o.ports.glance(o.employee()).laptop.restoration).toEqual({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_UNCONFIRMED',
+    });
+  });
+});

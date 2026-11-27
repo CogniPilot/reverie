@@ -87,6 +87,8 @@ function namespaceNative(mode: 'presence' | 'observe' | 'attach', runtimeNamespa
     },
     statfsSync: () => ({ type: 0x9fa0 }),
     statSync: () => ({ uid: 1000 }),
+    // The process table of a laptop nothing runs in: the probe asks it before it calls a missing socket absent.
+    readdirSync: () => ['1', 'self'],
     readFileSync(p: string) {
       return p === '/proc/self/status'
         ? 'NoNewPrivs: 1\nCapInh: 0\nCapPrm: 0\nCapEff: 0\nCapAmb: 0\n'

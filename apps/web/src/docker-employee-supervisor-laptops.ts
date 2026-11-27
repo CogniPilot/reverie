@@ -94,7 +94,7 @@ import type {
   DockerEmployeeResourcePolicy,
 } from './docker-employee-continuation-data.js';
 import { describeDockerProviderExit } from './docker-provider-exit.js';
-import { standingLayout, standingLimits } from './docker-standing-defaults.js';
+import { layoutFor, standingLayout, standingLimits, type OwnLaptop } from './docker-standing-defaults.js';
 import type {
   SupervisedEmployee,
   SupervisorActionResult,
@@ -105,6 +105,7 @@ import type {
   SupervisorPoolStep,
 } from './employee-supervisor.js';
 import {
+  paneQuiet,
   readParkedScreen,
   readSupervisedTerminal,
   readTerminalTurn,
@@ -154,6 +155,18 @@ export interface DockerSupervisorLaptopDeps {
   readonly sessions: { get(sessionId: string): SupervisedScreenTerminal | undefined };
   /** The saved record of a session says its terminal input is held. Asked only while there is no terminal object. */
   inputHeldOnRecord?(sessionId: string): boolean;
+  /**
+   * Hold every input the office would type into this session, and keep chat for it queued, until the returned
+   * function is called. These are the holds a plan move and a terminal reconnect already take
+   * (`Session.pauseCapacityRetry`, `ChatroomDelivery.pauseForMigration`); nothing new is held here.
+   */
+  holdInput?(sessionId: string): () => void;
+  /**
+   * What the Engine says of one laptop container: its user, binds and networks. Read only, for the layout of an
+   * employee who has none on record. Undefined, or a rejection, when the container cannot be read.
+   */
+  inspectLaptop?(containerId: string): Promise<OwnLaptop | undefined>;
+  now?(): number;
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
@@ -181,6 +194,10 @@ const BUSY = new Set(['DOCKER_CONTINUATION_BUSY', 'DOCKER_REPROVISION_BUSY']);
 /** The shared pool is what stands in the way of a laptop's own limits. Its in-place repair comes first. */
 const POOL_FIRST = new Set(['DOCKER_CONTINUATION_POOL_UNCONFIRMED', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']);
 
+/** Thrown by the fence of a rebuild when the pane moved between the proof and the stop. Never leaves this file. */
+class TurnStarted extends Error {}
+const IN_A_TURN: SupervisorActionResult = { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
+
 function refusal(error: unknown): SupervisorActionResult {
   if (error instanceof DockerEmployeeContinuationError)
     return { outcome: BUSY.has(error.code) ? 'busy' : 'refused', detail: error.code };
@@ -201,7 +218,12 @@ export class DockerSupervisorLaptops {
   constructor(private readonly deps: DockerSupervisorLaptopDeps) {}
 
   /** The whole of what the supervisor presents where a route presents a verified owner. See the file comment. */
-  #authority(employee: SupervisedEmployee, guard: SupervisorGuard, fence?: () => void): DockerContinuationAuthority {
+  #authority(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard,
+    fence?: () => void,
+    discarding?: () => void
+  ): DockerContinuationAuthority {
     const recovery = this.deps.company.recoveryAction(employee.id, employee.owner);
     const require = () => {
       if (!this.deps.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
@@ -210,7 +232,7 @@ export class DockerSupervisorLaptops {
       fence?.();
     };
     require();
-    return { owner: employee.owner, require, requireOffice: require };
+    return { owner: employee.owner, require, requireOffice: require, ...(discarding ? { discarding } : {}) };
   }
 
   #row(employeeId: string): DockerEmployeeContinuationRecord | undefined {
@@ -254,29 +276,50 @@ export class DockerSupervisorLaptops {
     );
   }
 
-  /** The standing default layout for this employee; see docker-standing-defaults.ts. */
-  #standingLayout(employeeId: string, state: CompanyState): DockerLaptopTemplate | undefined {
-    return standingLayout(
-      this.#others(employeeId, state).flatMap((value) => {
-        const template = this.#head(value.id, state)?.template;
-        return template ? [template] : [];
-      })
-    );
+  /** The layouts on record for the other employees' laptops; see docker-standing-defaults.ts. */
+  #otherLayouts(employeeId: string, state: CompanyState): DockerLaptopTemplate[] {
+    return this.#others(employeeId, state).flatMap((value) => {
+      const template = this.#head(value.id, state)?.template;
+      return template ? [template] : [];
+    });
+  }
+
+  /** The container of the employee's own last laptop, and the host directory of its home, from their record. */
+  #ownLaptopRecord(employeeId: string): { readonly containerId?: string; readonly home?: string } {
+    const row = this.#row(employeeId),
+      laptop = (row?.destination ?? row?.original) as
+        | { readonly containerId?: string; readonly home?: { readonly source?: string } }
+        | undefined;
+    return {
+      ...(laptop?.containerId ? { containerId: laptop.containerId } : {}),
+      ...(laptop?.home?.source ? { home: laptop.home.source } : {}),
+    };
   }
 
   /**
    * The laptop layout a rebuild would use: the one the owner approved for this employee's most recent laptop
    * operation, verbatim. The supervisor never writes one. An employee with none on record is given the owner's
-   * standing default, while that is switched on and the other laptops have one in common.
+   * standing default, while that is switched on: what their own last laptop had, read from its container, and from
+   * the other laptops only what that cannot say (`layoutFor`). `missing` says why there is none.
    */
-  #template(employeeId: string): DockerLaptopTemplate | undefined {
+  async #layout(employeeId: string): Promise<{ readonly template?: DockerLaptopTemplate; readonly missing?: string }> {
     const state = this.deps.company.store.snapshot(),
       own = this.#head(employeeId, state)?.template;
-    if (own) return own;
+    if (own) return { template: own };
     const employee = state.employees.find((value) => value.id === employeeId);
-    return employee && this.#standingEnabled(employee.owner, state)
-      ? this.#standingLayout(employeeId, state)
-      : undefined;
+    if (!employee || !this.#standingEnabled(employee.owner, state)) return {};
+    const { containerId, home } = this.#ownLaptopRecord(employeeId),
+      inspect = this.deps.inspectLaptop?.bind(this.deps);
+    const laptop = containerId && inspect ? await inspect(containerId).catch(() => undefined) : undefined;
+    const seatProfile = employee.runtimeRecipe?.subscriptionProfile?.id;
+    const found = layoutFor({
+      employeeId,
+      ...(home ? { home } : {}),
+      ...(seatProfile ? { seatProfile } : {}),
+      ...(laptop ? { own: laptop } : {}),
+      others: this.#otherLayouts(employeeId, state),
+    });
+    return 'layout' in found ? { template: found.layout } : { missing: found.missing };
   }
 
   /** What is already in memory about the laptop. No Engine call. */
@@ -298,7 +341,10 @@ export class DockerSupervisorLaptops {
       standing: {
         enabled: this.#standingEnabled(employee?.owner, state),
         limits: !!this.#standingLimits(employeeId, state),
-        layout: !!this.#standingLayout(employeeId, state),
+        // From memory: the others share one, or the employee has a laptop of their own that can be read for one.
+        layout:
+          !!standingLayout(this.#otherLayouts(employeeId, state)) ||
+          (!!this.#ownLaptopRecord(employeeId).containerId && !!this.deps.inspectLaptop),
       },
       ...(pending ? { rebuildPending: true } : {}),
     };
@@ -402,7 +448,7 @@ export class DockerSupervisorLaptops {
   async provider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence> {
     // A pending operation already proved its containers absent or discarded them before it retired the record.
     if (this.#pending(employee.id)) return 'no-laptop';
-    const template = this.#template(employee.id);
+    const { template } = await this.#layout(employee.id);
     if (!template) return 'unknown';
     let running: readonly string[];
     try {
@@ -733,18 +779,36 @@ export class DockerSupervisorLaptops {
   /**
    * Nothing that could start an agent in the laptop has moved since the read that allowed its discard: no set-up
    * step is in flight and the office terminal is the same object under the same process, or gone. A held terminal
-   * stays held for as long as it is that object, and what its pane shows is not asked again here: the pane of a
-   * laptop that is being stopped prints, which says nothing about a turn.
+   * stays held for as long as it is that object.
+   *
+   * For a laptop an agent may run in (`occupied`), the pane is part of it: from the proof until the rebuild says
+   * that the stop is next (`discarding`), no turn may have started and the pane may not have printed or taken a
+   * prompt. The rebuild's own checks and the seat preparation run in that time, and a turn that started in it would
+   * be killed with its prompt. After that word the pane is not asked again: a laptop that is being stopped prints,
+   * which says nothing about a turn.
    */
-  #quiet(employee: SupervisedEmployee): () => void {
+  #quiet(employee: SupervisedEmployee, occupied: boolean): { fence: () => void; discarding: () => void } {
     const before = this.deps.sessions.get(employee.sessionId),
-      pid = before?.pid ?? null;
-    return () => {
+      pid = before?.pid ?? null,
+      mark = (terminal: SupervisedScreenTerminal | undefined) =>
+        `${terminal?.lastActivityAt ?? 0}:${terminal?.lastPromptTime ?? 0}`,
+      shown = mark(before);
+    let stopping = false;
+    const fence = () => {
       if (this.deps.service.flightActive(employee.id))
         throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_BUSY');
       const now = this.deps.sessions.get(employee.sessionId);
       if (now && now.pid !== null && (now !== before || now.pid !== pid))
         throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_TARGET_CHANGED');
+      if (occupied && !stopping && now && (readTerminalTurn(now).turn === 'working' || mark(now) !== shown))
+        throw new TurnStarted();
+    };
+    return {
+      fence,
+      discarding: () => {
+        fence();
+        stopping = true;
+      },
     };
   }
 
@@ -765,15 +829,21 @@ export class DockerSupervisorLaptops {
     const onRecord = !terminal && this.deps.inputHeldOnRecord?.(employee.sessionId) === true;
     if (proved.includes('terminal-input-held') && !readSupervisedTerminal(terminal, onRecord).inputHeld)
       return { outcome: 'refused', detail: "the office terminal's input is not held" };
-    const { turn } = readTerminalTurn(terminal);
-    if (turn === 'working') return { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
+    const reading = readTerminalTurn(terminal),
+      { turn } = reading;
+    if (turn === 'working') return IN_A_TURN;
     if (proved.includes('agent-parked-at-screen')) {
       const screen = readParkedScreen(terminal).startupScreen;
       if (!screen?.proof || (screen.kind === 'first-run' && screen.answering))
         return { outcome: 'refused', detail: 'the agent is not shown to be parked on a start-up screen' };
     }
-    if (turn !== 'idle' && !proved.includes('agent-unreadable'))
+    const timed = turn === 'idle' && reading.idleSince !== undefined;
+    if (!timed && !proved.includes('agent-unreadable'))
       return { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
+    // The policy's own rule for "between turns", asked again here: idle is not enough, the pane must have been
+    // silent for as long as the policy demands. A pane that printed a moment ago tried nothing and is waited for.
+    if (timed && !paneQuiet(reading, (this.deps.now ?? Date.now)()))
+      return { outcome: 'busy', detail: "the agent's terminal has not been silent for two minutes" };
     return undefined;
   }
 
@@ -782,21 +852,26 @@ export class DockerSupervisorLaptops {
    * file comment: only the one recorded laptop, and only when it is empty or the policy chose the rebuild between
    * its agent's turns. A read that cannot say what runs there counts as an agent running, never as an empty laptop.
    * The empty candidate of an abandoned plan move is taken off the list first (`#withoutEmptyCandidates`).
+   *
+   * `occupied` says on what the discard rests when it is allowed: false for laptops shown to be empty, true for the
+   * one recorded laptop that is discarded between its agent's turns. Only the latter is fenced by its pane.
    */
   async #discardRefusal(
     employee: SupervisedEmployee,
     listed: readonly string[],
     proved: readonly SupervisorPrecondition[]
-  ): Promise<SupervisorActionResult | undefined> {
+  ): Promise<{ readonly refused?: SupervisorActionResult; readonly occupied: boolean }> {
     const running = await this.#withoutEmptyCandidates(employee, listed);
-    if (!running.length) return undefined;
+    if (!running.length) return { occupied: false };
     const row = this.#row(employee.id);
     const recorded = !!row?.destination && running.length === 1 && running[0] === row.destination.containerId;
     const presence = recorded ? await this.#destinationPresence(row!) : 'running';
-    if (presence === 'exited' || presence === 'absent') return undefined;
-    if (recorded && SUPERVISOR_OCCUPIED_PROOFS.some((name) => proved.includes(name)))
-      return this.#occupiedRefusal(employee, proved);
-    return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+    if (presence === 'exited' || presence === 'absent') return { occupied: false };
+    if (recorded && SUPERVISOR_OCCUPIED_PROOFS.some((name) => proved.includes(name))) {
+      const refused = this.#occupiedRefusal(employee, proved);
+      return { ...(refused ? { refused } : {}), occupied: true };
+    }
+    return { refused: { outcome: 'refused', detail: 'a running laptop is not shown to be empty' }, occupied: false };
   }
 
   /**
@@ -808,6 +883,7 @@ export class DockerSupervisorLaptops {
     guard: SupervisorGuard,
     proved: readonly SupervisorPrecondition[] = []
   ): Promise<SupervisorActionResult> {
+    let release: (() => void) | undefined;
     try {
       const pending = this.#pending(employee.id);
       if (pending) {
@@ -826,8 +902,8 @@ export class DockerSupervisorLaptops {
           ? { outcome: 'done', detail: 'finished ' + pending.operationId }
           : { outcome: 'refused', detail: resumed.code ?? resumed.state };
       }
-      const template = this.#template(employee.id);
-      if (!template) return { outcome: 'refused', detail: 'no approved laptop layout on record' };
+      const { template, missing } = await this.#layout(employee.id);
+      if (!template) return { outcome: 'refused', detail: missing ?? 'no approved laptop layout on record' };
       // The hold that the rebuild was chosen for is read once more. A laptop that has finished meanwhile is kept.
       if (proved.includes('laptop-held') && (await this.read(employee, guard))?.state === 'ready')
         return { outcome: 'refused', detail: 'the laptop is no longer held' };
@@ -835,11 +911,15 @@ export class DockerSupervisorLaptops {
       const blocked = 'code' in preview ? preview.code : undefined;
       if (blocked || !(preview.allowedActions as readonly string[]).includes('rebuild'))
         return { outcome: 'refused', detail: blocked ?? 'the rebuild is not offered' };
-      let fence: (() => void) | undefined;
+      let quiet: { fence: () => void; discarding: () => void } | undefined;
       if (preview.runningLaptops.length) {
-        const refused = await this.#discardRefusal(employee, preview.runningLaptops, proved);
-        if (refused) return refused;
-        fence = this.#quiet(employee);
+        // From before the last look at the pane until the rebuild has returned, nothing the office does may start a
+        // turn in a laptop that is about to be stopped: its input is held and chat for it stays queued, to be
+        // delivered to the new laptop. The hold is released on every way out of this method.
+        release = this.deps.holdInput?.(employee.sessionId);
+        const discard = await this.#discardRefusal(employee, preview.runningLaptops, proved);
+        if (discard.refused) return discard.refused;
+        quiet = this.#quiet(employee, discard.occupied);
       }
       // The home the new laptop will be bound to is read once more, last, whatever led to this rebuild: a
       // finished laptop that is stopped is never replaced while its home path holds other directories.
@@ -853,15 +933,19 @@ export class DockerSupervisorLaptops {
           sessionGeneration: preview.sessionGeneration,
           expectedScopeDigest: preview.scopeDigest,
           template,
-          ...(fence ? { confirmDiscardRunning: true as const } : {}),
+          ...(quiet ? { confirmDiscardRunning: true as const } : {}),
         },
-        this.#authority(employee, guard, fence)
+        this.#authority(employee, guard, quiet?.fence, quiet?.discarding)
       );
       return result.state === 'ready'
         ? { outcome: 'done', detail: 'rebuilt ' + result.operationId }
         : { outcome: 'refused', detail: result.code ?? result.state };
     } catch (error) {
+      // A turn that began after the proof: nothing was stopped, and the attempt is given back.
+      if (error instanceof TurnStarted) return IN_A_TURN;
       return refusal(error);
+    } finally {
+      release?.();
     }
   }
 }

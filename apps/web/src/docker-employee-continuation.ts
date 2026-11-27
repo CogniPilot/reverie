@@ -45,6 +45,12 @@ export class DockerEmployeeContinuationError extends Error {
 export interface DockerContinuationAuthority {
   readonly owner: string | undefined;
   require(): void;
+  /**
+   * Called once by a rebuild, after its own checks and immediately before it stops the first laptop. A caller that
+   * confirmed the discard on a proof about the laptop's agent proves it here for the last time, by throwing when it
+   * no longer holds: nothing has been stopped yet. What the laptop does after this call is the stop itself.
+   */
+  discarding?(): void;
   /** Independent office permission: recovery permission cannot end vacation. */
   requireOffice(): void;
 }

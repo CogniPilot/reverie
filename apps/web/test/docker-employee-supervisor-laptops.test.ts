@@ -6,7 +6,7 @@ import {
   type DockerContinuationAuthority,
 } from '../src/docker-employee-continuation.js';
 import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from '../src/docker-employee-supervisor-laptops.js';
-import { standingLayout, standingLimits } from '../src/docker-standing-defaults.js';
+import { layoutFor, ownLaptop, standingLayout, standingLimits } from '../src/docker-standing-defaults.js';
 import type { SupervisedEmployee } from '../src/employee-supervisor.js';
 
 const EMPLOYEE: SupervisedEmployee = {
@@ -98,6 +98,14 @@ function world() {
     /** Resource limits saved through the store, and what runs inside that save before it writes. */
     saved: [] as unknown[],
     duringSave: undefined as (() => void) | undefined,
+    /** What happens after the rebuild service was called and before it says that the stop is next. */
+    beforeStop: undefined as (() => void) | undefined,
+    /** The input holds taken and released for a session, in order. */
+    holds: [] as string[],
+    now: 10 * 60_000,
+    /** What the Engine says of the employee's own laptop, and the plan the employee is on. */
+    inspect: undefined as Record<string, unknown> | Error | undefined,
+    plan: undefined as string | undefined,
   };
   const took = (name: string, argument: unknown, authority: DockerContinuationAuthority) => {
     state.calls.push([name, argument]);
@@ -118,7 +126,12 @@ function world() {
       store: {
         snapshot: () => ({
           employees: [
-            { id: EMPLOYEE.id, dockerBinding: {}, ...(state.approved ? { dockerResourcePolicy: state.policy } : {}) },
+            {
+              id: EMPLOYEE.id,
+              dockerBinding: {},
+              ...(state.approved ? { dockerResourcePolicy: state.policy } : {}),
+              ...(state.plan ? { runtimeRecipe: { subscriptionProfile: { id: state.plan } } } : {}),
+            },
             ...state.others,
           ],
           settings: state.settings,
@@ -199,6 +212,10 @@ function world() {
       },
       rebuild: async (_id: string, request: unknown, authority: DockerContinuationAuthority) => {
         took('rebuild', request, authority);
+        // As the service does: its checks and the seat preparation, then word that the stop is next, then the stop.
+        state.beforeStop?.();
+        authority.require();
+        authority.discarding?.();
         state.during?.();
         authority.require();
         return state.rebuilt;
@@ -206,6 +223,16 @@ function world() {
     },
     sessions: { get: () => state.session },
     inputHeldOnRecord: () => state.heldOnRecord,
+    inspectLaptop: async (containerId: string) => {
+      state.calls.push(['inspect', containerId]);
+      if (state.inspect instanceof Error) throw state.inspect;
+      return state.inspect;
+    },
+    holdInput: (sessionId: string) => {
+      state.holds.push('hold ' + sessionId);
+      return () => void state.holds.push('release ' + sessionId);
+    },
+    now: () => state.now,
     current: () => state.current,
   } as unknown as DockerSupervisorLaptopDeps;
   const guard = () => {
@@ -411,7 +438,8 @@ describe('reading a laptop', () => {
       bound: true,
       policyApproved: true,
       templateOnRecord: true,
-      standing: { enabled: true, limits: false, layout: false },
+      // The employee has a laptop of their own whose container can be read for a layout.
+      standing: { enabled: true, limits: false, layout: true },
     });
     w.state.retired = [];
     w.state.record = undefined;
@@ -665,7 +693,8 @@ describe('rebuilding a laptop', () => {
     w.state.preview = new DockerEmployeeContinuationError('DOCKER_REPROVISION_BUSY') as never;
     expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'busy', detail: 'DOCKER_REPROVISION_BUSY' });
     w.state.retired = [];
-    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toBe('no approved laptop layout on record');
+    // No layout on record for anyone, and the employee's own laptop could not be read for one.
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toMatch(/^no laptop layout is on record for any laptop of this office/);
     expect(w.made('rebuild')).toEqual([]);
   });
 
@@ -1059,14 +1088,112 @@ describe('the owner’s standing defaults for an employee who has no limits or n
   });
 
   describe('layout', () => {
-    it('is the user, the scratch root and the drives that every laptop with a layout has', () => {
-      expect(standingLayout([layout(), layout({ mounts: [DRIVE, PROJECT] })] as never)).toEqual(layout());
-      // Read-only where any of them has it read-only; no alias unless all of them have it.
-      expect(
-        standingLayout([layout(), layout({ mounts: [{ ...DRIVE, readOnly: true }], workspaceAlias: undefined })] as never)
-      ).toEqual({ user: '1000:1000', scratchRoot: '/host/scratch/laptops', mounts: [{ ...DRIVE, readOnly: true }] });
+    /** What the other laptops share is given read-only: nobody is given a drive to write on by somebody else's layout. */
+    const shared = (patch: Record<string, unknown> = {}) => layout({ mounts: [{ ...DRIVE, readOnly: true }], ...patch });
+
+    it('taken from the other laptops, is their user, their scratch root and the drives all of them have, read-only', () => {
+      expect(standingLayout([layout(), layout({ mounts: [DRIVE, PROJECT] })] as never)).toEqual(shared());
+      // No alias unless all of them have it.
+      expect(standingLayout([layout(), layout({ workspaceAlias: undefined })] as never)).toEqual({
+        user: '1000:1000',
+        scratchRoot: '/host/scratch/laptops',
+        mounts: [{ ...DRIVE, readOnly: true }],
+      });
       // What belongs to one employee alone is never copied.
-      expect(standingLayout([layout({ network: 'reverie-boxed-api-one', accountSource: '/host/seats/plan-a' })] as never)).toEqual(layout());
+      expect(standingLayout([layout({ network: 'reverie-boxed-api-one', accountSource: '/host/seats/plan-a' })] as never)).toEqual(shared());
+    });
+
+    const HOME = '/host/state/employees/' + EMPLOYEE.id + '/home';
+    const SEAT = '/instances/default/console/accounts/plan-a';
+    /** The employee's own last laptop, as the Engine describes it. */
+    const own = (patch: Record<string, unknown> = {}) => ({
+      user: '1000:1000',
+      mounts: [
+        { source: '/host/drive', destination: '/reverie_workspace', readOnly: false },
+        { source: '/host/drive', destination: '/workspace', readOnly: false },
+        { source: '/host/projects/x', destination: '/projects/x', readOnly: true },
+        { source: '/host/scratch/laptops/employees/' + EMPLOYEE.id, destination: '/scratch', readOnly: false },
+        { source: HOME, destination: '/home/agent', readOnly: false },
+        { source: '/host/state/nix', destination: '/nix', readOnly: false },
+        { source: '/host/seats/plan-a', destination: SEAT, readOnly: false },
+      ],
+      networks: ['bridge', 'reverie-boxed-api-stan'],
+      ...patch,
+    });
+    const mine = { employeeId: EMPLOYEE.id, home: HOME, seatProfile: 'plan-a' };
+
+    it('is read from the employee’s own last laptop first: its user, its drives as they were, its network and its seat', () => {
+      expect(layoutFor({ ...mine, own: own(), others: [] })).toEqual({
+        layout: {
+          user: '1000:1000',
+          scratchRoot: '/host/scratch/laptops',
+          mounts: [
+            { source: '/host/drive', destination: '/reverie_workspace', readOnly: false },
+            { source: '/host/projects/x', destination: '/projects/x', readOnly: true },
+          ],
+          workspaceAlias: true,
+          network: 'reverie-boxed-api-stan',
+          accountSource: '/host/seats/plan-a',
+        },
+      });
+      // The other laptops' drives are not added to what this one had.
+      const others = [layout({ mounts: [DRIVE, PROJECT] })] as never;
+      expect(layoutFor({ ...mine, own: own({ mounts: own().mounts.slice(3) }), others })).toMatchObject({ layout: { mounts: [] } });
+    });
+
+    it('names no seat folder for a seat the laptop keeps in its home, or for an employee on no plan', () => {
+      const inHome = own({
+        mounts: [...own().mounts.slice(0, 6), { source: HOME + '/.reverie/seat-auth/plan-a', destination: SEAT, readOnly: false }],
+      });
+      expect(layoutFor({ ...mine, own: inHome, others: [] })).toMatchObject({ layout: expect.not.objectContaining({ accountSource: expect.anything() }) });
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, own: own(), others: [] })).toMatchObject({
+        layout: expect.not.objectContaining({ accountSource: expect.anything() }),
+      });
+    });
+
+    it('takes from the other laptops only what its own cannot say: the scratch root of a laptop from before that layout', () => {
+      const old = own({ mounts: own().mounts.filter((mount) => mount.destination !== '/scratch') });
+      expect(layoutFor({ ...mine, own: old, others: [] })).toEqual({
+        missing: 'no laptop of this office says where scratch space is kept, and this one does not either',
+      });
+      expect(layoutFor({ ...mine, own: old, others: [layout()] as never })).toMatchObject({
+        layout: { scratchRoot: '/host/scratch/laptops', mounts: [expect.objectContaining({ readOnly: false }), expect.anything()] },
+      });
+    });
+
+    it('without a laptop of its own to read, gives what the others share, and refuses when the plan needs a seat', () => {
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, others: [layout(), layout()] as never })).toEqual({ layout: shared() });
+      expect(layoutFor({ ...mine, others: [layout()] as never })).toEqual({
+        missing:
+          "the folder of this employee's plan sign-in cannot be told: their last laptop could not be read, and a " +
+          'laptop built without it would stop at the sign-in screen',
+      });
+      expect(layoutFor({ employeeId: EMPLOYEE.id, home: HOME, others: [] })).toEqual({
+        missing: 'no laptop layout is on record for any laptop of this office, and this employee has no laptop to read one from',
+      });
+    });
+
+    it('reads a laptop from what the Engine says of its container', () => {
+      expect(
+        ownLaptop({
+          Config: { User: '1000:1000' },
+          Mounts: [
+            { Type: 'bind', Source: '/host/drive', Destination: '/workspace', RW: true },
+            { Type: 'bind', Source: '/host/tools', Destination: '/instances/default/tools', RW: false },
+            { Type: 'volume', Source: '/var/lib/docker/volumes/x/_data', Destination: '/data', RW: true },
+          ],
+          NetworkSettings: { Networks: { 'reverie-boxed-api-stan': {}, bridge: {} } },
+        })
+      ).toEqual({
+        user: '1000:1000',
+        mounts: [
+          { source: '/host/drive', destination: '/workspace', readOnly: false },
+          { source: '/host/tools', destination: '/instances/default/tools', readOnly: true },
+        ],
+        networks: ['reverie-boxed-api-stan', 'bridge'],
+      });
+      expect(ownLaptop({ Config: {} })).toBeUndefined();
+      expect(ownLaptop(null)).toBeUndefined();
     });
 
     it('does not exist where no laptop has one or they differ in user or scratch root', () => {
@@ -1082,8 +1209,43 @@ describe('the owner’s standing defaults for an employee who has no limits or n
       expect(w.laptops.glance(EMPLOYEE.id)).toMatchObject({ templateOnRecord: false, standing: { enabled: true, layout: true } });
       expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('no-laptop');
       expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'rebuilt new' });
-      expect(w.made('preview')).toEqual([layout(), layout()]);
-      expect(w.made('rebuild')).toEqual([expect.objectContaining({ template: layout() })]);
+      // No laptop of the employee could be read here, so it is what the others share, read-only.
+      expect(w.made('preview')).toEqual([shared(), shared()]);
+      expect(w.made('rebuild')).toEqual([expect.objectContaining({ template: shared() })]);
+      expect(w.made('inspect')).toEqual([DESTINATION, DESTINATION]);
+    });
+
+    it('reads the employee’s own laptop for it, and builds with what that laptop had', async () => {
+      const w = bare();
+      w.state.approved = true;
+      w.state.plan = 'plan-a';
+      w.state.record = {
+        version: 2,
+        phase: 'resources-issued',
+        request: REQUEST,
+        original: { containerId: 'a'.repeat(64), home: { source: HOME } },
+        destination: { containerId: DESTINATION, home: { source: HOME } },
+      };
+      w.state.inspect = own();
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+      expect(w.made('rebuild')).toEqual([
+        expect.objectContaining({
+          template: expect.objectContaining({
+            network: 'reverie-boxed-api-stan',
+            accountSource: '/host/seats/plan-a',
+            mounts: [expect.objectContaining({ destination: '/reverie_workspace', readOnly: false }), expect.anything()],
+          }),
+        }),
+      ]);
+      // The laptop cannot be read and the plan needs its seat: nothing is built, and the step says why.
+      w.state.inspect = new Error('No such container');
+      w.state.calls.length = 0;
+      expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({
+        outcome: 'refused',
+        detail: expect.stringMatching(/^the folder of this employee's plan sign-in cannot be told/),
+      });
+      expect(w.made('rebuild')).toEqual([]);
+      expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
     });
 
     it('never replaces a layout the employee has, and is not used once the owner switched the defaults off', async () => {
@@ -1191,6 +1353,123 @@ describe('rebuilding any laptop an agent runs in, between that agent’s turns',
       // Without the long wait, an unread pane still refuses, held on record or not.
       w.state.session = undefined;
       expect(await w.laptops.rebuild(EMPLOYEE, w.guard, ['terminal-input-held'])).toEqual(UNREAD);
+    });
+  });
+});
+
+describe('proving "between turns" up to the moment a laptop is stopped', () => {
+  const BETWEEN = ['agent-between-turns'] as const;
+  const BUSY_TURN = { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
+  const SESSION = EMPLOYEE.sessionId;
+  /** The one running laptop is the recorded one, an agent runs in it, and its pane has been idle since `quietSince`. */
+  const occupied = (quietSince = 1000, terminal: Record<string, unknown> = {}) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'running', operationId: 'o', sessionId: 's' } };
+    w.state.session = { pid: 77, status: 'idle', isWorking: false, lastActivityAt: quietSince, lastPromptTime: quietSince, ...terminal };
+    return w;
+  };
+
+  it('asks for the same two silent minutes as the policy, at the step itself', async () => {
+    const w = occupied();
+    w.state.session = { ...w.state.session!, lastActivityAt: w.state.now - 119_000 };
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).toEqual({
+      outcome: 'busy',
+      detail: "the agent's terminal has not been silent for two minutes",
+    });
+    expect(w.made('rebuild')).toEqual([]);
+    w.state.session = { ...w.state.session!, lastActivityAt: w.state.now - 120_000 };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+    // An idle pane with no time on it is no reading at all.
+    const timeless = occupied(0);
+    expect(await timeless.laptops.rebuild(EMPLOYEE, timeless.guard, BETWEEN)).toEqual({
+      outcome: 'refused',
+      detail: "the office is not reading the agent's terminal",
+    });
+  });
+
+  it.each([
+    ['a turn starts', (s: Record<string, unknown>) => (s.isWorking = true)],
+    ['the pane prints', (s: Record<string, unknown>) => (s.lastActivityAt = 9 * 60_000)],
+    ['a prompt is submitted', (s: Record<string, unknown>) => (s.lastPromptTime = 9 * 60_000)],
+  ])('stops nothing when %s after the proof and before the stop, and gives the attempt back', async (_title, change) => {
+    const w = occupied();
+    w.state.beforeStop = () => change(w.state.session as Record<string, unknown>);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).toEqual(BUSY_TURN);
+    // The same at the last look, the one the service asks for immediately before it stops the laptop.
+    const last = occupied();
+    const state = last.state;
+    let asked = 0;
+    const session = state.session as Record<string, unknown>;
+    Object.defineProperty(state, 'session', {
+      get: () => {
+        // The proof, the fence's own start, the service's check, and then the look that precedes the stop.
+        if (++asked === 6) change(session);
+        return session;
+      },
+    });
+    expect(await last.laptops.rebuild(EMPLOYEE, last.guard, BETWEEN)).toEqual(BUSY_TURN);
+  });
+
+  it('does not take what a stopping laptop prints for a turn', async () => {
+    const w = occupied();
+    w.state.during = () => {
+      const session = w.state.session as Record<string, unknown>;
+      session.isWorking = true;
+      session.lastActivityAt = w.state.now;
+    };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+  });
+
+  it('asks the pane nothing more of a laptop that a read showed to be empty', async () => {
+    const w = occupied();
+    w.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    w.state.beforeStop = () => ((w.state.session as Record<string, unknown>).isWorking = true);
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+    // Input is held all the same while a running laptop is stopped: nothing is typed into a pane that is going.
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+  });
+
+  describe('holding input to the session meanwhile', () => {
+    it('takes the hold before the last look at the pane and releases it when the rebuild has returned', async () => {
+      const w = occupied();
+      const order: string[] = [];
+      w.state.beforeStop = () => order.push('service called with ' + w.state.holds.join(','));
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).toBe('done');
+      expect(order).toEqual(['service called with hold ' + SESSION]);
+      expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+      // The hold is in place before the pane is read for the proof: a wake cannot slip in between.
+      const early = occupied();
+      const session = early.state.session;
+      let heldAtProof: boolean | undefined;
+      Object.defineProperty(early.state, 'session', {
+        get: () => {
+          heldAtProof ??= early.state.holds.length === 1;
+          return session;
+        },
+      });
+      await early.laptops.rebuild(EMPLOYEE, early.guard, BETWEEN);
+      expect(heldAtProof).toBe(true);
+    });
+
+    it.each<[string, (w: ReturnType<typeof world>) => void, RegExp | undefined]>([
+      ['the pane shows a turn', (w) => ((w.state.session as Record<string, unknown>).isWorking = true), undefined],
+      ['a turn starts before the stop', (w) => (w.state.beforeStop = () => ((w.state.session as Record<string, unknown>).isWorking = true)), undefined],
+      ['the service refuses', (w) => (w.state.rebuilt = { operationId: 'new', state: 'held', code: 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED' }), undefined],
+      ['the service throws a refusal', (w) => (w.state.during = () => { throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_BUSY'); }), undefined],
+      ['the supervisor is switched off meanwhile', (w) => (w.state.during = () => (w.state.guard = false)), /switched off/],
+    ])('releases the hold when %s', async (_title, arrange, throws) => {
+      const w = occupied();
+      arrange(w);
+      if (throws) await expect(w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).rejects.toThrow(throws);
+      else expect((await w.laptops.rebuild(EMPLOYEE, w.guard, BETWEEN)).outcome).not.toBe('done');
+      expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    });
+
+    it('is not taken for a rebuild that stops no running laptop', async () => {
+      const w = world();
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+      expect(w.state.holds).toEqual([]);
     });
   });
 });
