@@ -1863,6 +1863,15 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     });
   });
 
+  it('treats a move the step watch held like any other held move', () => {
+    const held = move(
+      'The office stopped waiting for this move in its “starting” step: nothing came back from it for 10 minutes. ' +
+        'How far that step got is not known. The move is held as an office restart would leave it; nothing was repeated.'
+    );
+    expect(classifyEmployee(held)).toMatchObject({ condition: 'move-held-retryable', code: 'move-unrecognized' });
+    expect(timeline(held, 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
+  });
+
   it('leaves both steps to the owner’s switches', () => {
     const stuck = move('x');
     const history = since(START, classifyEmployee(stuck).fingerprint, { attempts: tried('continue-move', 3, START) });

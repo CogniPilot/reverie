@@ -10,6 +10,7 @@ import {
   PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
+  PlanMoveStepTimedOut,
   planMoveComposerWaitContinues,
   type PlanMoveInput,
   type PlanMoveRecord,
@@ -85,6 +86,9 @@ export interface DockerPlanMoveFlight {
   /** Exact in-memory original owner. No native effect authority is conferred. */
   current(): void;
   signal: AbortSignal;
+  /** The move was taken from this flight because its step never returned. It must not touch the record any more:
+   * the move is held by its owner, and may already be in another flight's hands. */
+  released?(): boolean;
 }
 function checkedFence(fence: unknown): () => void {
   if (typeof fence !== 'function') throw new PlanMoveError('Native plan verification is unavailable');
@@ -282,6 +286,7 @@ export async function runDockerPlanMove(
     return retireSource();
   } catch (error) {
     publication = 'failed';
+    if (flight.released?.()) return undefined;
     if (mode === 'reconcile' && completedBefore) {
       record.phase = 'completed';
       return {
@@ -291,8 +296,14 @@ export async function runDockerPlanMove(
     }
     // A changed credential snapshot cannot satisfy the original reservation.
     // Release it only after the store's exact-cursor CAS confirms nothing was issued.
+    // A step the watch told to stop is not a cancellation: the move stays held, as an office restart would leave it.
+    // A wait that was cut short reports only that it was aborted, so the watch's own sentence is recorded instead.
+    const reason: unknown = flight.signal.aborted ? flight.signal.reason : undefined,
+      timedOut = reason instanceof PlanMoveStepTimedOut ? reason : undefined,
+      cancelled = flight.signal.aborted && !timedOut,
+      cut = error === timedOut || (error instanceof Error && error.name === 'AbortError');
     const failedBeforeEffects =
-      ((flight.signal.aborted && record.phase === 'waiting') ||
+      ((cancelled && record.phase === 'waiting') ||
         (error instanceof PlanMoveAccountSnapshotChanged && (mode === 'new' || mode === 'continue'))) &&
       !cursor.material &&
       !cursor.sourceStop &&
@@ -301,7 +312,7 @@ export async function runDockerPlanMove(
       !cursor.paidDispatch &&
       !cursor.companyPublication &&
       !cursor.handoff;
-    const message = dockerPlanMoveFailureMessage(error).slice(0, 4000);
+    const message = dockerPlanMoveFailureMessage(timedOut && cut ? timedOut : error).slice(0, 4000);
     record.phase = 'recovery-required';
     record.error = message;
     try {

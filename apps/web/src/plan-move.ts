@@ -8,6 +8,7 @@ import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
 import { ResourceHistoricalSettlement } from './resource-native-client.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
@@ -230,6 +231,66 @@ export class PlanMoveAccountSnapshotChanged extends PlanMoveError {
 /** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
 export class PlanMoveUnconfirmed extends PlanMoveError {}
 
+/** A step of a laptop move was given up by the step watch (`PLAN_MOVE_STEP_LIMITS`). What it had done is not known. */
+export class PlanMoveStepTimedOut extends PlanMoveUnconfirmed {}
+
+/**
+ * How long one step of a laptop move is waited for before the move is held instead.
+ *
+ * A step is a chain of short waits, each with its own limit: a container engine command ends after thirty seconds,
+ * the journal lock after five, the wait for an employee to yield after five minutes, a read of the new session's
+ * composer after three. Between them the step passes a checkpoint (it asks whether it is still the move's flight),
+ * so a healthy step passes one at least every thirty seconds, and every second while it waits for a composer. What
+ * has no limit of its own is a wait on the office itself: an audit entry, a company record, a terminal, the launch.
+ *
+ * - `stallMs`: no checkpoint for this long means one such wait never returned. Ten minutes is twenty times the
+ *   longest wait that has a limit.
+ * - `phaseMs`: a backstop for a step that keeps passing checkpoints and never ends. Waiting for the employee
+ *   ends by its own five-minute limit, and checking the target and stopping the source are a handful of waits;
+ *   they get fifteen minutes. Building and starting the new laptop, and checking it (up to three composer reads,
+ *   the handoff and the completion), are dozens of waits, by a count of the steps some twenty minutes if every
+ *   one ran to its limit; they get forty-five. The counts are estimates from reading the steps, not measurements.
+ *   A phase that is not listed gets the longest.
+ * - `graceMs`: how long a step that was told to stop is given to stop by itself before the move is taken from it.
+ * - `checkMs`: how often a step is looked at.
+ */
+export interface PlanMoveStepLimits {
+  readonly stallMs: number;
+  readonly phaseMs: Readonly<Partial<Record<PlanMovePhase, number>>>;
+  readonly graceMs: number;
+  readonly checkMs: number;
+}
+export const PLAN_MOVE_STEP_LIMITS: PlanMoveStepLimits = {
+  stallMs: 10 * 60_000,
+  phaseMs: {
+    waiting: 15 * 60_000,
+    creating: 15 * 60_000,
+    stopping: 15 * 60_000,
+    starting: 45 * 60_000,
+    checking: 45 * 60_000,
+  },
+  graceMs: 60_000,
+  checkMs: 15_000,
+};
+
+/** The sentence a move is held with once the step watch gave its step up. It says what is and is not known. */
+function stepTimedOutMessage(phase: PlanMovePhase, stalledMs: number | undefined, lastedMs: number): string {
+  const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000)),
+    step =
+      phase === 'recovery-required'
+        ? 'while it was being continued'
+        : phase === 'completed'
+          ? 'while the old terminal of the finished move was being retired'
+          : `in its “${phase}” step`;
+  return (
+    `The office stopped waiting for this move ${step}: ` +
+    (stalledMs !== undefined
+      ? `nothing came back from it for ${minutes(stalledMs)} minutes. `
+      : `that had lasted ${minutes(lastedMs)} minutes. `) +
+    'How far that step got is not known. The move is held as an office restart would leave it; nothing was repeated.'
+  );
+}
+
 /** What a candidate that is short of its composer was showing instead, when that is a screen the office can name. */
 export interface PlanMoveWaitingAt extends Pick<StartupScreenStatus, 'label' | 'kind' | 'answering'> {
   /** The owner-facing name of the session, e.g. "Stan's new session". */
@@ -298,7 +359,10 @@ export class PlanMoves {
   }
   private loaded: Promise<void> | undefined;
 
-  constructor(private readonly port: PlanMovePort) {}
+  constructor(
+    private readonly port: PlanMovePort,
+    private readonly stepLimits: PlanMoveStepLimits = PLAN_MOVE_STEP_LIMITS
+  ) {}
 
   private init(): Promise<void> {
     this.loaded ??= (async () => {
@@ -1463,6 +1527,122 @@ export class PlanMoves {
       this.intents.delete(id);
     }
   }
+  /**
+   * Watch one flight of a laptop move (`PLAN_MOVE_STEP_LIMITS`). A step that passes no checkpoint for too long, or a
+   * phase that lasts too long, is first told to stop through the flight's own abort signal: a step that is waiting
+   * in a loop ends there and the runner holds the move in its usual way. A step that does not end within the grace
+   * is stuck in a wait that never returns, and the move is taken from it (`releaseStuckStep`).
+   */
+  private watchStep(
+    record: PlanMoveRecord,
+    abort: AbortController,
+    executor: PlanMoveExecutor
+  ): { progress(): void; released(): boolean; stop(): void } {
+    const limits = this.stepLimits;
+    let progressAt = performance.now(),
+      phase = record.phase,
+      phaseAt = progressAt,
+      toldAt: number | undefined,
+      released = false,
+      reason = '';
+    const look = () => {
+      const now = performance.now();
+      if (this.aborts.get(record.id) !== abort) return clearInterval(timer);
+      if (record.phase !== phase) [phase, phaseAt] = [record.phase, now];
+      if (toldAt === undefined) {
+        const stalled = now - progressAt >= limits.stallMs,
+          bound = limits.phaseMs[phase] ?? Math.max(...Object.values(limits.phaseMs));
+        if (!stalled && now - phaseAt < bound) return;
+        reason = stepTimedOutMessage(phase, stalled ? now - progressAt : undefined, now - phaseAt);
+        toldAt = now;
+        console.warn(`[plans] move ${record.id}: ${reason}`);
+        return abort.abort(new PlanMoveStepTimedOut(reason));
+      }
+      if (now - toldAt < limits.graceMs) return;
+      released = true;
+      clearInterval(timer);
+      void this.releaseStuckStep(record, abort, executor, reason);
+    };
+    const timer = setInterval(look, limits.checkMs);
+    timer.unref?.();
+    return {
+      progress: () => {
+        progressAt = performance.now();
+      },
+      released: () => released,
+      stop: () => clearInterval(timer),
+    };
+  }
+
+  /**
+   * Take a move from a step that is stuck in a wait which never returns, and leave it as an office restart would:
+   * held, with whatever its journal last recorded, and nothing repeated. The stuck step can do nothing more
+   * afterwards: every checkpoint it would pass refuses (`runDocker`), each effect and each journal write is behind
+   * one, and a continue takes the journal over under a new epoch before it issues anything. A provider launch whose
+   * intent is in the journal stays there, so a continue of such a move only reads and verifies and never launches
+   * again. The sentence the move is held with says that the step's outcome is not known.
+   *
+   * A move that had already completed keeps that: only the retirement of its old terminal is left unconfirmed.
+   */
+  private async releaseStuckStep(
+    record: PlanMoveRecord,
+    abort: AbortController,
+    executor: PlanMoveExecutor,
+    reason: string
+  ): Promise<void> {
+    const id = record.id;
+    if (this.aborts.get(id) !== abort) return;
+    // The move reads as working until the hold is written, so nothing continues or abandons it meanwhile.
+    this.intents.add(id);
+    this.aborts.delete(id);
+    try {
+      if (record.phase === 'completed') {
+        this.sourceRetirements.set(id, { state: 'unconfirmed', error: reason });
+        return;
+      }
+      record.phase = 'recovery-required';
+      record.error = reason;
+      // The journal may be what the step is stuck on. The write is given the same grace and no more; the hold in
+      // memory does not depend on it.
+      await Promise.race([
+        this.recordStuckStep(record, reason),
+        delay(this.stepLimits.graceMs, undefined, { ref: false }),
+      ]);
+      // The audit is one of the waits that can itself be stuck, so it is not waited for.
+      void Promise.resolve()
+        .then(() => executor.audit({ ...record }))
+        .catch(() => console.warn(`[plans] move ${id} could not post the audit of its stopped step`));
+    } finally {
+      this.intents.delete(id);
+      if (['completed', 'failed'].includes(record.phase)) this.releaseLock(record.employeeId);
+    }
+  }
+
+  /** Write the hold of a stuck step to the journal, or take over what the journal already settled. Best effort:
+   * when it cannot be written, this process holds the move in memory and a restart reads the journal as it is. */
+  private async recordStuckStep(record: PlanMoveRecord, reason: string): Promise<void> {
+    const store = this.port.dockerJournal,
+      id = record.id;
+    try {
+      const disk = await store!.record(id);
+      if (this.records.get(id) !== record || this.aborts.has(id) || !disk.dockerReplacement) return;
+      // The step had written its last word before it got stuck: that outcome stands.
+      const settled = ['completed', 'failed'].includes(disk.phase);
+      const saved = settled
+        ? disk
+        : await store!.phase(id, disk.dockerReplacement, { phase: 'recovery-required', error: reason }, () => {
+            if (this.records.get(id) !== record || this.aborts.has(id))
+              throw new PlanMoveError('The held move changed');
+          });
+      // A write that came back late must not reach into a continue that has started meanwhile.
+      if (this.records.get(id) !== record || this.aborts.has(id)) return;
+      Object.assign(record, structuredClone(saved));
+      if (saved.error === undefined) delete record.error;
+    } catch {
+      /* the hold stays in memory */
+    }
+  }
+
   private async runDocker(
     record: PlanMoveRecord,
     executor: PlanMoveExecutor,
@@ -1471,6 +1651,7 @@ export class PlanMoves {
     const abort = new AbortController();
     const completedBefore = record.phase === 'completed';
     this.aborts.set(record.id, abort);
+    const watch = this.watchStep(record, abort, executor);
     try {
       if (!this.port.dockerJournal) throw new PlanMoveError('The private Docker journal is unavailable', 503);
       const retirement = await runDockerPlanMove(
@@ -1479,18 +1660,23 @@ export class PlanMoves {
         this.port.dockerJournal,
         {
           signal: abort.signal,
+          released: () => watch.released(),
           current: () => {
             if (
+              watch.released() ||
               this.records.get(record.id) !== record ||
               (record.phase !== 'completed' && this.aborts.get(record.id) !== abort)
             )
               throw new PlanMoveError('The original Docker move flight changed');
+            watch.progress();
           },
         },
         mode
       );
-      if (retirement) this.sourceRetirements.set(record.id, retirement);
+      if (retirement && !watch.released()) this.sourceRetirements.set(record.id, retirement);
     } catch (error) {
+      // A step the move was taken from has no say about the record any more.
+      if (watch.released()) return;
       if (completedBefore && mode === 'reconcile')
         this.sourceRetirements.set(record.id, {
           state: 'unconfirmed',
@@ -1501,6 +1687,7 @@ export class PlanMoves {
         record.error = error instanceof Error ? error.message : 'Docker move unavailable';
       }
     } finally {
+      watch.stop();
       if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
       if (record.phase === 'completed' || record.phase === 'failed') this.releaseLock(record.employeeId);
     }

@@ -312,7 +312,7 @@ record offers. No sentence about a held move asks for a person.
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
 | A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
-| A step of the move is running | Nothing | |
+| A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
 The thirty minutes cover the recovery of the shared pool after a host restart.
 Only a continue can tell whether such a cause is gone, so the three continues
@@ -351,6 +351,35 @@ Continuing uses `supervisorEnabled`; abandoning and closing use
 (`supervisor_continue_move`, `supervisor_abandon_move`) with the move, the
 class of its error and the outcome. Asking twice is safe: a move that has ended
 is answered with `already closed` and nothing is written.
+
+**A step that never returns.** A move's step is a chain of short waits, each
+with its own limit: a container engine command ends after thirty seconds, the
+wait for the employee to yield after five minutes, a read of the new session's
+composer after three. Between them the step passes a checkpoint. What has no
+limit of its own is a wait on the office itself, such as an audit entry, a
+company record or the launch. The move service therefore watches every step of
+a laptop move. It gives a step up when no checkpoint was passed for ten
+minutes, which is twenty times the longest wait that has a limit, or when its
+phase has lasted longer than fifteen minutes (waiting for the employee,
+checking the target, stopping the source) or forty-five (building and starting
+the new laptop, checking it). Both are well above what the phase takes even if
+every one of its waits ran to its limit.
+
+A step that is given up is first told to stop. One that is waiting in a loop
+ends there, and the move is held in the usual way. One that has not ended a
+minute later is stuck in a wait that never returns, and the move is taken from
+it: the move is held with what its journal last recorded, exactly as an office
+restart would leave it, and its sentence says that the office stopped waiting
+and that the step's outcome is not known. The stuck step can do nothing
+afterwards, because every effect and every journal write of a step is behind a
+checkpoint, and those now refuse. Nothing is repeated: a launch whose intent
+is in the journal stays there, so the continue that follows only reads and
+verifies. From there the move is an ordinary held move: three continues, then
+the abandon. A move that had already completed stays completed; only the
+retirement of its old terminal is reported as unconfirmed. The line
+`[plans] move … The office stopped waiting …` is written, and the plan move
+audit records the hold. This watch belongs to the move service and has no
+switch, like the limits of the single waits. It covers laptop moves only.
 
 **Paid steps.** A move launches the agent in the new laptop once, and records
 that launch before it issues it. The office never repeats it and never starts
