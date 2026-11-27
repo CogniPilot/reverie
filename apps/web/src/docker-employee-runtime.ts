@@ -519,6 +519,11 @@ export class DockerEmployeeRuntime {
     const storageIdentity = new DockerStorageIdentityJournal(
       join(dirname(company.store.file), 'docker-storage-identity.jsonl')
     );
+    // What the owner's grant accepted where the office held no record, apart from the office's own records, so
+    // that `docker-storage-identity.jsonl` holds only what running laptops showed, in the form it always had.
+    const storageGrants = new DockerStorageIdentityJournal(
+      join(dirname(company.store.file), 'docker-storage-identity-granted.jsonl')
+    );
     const recoveryHelper = configuration.recoveryHelperImageId
       ? new DockerWorkerReattachHelper(
           command,
@@ -530,6 +535,7 @@ export class DockerEmployeeRuntime {
           {
             granted: (owner) => company.view(owner).settings.acceptStorageRenumbering === true,
             identity: storageIdentity,
+            grants: storageGrants,
           }
         )
       : undefined;

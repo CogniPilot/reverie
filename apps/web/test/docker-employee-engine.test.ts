@@ -41,6 +41,11 @@ import {
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 import { DockerWorkerReattachHelper } from '../src/docker-worker-reattach-helper.js';
+import { DockerStorageIdentityJournal } from '../src/docker-storage-identity-journal.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { z } from 'zod';
 import { allowedDockerTaskTransition, type DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
   dest = 'd'.repeat(64),
@@ -2785,7 +2790,16 @@ describe('the stored home of a stopped laptop after a host restart', () => {
   /** A failed `docker run`, as Node reports it: the command line, then what the client printed. */
   const failed = (stderr: string, code: number | undefined, killed = false) =>
     Object.assign(new Error('Command failed: docker run …\n' + stderr), { code, killed });
-  async function restarted(options: { granted?: boolean; recorded?: Identity; oldVerifier?: boolean } = {}) {
+  async function restarted(
+    options: {
+      granted?: boolean;
+      recorded?: Identity;
+      accepted?: Identity;
+      oldVerifier?: boolean;
+      /** Keep the two records in real journals in this directory, as the office does. */
+      journals?: string;
+    } = {}
+  ) {
     const f = await retainedStoppedFixture();
     f.holder().State = { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 };
     const state = {
@@ -2798,6 +2812,9 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       granted: options.granted ?? false,
       recorded: options.recorded as Identity | undefined,
       remembered: [] as Identity[],
+      /** What the grant accepted, in its own file. */
+      accepted: options.accepted as Identity | undefined,
+      grantsRemembered: [] as Identity[],
       verified: [] as string[][],
       observed: 0,
       /** The verifier refuses its second confirmation. */
@@ -2808,13 +2825,26 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       timeouts: 0,
       runs: 0,
     };
-    const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); }, {
+    const real = options.journals
+      ? {
+          identity: new DockerStorageIdentityJournal(join(options.journals, 'docker-storage-identity.jsonl')),
+          grants: new DockerStorageIdentityJournal(join(options.journals, 'docker-storage-identity-granted.jsonl')),
+        }
+      : undefined;
+    const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); }, real ? { granted: () => state.granted, ...real } : {
       granted: () => state.granted,
       identity: {
         read: () => state.recorded,
         remember: (identity) => {
           state.remembered.push(identity);
           state.recorded = identity;
+        },
+      },
+      grants: {
+        read: () => state.accepted,
+        remember: (identity) => {
+          state.grantsRemembered.push(identity);
+          state.accepted = identity;
         },
       },
     });
@@ -3206,9 +3236,10 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       const w = await gone({ granted: true });
       await expect(w.read(layout)).resolves.toBe('verified');
       expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
-      expect(w.state.remembered).toEqual([{ ...identity(w.f, '4'), basis: 'grant' }]);
+      // What the grant accepted is kept apart from the office's own records, which it leaves as they were.
+      expect(w.state.remembered).toEqual([]);
+      expect(w.state.grantsRemembered).toEqual([identity(w.f, '4')]);
       // The record stands for the grant and proves nothing by itself: with the grant withdrawn it accepts nothing.
-      w.state.recorded = { ...identity(w.f, '4'), basis: 'grant' } as never;
       w.state.granted = false;
       await expect(w.read(layout)).resolves.toBe('renumbered:absent-no-record-no-grant');
       expect(w.helper.verdict(w.f.row)).toBe('absent-no-record');
@@ -3222,7 +3253,43 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       const missing = await gone({ granted: true });
       missing.state.mounted.home = { ...missing.state.mounted.home, uid: 0, gid: 0, mode: 493 };
       await expect(missing.read(layout)).resolves.toBe('different');
-      expect(missing.state.remembered).toEqual([]);
+      expect([...missing.state.remembered, ...missing.state.grantsRemembered]).toEqual([]);
+    });
+
+    it('keeps what the grant accepted out of the record an earlier office reads, which still reads there', async () => {
+      // The record format of the office before the grant was recorded at all: version 1, exactly these fields.
+      const directory = { ino: z.string(), uid: z.number(), gid: z.number(), mode: z.number() };
+      const earlier = z
+        .object({
+          version: z.literal(1),
+          employeeId: z.string().uuid(),
+          home: z.object(directory).strict(),
+          nix: z.object(directory).strict(),
+          device: z.string(),
+          filesystemId: z.string(),
+          recordedAt: z.number(),
+        })
+        .strict();
+      const dir = mkdtempSync(join(tmpdir(), 'storage-grants-'));
+      try {
+        const w = await gone({ granted: true, journals: dir });
+        await expect(w.read(layout)).resolves.toBe('verified');
+        expect(w.helper.verdict(w.f.row)).toBe('absent-granted');
+        const own = join(dir, 'docker-storage-identity.jsonl'),
+          granted = join(dir, 'docker-storage-identity-granted.jsonl');
+        // Nothing was written to the office's own record; the acceptance is in a file of its own.
+        expect(existsSync(own)).toBe(false);
+        expect(readFileSync(granted, 'utf8').trim().split('\n')).toHaveLength(1);
+        // A running laptop gives the office a record of its own: it reads under the earlier format, line by line.
+        new DockerStorageIdentityJournal(own).remember(identity(w.f, '4'));
+        for (const line of readFileSync(own, 'utf8').trim().split('\n')) expect(() => earlier.parse(JSON.parse(line))).not.toThrow();
+        // With the grant withdrawn the acceptance proves nothing; the office's own record proves the home.
+        w.state.granted = false;
+        await expect(w.read(layout)).resolves.toBe('verified');
+        expect(w.helper.verdict(w.f.row)).toBe('absent-proved');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('accepts under the grant only what the laptop ran with: one filesystem, two real directories, its user and group', async () => {
@@ -3235,17 +3302,17 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       const emptyNix = await gone({ granted: true });
       emptyNix.state.mounted.nix = { ...emptyNix.state.mounted.nix, ino: '0' };
       await expect(emptyNix.read(layout)).resolves.toBe('different');
-      for (const w of [split, group, emptyNix]) expect(w.state.remembered).toEqual([]);
+      for (const w of [split, group, emptyNix]) expect([...w.state.remembered, ...w.state.grantsRemembered]).toEqual([]);
     });
 
     it('does not take a record the grant accepted for a proof of a new device number either', async () => {
       const seed = await restarted();
-      const w = await restarted({ recorded: { ...identity(seed.f, '4'), basis: 'grant' } as never });
+      const w = await restarted({ accepted: identity(seed.f, '4') });
       w.renumber('7');
       // Without the grant it is what no record is.
       await expect(w.read()).resolves.toBe('renumbered:no-record-no-grant');
       // Under the grant it is accepted again, as granted; a record a running laptop gives would prove it.
-      const granted = await restarted({ granted: true, recorded: { ...identity(seed.f, '4'), basis: 'grant' } as never });
+      const granted = await restarted({ granted: true, accepted: identity(seed.f, '4') });
       granted.renumber('7');
       await expect(granted.read()).resolves.toBe('verified');
       expect(granted.helper.verdict(granted.f.row)).toBe('renumbered-granted');

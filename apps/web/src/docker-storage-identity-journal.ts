@@ -58,11 +58,6 @@ export const DockerStorageIdentity = z
     device: decimal,
     /** The kernel filesystem ID of the one ext4 filesystem both directories are on. */
     filesystemId: positive,
-    /**
-     * `grant`: not seen in a running laptop, but accepted under the owner's standing grant for a home the office
-     * held no record of. Such a record proves nothing: it stands for the grant, while the grant is on.
-     */
-    basis: z.literal('grant').optional(),
     recordedAt: z.number().int().nonnegative().safe(),
   })
   .strict();

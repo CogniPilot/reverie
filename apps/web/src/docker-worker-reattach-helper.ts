@@ -7,7 +7,7 @@ import { DockerEmployeeContinuationError } from './docker-employee-continuation.
 import type { DockerEmployeeInspect } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
-import type { DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
+import type { DockerStorageIdentity, DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
 import { classifyDockerExecFailure } from './docker-exec-failure.js';
 
 type Directory = Readonly<{ dev: string; ino: string; uid: number; gid: number; mode: number }>;
@@ -124,7 +124,15 @@ export interface DockerStorageRenumbering {
   /** The owner's standing grant. Absent or false: the office accepts only what it can prove. */
   granted(owner: string | undefined): boolean;
   readonly identity: Pick<DockerStorageIdentityJournal, 'read' | 'remember'>;
+  /**
+   * What the grant accepted, kept apart from `identity` so that a record there is always one the office saw on a
+   * running laptop, in a file an earlier office reads as it always did. Absent: nothing accepted is kept.
+   */
+  readonly grants?: Pick<DockerStorageIdentityJournal, 'read' | 'remember'>;
 }
+
+/** The newest record of one employee's storage, and whether it is only what the grant accepted. */
+type HeldStorage = { readonly record: DockerStorageIdentity; readonly granted: boolean } | undefined | 'unreadable';
 
 const unchanged = (a: Directory, b: Directory) =>
   a.ino !== '0' && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid && a.mode === b.mode;
@@ -284,12 +292,12 @@ export class DockerWorkerReattachHelper {
       return { observation: historical };
     }
     const single = !!identity && historical.home.dev === historical.nix.dev;
-    const held = this.renumbering?.identity.read(row.employeeId);
+    const held = this.#held(row.employeeId);
     if (held === 'unreadable') {
       this.#decided(row, 'renumbered-record-unreadable');
       return { observation: historical };
     }
-    const recorded = held;
+    const recorded = held?.record;
     const sameDirectories = !!recorded && !!identity &&
       isDeepStrictEqual(recorded.home, identity.home) && isDeepStrictEqual(recorded.nix, identity.nix);
     // The office recorded these very directories on another filesystem: what is mounted is not that one.
@@ -299,7 +307,7 @@ export class DockerWorkerReattachHelper {
     }
     // A record that the owner's grant accepted proves nothing by itself: it stands for the grant, and holds only
     // while the grant does.
-    const independent = !!recorded && recorded.basis !== 'grant';
+    const independent = !!held && !held.granted;
     const proved = single && sameDirectories && independent;
     const granted =
       single && (!recorded || (!independent && sameDirectories)) && this.renumbering?.granted(row.owner) === true;
@@ -325,7 +333,7 @@ export class DockerWorkerReattachHelper {
    * - `granted`: the office holds no record of this employee, the owner's standing grant is set, and what is at
    *   the two paths is what the laptop record says the laptop ran with (`grantable`). That is all that can be known
    *   without a record, and the grant is the owner's word for exactly the case without one. What was accepted is
-   *   recorded as accepted under the grant (`basis: grant`), never as a proof: a later read of the same directories
+   *   recorded as accepted under the grant, in a file of its own (`grants`), never as a proof: a later read of the same directories
    *   is granted again while the grant is on, one of other directories is `different`, and only a record a running
    *   laptop gives replaces it.
    * - `no-record`: no record, and no grant. Nothing proves the directory, and it is not accepted.
@@ -349,7 +357,7 @@ export class DockerWorkerReattachHelper {
     const seen = await this.observe(source, current).catch(() => undefined);
     current();
     if (!seen) return 'unobserved';
-    const held = this.renumbering?.identity.read(row.employeeId);
+    const held = this.#held(row.employeeId);
     if (held === 'unreadable') {
       this.#decided(row, 'absent-record-unreadable');
       return 'record-unreadable';
@@ -360,12 +368,13 @@ export class DockerWorkerReattachHelper {
     };
     const granted = this.renumbering?.granted(row.owner) === true;
     if (held) {
+      const kept = held.record;
       const same = oneFilesystem(seen) && seen.home.ino !== '0' && seen.nix.ino !== '0' &&
-        isDeepStrictEqual(held.home, identity.home) && isDeepStrictEqual(held.nix, identity.nix) &&
-        held.filesystemId === identity.filesystemId;
+        isDeepStrictEqual(kept.home, identity.home) && isDeepStrictEqual(kept.nix, identity.nix) &&
+        kept.filesystemId === identity.filesystemId;
       // A record the grant accepted is the grant's word, never a proof: it holds while the grant does. What
       // contradicts it is refused all the same; only a record a running laptop gives replaces it.
-      const verdict = !same ? 'different' : held.basis !== 'grant' ? 'proved' : granted ? 'granted' : 'no-record';
+      const verdict = !same ? 'different' : !held.granted ? 'proved' : granted ? 'granted' : 'no-record';
       this.#decided(row, ABSENT_VERDICTS[verdict]);
       return verdict;
     }
@@ -380,11 +389,24 @@ export class DockerWorkerReattachHelper {
     this.#decided(row, 'absent-granted');
     // A record that cannot be written loses the next read's shortcut and nothing else.
     try {
-      this.renumbering!.identity.remember({ ...identity, basis: 'grant' });
+      this.renumbering!.grants?.remember(identity);
     } catch {
       /* the next read under the grant records it */
     }
     return 'granted';
+  }
+
+  /**
+   * The office's own record of this employee's storage, or else what the grant accepted. A record in either file
+   * that cannot be trusted is `unreadable`: neither a record nor the absence of one.
+   */
+  #held(employeeId: string): HeldStorage {
+    const own = this.renumbering?.identity.read(employeeId);
+    if (own === 'unreadable') return 'unreadable';
+    if (own) return { record: own, granted: false };
+    const accepted = this.renumbering?.grants?.read(employeeId);
+    if (accepted === 'unreadable') return 'unreadable';
+    return accepted ? { record: accepted, granted: true } : undefined;
   }
 
   /** Records what a running laptop's own mounts are on, for a later proof. `live` is what the laptop itself
