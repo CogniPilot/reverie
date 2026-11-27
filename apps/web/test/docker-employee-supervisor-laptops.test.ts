@@ -7,7 +7,7 @@ import {
 } from '../src/docker-employee-continuation.js';
 import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from '../src/docker-employee-supervisor-laptops.js';
 import { layoutFor, ownLaptop, standingLayout, standingLimits } from '../src/docker-standing-defaults.js';
-import type { SupervisedEmployee } from '../src/employee-supervisor.js';
+import { SUPERVISOR_LIMITS, type SupervisedEmployee } from '../src/employee-supervisor.js';
 
 const EMPLOYEE: SupervisedEmployee = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -43,7 +43,7 @@ const retired = (patch: Record<string, unknown> = {}) => ({
   ...patch,
 });
 
-function world() {
+function world(extra: Partial<DockerSupervisorLaptopDeps> = {}) {
   const state = {
     current: true,
     guard: true,
@@ -102,6 +102,8 @@ function world() {
     beforeStop: undefined as (() => void) | undefined,
     /** The input holds taken and released for a session, in order. */
     holds: [] as string[],
+    /** While set, the rebuild does not return until it settles. */
+    hang: undefined as Promise<void> | undefined,
     /** Each read of the stored home: the holds in place then, and the calls that had been made before it. */
     homeReads: [] as Array<{ holds: string; after: string[] }>,
     /** What the read of the stored home finds. A laptop that runs has no stopped storage to compare. */
@@ -221,6 +223,7 @@ function world() {
         authority.require();
         authority.discarding?.();
         state.during?.();
+        if (state.hang) await state.hang;
         authority.require();
         return state.rebuilt;
       },
@@ -249,7 +252,7 @@ function world() {
     if (!state.guard) throw new Error('The office supervisor was switched off');
   };
   const made = (name: string) => state.calls.filter(([call]) => call === name).map(([, argument]) => argument);
-  return { state, laptops: new DockerSupervisorLaptops(deps), guard, made };
+  return { state, laptops: new DockerSupervisorLaptops({ ...deps, ...extra }), guard, made };
 }
 
 describe('the office supervisor’s laptop authority', () => {
@@ -1506,5 +1509,33 @@ describe('proving "between turns" up to the moment a laptop is stopped', () => {
       expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
       expect(w.state.holds).toEqual([]);
     });
+  });
+});
+
+describe('a rebuild that does not return', () => {
+  const SESSION = EMPLOYEE.sessionId;
+  it('lets the hold on the session go at its deadline with a line in the log, and only once', async () => {
+    const lines: string[] = [];
+    const w = world({ holdDeadlineMs: 40, log: (line) => void lines.push(line) });
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    let finish!: () => void;
+    w.state.hang = new Promise<void>((resolve) => (finish = resolve));
+    const rebuild = w.laptops.rebuild(EMPLOYEE, w.guard);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(w.state.holds).toEqual(['hold ' + SESSION]);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    // Chat and capacity retries flow again although the rebuild has not returned.
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    expect(lines).toEqual([
+      `[supervisor] ${EMPLOYEE.name} (${EMPLOYEE.id}): the rebuild has not returned after 0 minutes; the hold on the session's input is released`,
+    ]);
+    finish();
+    expect((await rebuild).outcome).toBe('done');
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+  });
+
+  it('keeps the hold for thirty minutes by default, the supervisor’s own deadline for a step', () => {
+    expect(SUPERVISOR_LIMITS.stepDeadlineMs).toBe(30 * 60_000);
   });
 });

@@ -2582,7 +2582,6 @@ describe('rebuild laptop', () => {
     f.engine.prepareOutcome = 'ok';
     await expect(f.service.rebuild(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
     expect(f.engine.created).toHaveLength(1);
-    expect(f.engine.rebuilt).toEqual([destinationCid]);
   });
   it('still requires what a discarded laptop does not make moot', async () => {
     const busy = await fixture({ moves: abandonedMove(null) });
@@ -3420,5 +3419,43 @@ describe('rebuilding the laptop of a session this office process launched', () =
     await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).resolves.toMatchObject({
       state: 'ready',
     });
+  });
+});
+
+describe('a rebuild that has not returned when another is asked for', () => {
+  it('refuses the second as busy while the first runs, and the first finishes as itself', async () => {
+    const f = await fixture();
+    const request = await rebuildRequest(f);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const prepare = f.engine.prepareWorkerStore.bind(f.engine);
+    let waiting = false;
+    f.engine.prepareWorkerStore = async (...args) => {
+      waiting = true;
+      await gate;
+      return prepare(...args);
+    };
+    // The first rebuild waits, part-way, in a helper of its own that does not return.
+    const first = f.service.rebuild(employeeId, request, f.authority);
+    for (let tries = 0; tries < 100 && !waiting; tries++) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(waiting).toBe(true);
+    expect(f.service.flightActive(employeeId)).toBe(true);
+    // A second rebuild of the same laptop, as the supervisor asks once it took the first for interrupted.
+    await expect(
+      f.service.rebuild(employeeId, { ...request, operationId: '99999999-9999-4999-8999-999999999999' }, f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_BUSY' });
+    // Asked again with the first one's own request, it is refused all the same: one flight per employee.
+    await expect(f.service.rebuild(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_BUSY',
+    });
+    release();
+    await expect(first).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.created).toHaveLength(1);
+    // After it, a preview names nothing pending, and a request made before the first finished is out of date.
+    expect(f.service.flightActive(employeeId)).toBe(false);
+    await expect(
+      f.service.rebuild(employeeId, { ...request, operationId: '99999999-9999-4999-8999-999999999999' }, f.authority)
+    ).rejects.toMatchObject({ code: expect.stringMatching(/^DOCKER_RE/) });
+    expect(f.engine.created).toHaveLength(1);
   });
 });

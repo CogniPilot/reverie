@@ -1750,3 +1750,48 @@ describe('EmployeeSupervisor: an office start does not carry over what an earlie
     expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
   });
 });
+
+describe('EmployeeSupervisor: a repair step that does not return', () => {
+  /** A laptop nothing runs in, held for a cause only a rebuild settles; the first rebuild never returns by itself. */
+  const stuck = () => {
+    const w = world([hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED')], {
+      limits: { ...LIMITS, stepDeadlineMs: 10 * MINUTE } as typeof LIMITS,
+    });
+    let release!: () => void;
+    const first = new Promise<SupervisorActionResult>((resolve) => (release = () => resolve({ outcome: 'done', detail: 'rebuilt late' })));
+    let calls = 0;
+    // As the rebuild service answers a second rebuild of the same laptop while the first runs: busy, nothing tried.
+    w.state.respond = async (action) =>
+      action !== 'rebuild-laptop' ? { outcome: 'done' } : ++calls === 1 ? first : { outcome: 'busy', detail: 'DOCKER_REPROVISION_BUSY' };
+    return { ...w, release };
+  };
+
+  it('holds the employee while it is young, then takes it as interrupted and lets the ladder go on', async () => {
+    const w = stuck();
+    await w.run(5);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(w.report('a').waitingFor).toBe('the last step to return');
+    await w.run(10);
+    // Taken as interrupted: settled as failed, its attempt spent and the rebuild counted for the day.
+    const history = w.state.stored.get('a')!;
+    expect(history.rebuilds).toHaveLength(1);
+    expect(w.state.logs.some((line) => /rebuild-laptop has not returned after 1\d minutes; taken as interrupted/.test(line))).toBe(true);
+    expect(w.state.audits.map((entry) => entry.action)).toContain('supervisor_step_unreturned');
+    expect(w.report('a').waitingFor).not.toBe('the last step to return');
+    // The ladder asks for the rebuild again, and the rebuild service refuses it while the first one runs.
+    await w.run(10);
+    expect(w.state.acts.filter((name) => name === 'rebuild-laptop:a').length).toBeGreaterThan(1);
+    expect(w.state.stored.get('a')!.lastAction).toMatchObject({ action: 'rebuild-laptop', outcome: 'busy', detail: 'DOCKER_REPROVISION_BUSY' });
+  });
+
+  it('only says how the first step ended when it returns at last, and records nothing over the ladder', async () => {
+    const w = stuck();
+    await w.run(15);
+    const before = w.state.stored.get('a')!.lastAction;
+    expect(before).toMatchObject({ outcome: 'failed', detail: 'did not return in time; taken as interrupted' });
+    w.release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(w.state.logs.some((line) => line.includes('rebuild-laptop returned after it was taken as interrupted -> done rebuilt late'))).toBe(true);
+    expect(w.state.stored.get('a')!.lastAction).toEqual(before);
+  });
+});

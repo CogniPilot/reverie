@@ -264,6 +264,23 @@ A step that an office restart interrupted is settled as failed at the next
 office start, so nothing waits for its outcome. An interrupted rebuild counts
 against the limit per day, because it may have been carried out.
 
+A step that has not returned after thirty minutes is taken as interrupted in
+the same way, with a line `[supervisor] … has not returned after … minutes;
+taken as interrupted` and an audit entry `supervisor_step_unreturned`, and the
+employee's steps go on. Every container engine call of a rebuild, the longest
+step, ends after thirty seconds, and a rebuild makes some fifty of them in a
+row, so about twenty-five minutes if each ran to its limit (an estimate from
+reading the steps; a healthy rebuild takes well under a minute). Nothing stops
+the step itself. A second rebuild of the same laptop meets the rebuild
+service's own rule of one operation per employee at a time: it is refused as
+busy, which spends no attempt, for as long as the first runs. If the first
+returns later, its outcome is written to the log and changes nothing else.
+The rebuild's hold on the session's input and chat ends at the same thirty
+minutes, with a line in the log, so a rebuild that never returns does not keep
+the employee's chat queued for good. A turn that starts after that is still
+protected: the rebuild's last look at the pane before it stops the laptop
+refuses to stop it.
+
 The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
 next day the ladder goes on by itself. The rebuild of a laptop that was stopped

@@ -101,6 +101,7 @@ import type {
 } from './docker-employee-continuation-data.js';
 import { describeDockerProviderExit } from './docker-provider-exit.js';
 import { layoutFor, standingLayout, standingLimits, type OwnLaptop } from './docker-standing-defaults.js';
+import { SUPERVISOR_LIMITS } from './employee-supervisor.js';
 import type {
   SupervisedEmployee,
   SupervisorActionResult,
@@ -183,6 +184,14 @@ export interface DockerSupervisorLaptopDeps {
    * (`Session.pauseCapacityRetry`, `ChatroomDelivery.pauseForMigration`); nothing new is held here.
    */
   holdInput?(sessionId: string): () => void;
+  /**
+   * How long a rebuild keeps that hold at most. Default: the supervisor's own deadline for a step
+   * (`SUPERVISOR_LIMITS.stepDeadlineMs`, which says why that long). A rebuild that has not returned by then is
+   * taken to hang, and the employee's chat and capacity retries are let go with a line in the log.
+   */
+  readonly holdDeadlineMs?: number;
+  /** One console line. */
+  log?(line: string): void;
   /**
    * What the Engine says of one laptop container: its user, binds and networks. Read only, for the layout of an
    * employee who has none on record. Undefined, or a rejection, when the container cannot be read.
@@ -1013,6 +1022,35 @@ export class DockerSupervisorLaptops {
   }
 
   /**
+   * The hold a rebuild takes on the session's input (`holdInput`), released by the returned function, and in any
+   * case at `holdDeadlineMs`: a rebuild that never returns must not keep the employee's chat queued for good. Once
+   * the hold is let go a turn may start; the rebuild's last look at the pane before it stops the laptop then refuses
+   * to stop it (`#quiet`).
+   */
+  #holdInput(employee: SupervisedEmployee): (() => void) | undefined {
+    const release = this.deps.holdInput?.(employee.sessionId);
+    if (!release) return undefined;
+    let held = true;
+    const end = () => {
+      if (!held) return;
+      held = false;
+      clearTimeout(timer);
+      release();
+    };
+    const deadline = this.deps.holdDeadlineMs ?? SUPERVISOR_LIMITS.stepDeadlineMs;
+    const timer = setTimeout(() => {
+      if (!held) return;
+      end();
+      this.deps.log?.(
+        `[supervisor] ${employee.name} (${employee.id}): the rebuild has not returned after ${Math.round(deadline / 60_000)} ` +
+          "minutes; the hold on the session's input is released"
+      );
+    }, deadline);
+    timer.unref?.();
+    return end;
+  }
+
+  /**
    * The owner's rebuild: preview, then apply with the preview's own digest. A pending one is finished instead.
    * `proved` is what the policy asked to be proved for this step; see `#discardRefusal` and the file comment.
    */
@@ -1054,7 +1092,7 @@ export class DockerSupervisorLaptops {
         // From before the last look at the pane until the rebuild has returned, nothing the office does may start a
         // turn in a laptop that is about to be stopped: its input is held and chat for it stays queued, to be
         // delivered to the new laptop. The hold is released on every way out of this method.
-        release = this.deps.holdInput?.(employee.sessionId);
+        release = this.#holdInput(employee);
         const discard = await this.#discardRefusal(employee, preview.runningLaptops, proved);
         if (discard.refused) return discard.refused;
         quiet = this.#quiet(employee, discard.occupied);

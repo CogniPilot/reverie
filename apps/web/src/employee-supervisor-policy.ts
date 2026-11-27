@@ -2819,13 +2819,26 @@ export const INTERRUPTED_BY_RESTART = 'interrupted by an office restart';
  * failed, with the attempt still spent. A rebuild is the one step whose effect is rationed by the day, so an
  * interrupted one is counted as carried out: the limit must not be passed because the office fell over.
  */
-function settleInterrupted(history: SupervisorHistory): SupervisorHistory {
+function settleInterrupted(history: SupervisorHistory, detail = INTERRUPTED_BY_RESTART): SupervisorHistory {
   const last = history.lastAction;
   if (last?.outcome !== 'issued') return history;
-  const settled = settleSupervisorAttempt(history, 'failed', INTERRUPTED_BY_RESTART);
+  const settled = settleSupervisorAttempt(history, 'failed', detail);
   return last.action === 'rebuild-laptop' && !last.uncounted
     ? { ...settled, rebuilds: [...settled.rebuilds, last.at].slice(-8) }
     : settled;
+}
+
+/** Said of a step that had not returned when its time was up (`settleUnreturnedSupervisorAttempt`). */
+export const UNRETURNED_STEP = 'did not return in time; taken as interrupted';
+
+/**
+ * A step that has not returned long after any healthy one would have is settled the way an office restart settles
+ * one it cut off: as failed, with the attempt spent, and a rebuild counted as carried out. The ladder goes on from
+ * there instead of waiting for an outcome that may never come. The step itself is not stopped, and whatever it
+ * still does is decided by its own service, which runs one operation per employee at a time.
+ */
+export function settleUnreturnedSupervisorAttempt(history: SupervisorHistory): SupervisorHistory {
+  return settleInterrupted(history, UNRETURNED_STEP);
 }
 
 /**

@@ -711,6 +711,7 @@ export class DockerEmployeeRuntime {
     else said('none');
     return new DockerSupervisorLaptops({
       ...office,
+      log: (line) => console.log(line),
       inspectLaptop: async (containerId) =>
         ownLaptop((JSON.parse(await a.command.run(['container', 'inspect', containerId])) as unknown[])[0]),
       company: a.company,

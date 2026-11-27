@@ -1161,7 +1161,9 @@ describe('a laptop whose agent exited while other work may still run in it', () 
     expect(new Set(stuck.rebuilt.map((row) => row.id)).size).toBe(1);
     const probe = stuck.rebuilt[0]!.id;
     for (const id of FIVE.filter((other) => other !== probe)) {
-      expect(stuck.report(id).waitingFor).toMatch(/to come back healthy: its agent exited as this employee's did/);
+      expect(stuck.report(id).waitingFor).toMatch(
+        /^the laptop of [A-E] to come back healthy: its agent exited as this employee's did/
+      );
       expect(stuck.report(id).needsHuman).toBeUndefined();
     }
     const fine = exited(FIVE, false);

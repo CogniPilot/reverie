@@ -57,6 +57,7 @@ import {
   sightEmployee,
   rollSupervisorHistory,
   settleSupervisorAttempt,
+  settleUnreturnedSupervisorAttempt,
   type SupervisorAction,
   type SupervisorAssessment,
   type SupervisorCondition,
@@ -299,6 +300,15 @@ export interface EmployeeSupervisorLimits {
   readonly occupiedRebuildSpacingMs?: number;
   /** A cause that several employees share must have been shared this long before one laptop is rebuilt as a probe. */
   readonly sharedCauseProbeMs?: number;
+  /**
+   * A repair step that has not returned after this long is taken as interrupted, and the employee's ladder goes on
+   * (`settleUnreturnedSupervisorAttempt`). The longest step is a rebuild: every container engine call in it ends
+   * after thirty seconds, and by a count of its steps it makes some fifty of them one after the other (the reads
+   * of its scope, the sign-in folder's helper, the stop and removal of the laptop and its leftovers, the new
+   * source), so about twenty-five minutes if every one ran to its limit. That count is an estimate from reading the
+   * steps, not a measurement; a healthy rebuild takes well under a minute.
+   */
+  readonly stepDeadlineMs?: number;
   /** After this long without reading any laptop, the office asks for its own restart. */
   readonly officeBlindRestartMs?: number;
   /** A restart of the office no longer ago than this counts as tried for the fault that stands now. */
@@ -325,6 +335,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   sharedCauseProbeMs: 30 * 60_000,
   officeBlindRestartMs: 30 * 60_000,
   officeRestartTriedMs: 6 * 60 * 60_000,
+  stepDeadlineMs: 30 * 60_000,
 };
 /** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
 const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
@@ -402,6 +413,13 @@ export interface SupervisorReport {
   readonly otherWork?: SupervisorOtherWork;
 }
 
+/** One repair step in flight. `givenUp` once it was taken as interrupted (`stepDeadlineMs`). */
+interface SupervisorStep {
+  readonly action: SupervisorAction;
+  readonly at: number;
+  givenUp: boolean;
+}
+
 class SupervisorStopped extends Error {
   constructor(reason: string) {
     super(reason);
@@ -425,6 +443,10 @@ export class EmployeeSupervisor {
   readonly #reports = new Map<string, SupervisorReport>();
   /** Employees with an action that has not returned yet. */
   readonly #acting = new Map<string, Promise<void>>();
+  /** The repair steps among those, and when each was issued. */
+  readonly #steps = new Map<string, SupervisorStep>();
+  /** Repair steps that were taken as interrupted because they had not returned in time, and still have not. */
+  readonly #unreturned = new Map<string, SupervisorStep>();
   readonly #announced = new Map<string, string>();
   readonly #readings = new Map<string, { at: number; operationId: string; reading: SupervisorLaptopReading }>();
   /** The observation being assessed reused a kept laptop reading. Only read within one pass. */
@@ -1131,6 +1153,8 @@ export class EmployeeSupervisor {
       return false;
     }
     if (this.#acting.has(employee.id)) {
+      // A step that has not returned in time is taken as interrupted; the next pass looks at the employee afresh.
+      if (this.#overdueStep(employee, now)) return false;
       // An employee with a step in flight says nothing about the office; the step itself keeps the office from
       // asking for its own restart (`#officeOperating`).
       this.#reading.set(employee.id, 'no-evidence');
@@ -1482,7 +1506,7 @@ export class EmployeeSupervisor {
     if (other && this.#reports.get(other.id)?.condition !== 'healthy')
       return {
         waitingFor:
-          `the laptop of  to come back healthy: its agent exited as this employee's did, it was ` +
+          `the laptop of ${other.name} to come back healthy: its agent exited as this employee's did, it was ` +
           'rebuilt first, and no other laptop is rebuilt for the same cause before that',
       };
     // This laptop is the probe now. A step that finds the employee busy tries nothing, and it stays the probe.
@@ -1508,6 +1532,7 @@ export class EmployeeSupervisor {
   ): Promise<void> {
     const tier = this.policy.ladder[action].tier;
     const run = this.ports.actions[action]!;
+    const step: SupervisorStep = { action, at: this.ports.now(), givenUp: false };
     const work = (async (): Promise<SupervisorActionResult> => {
       try {
         const guard = this.#guard(employee, tier);
@@ -1519,49 +1544,13 @@ export class EmployeeSupervisor {
           : { outcome: 'failed', detail: describe(error) };
       }
     })().then((result) => {
+      if (step.givenUp) return this.#lateStep(employee, step, result);
       this.#acting.delete(employee.id);
-      const ended = settleSupervisorAttempt(
-        this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY,
-        result.outcome,
-        result.detail
-      );
-      // A step that found the employee busy tried nothing, so it does not count against the office either.
-      const { occupiedRebuildAt: _mark, ...unmarked } = ended;
-      const settled: SupervisorHistory =
-        marked && result.outcome === 'busy'
-          ? { ...unmarked, ...(marked.before === undefined ? {} : { occupiedRebuildAt: marked.before }) }
-          : ended;
-      this.#remember(employee.id, settled);
-      const report = this.#reports.get(employee.id);
-      if (report) this.#reports.set(employee.id, { ...report, last: settled.lastAction });
-      const attempt = settled.attempts[action]?.count ?? 0;
-      // Reporting never changes what was done, and never throws out of this promise.
-      try {
-        this.ports.log(
-          `[supervisor] ${employee.name} (${employee.id}): ${action} -> ${result.outcome}` +
-            `${result.detail ? ' ' + result.detail : ''} (${assessment.condition}${assessment.code ? ', ' + assessment.code : ''}; attempt ${attempt})`
-        );
-        this.ports.audit({
-          admin: 'office supervisor',
-          action: 'supervisor_' + action.replaceAll('-', '_'),
-          target: employee.name,
-          detail: {
-            id: employee.id,
-            sessionId: employee.sessionId,
-            condition: assessment.condition,
-            ...(assessment.code ? { code: assessment.code } : {}),
-            outcome: result.outcome,
-            ...(result.detail ? { detail: result.detail } : {}),
-            attempt,
-            ...(assessment.next.preconditions.length ? { proved: [...assessment.next.preconditions] } : {}),
-            ...(move ? { moveId: move.id } : {}),
-          },
-        });
-      } catch {
-        /* best-effort */
-      }
+      this.#steps.delete(employee.id);
+      this.#settleStep(employee, action, assessment, move, marked, result);
     });
     this.#acting.set(employee.id, work);
+    this.#steps.set(employee.id, step);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waited = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, this.limits.actionWaitMs);
@@ -1571,6 +1560,106 @@ export class EmployeeSupervisor {
     if (timer) clearTimeout(timer);
     // A step that outlives the wait keeps its seat in #acting; its result is still recorded when it returns.
     void work.then(() => this.#persist()).catch(() => {});
+  }
+
+  /** Record how one repair step ended. */
+  #settleStep(
+    employee: SupervisedEmployee,
+    action: SupervisorAction,
+    assessment: SupervisorAssessment,
+    move: SupervisorMove | undefined,
+    marked: { readonly before: number | undefined } | undefined,
+    result: SupervisorActionResult
+  ): void {
+    const ended = settleSupervisorAttempt(
+      this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY,
+      result.outcome,
+      result.detail
+    );
+    // A step that found the employee busy tried nothing, so it does not count against the office either.
+    const { occupiedRebuildAt: _mark, ...unmarked } = ended;
+    const settled: SupervisorHistory =
+      marked && result.outcome === 'busy'
+        ? { ...unmarked, ...(marked.before === undefined ? {} : { occupiedRebuildAt: marked.before }) }
+        : ended;
+    this.#remember(employee.id, settled);
+    const report = this.#reports.get(employee.id);
+    if (report) this.#reports.set(employee.id, { ...report, last: settled.lastAction });
+    const attempt = settled.attempts[action]?.count ?? 0;
+    // Reporting never changes what was done, and never throws out of this promise.
+    try {
+      this.ports.log(
+        `[supervisor] ${employee.name} (${employee.id}): ${action} -> ${result.outcome}` +
+          `${result.detail ? ' ' + result.detail : ''} (${assessment.condition}${assessment.code ? ', ' + assessment.code : ''}; attempt ${attempt})`
+      );
+      this.ports.audit({
+        admin: 'office supervisor',
+        action: 'supervisor_' + action.replaceAll('-', '_'),
+        target: employee.name,
+        detail: {
+          id: employee.id,
+          sessionId: employee.sessionId,
+          condition: assessment.condition,
+          ...(assessment.code ? { code: assessment.code } : {}),
+          outcome: result.outcome,
+          ...(result.detail ? { detail: result.detail } : {}),
+          attempt,
+          ...(assessment.next.preconditions.length ? { proved: [...assessment.next.preconditions] } : {}),
+          ...(move ? { moveId: move.id } : {}),
+        },
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * A repair step that has not returned within `stepDeadlineMs` is taken as interrupted, as an office restart
+   * would take it: it is settled as failed with its attempt spent, a rebuild is counted as carried out, and the
+   * employee is no longer held by it, so their ladder goes on. Nothing stops the step itself. A second rebuild of
+   * the same laptop that the ladder may then ask for meets the rebuild service's own single flight and journal: it
+   * is refused as busy while the first runs, and a first one that ends later finds its preview out of date.
+   */
+  #overdueStep(employee: SupervisedEmployee, now: number): boolean {
+    const step = this.#steps.get(employee.id);
+    if (!step || now - step.at < this.#resolved.stepDeadlineMs) return false;
+    step.givenUp = true;
+    this.#steps.delete(employee.id);
+    this.#acting.delete(employee.id);
+    this.#unreturned.set(employee.id, step);
+    this.#remember(
+      employee.id,
+      settleUnreturnedSupervisorAttempt(this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY)
+    );
+    const minutes = Math.round((now - step.at) / 60_000);
+    try {
+      this.ports.log(
+        `[supervisor] ${employee.name} (${employee.id}): ${step.action} has not returned after ${minutes} minutes; ` +
+          'taken as interrupted, and the repair steps go on'
+      );
+      this.ports.audit({
+        admin: 'office supervisor',
+        action: 'supervisor_step_unreturned',
+        target: employee.name,
+        detail: { id: employee.id, sessionId: employee.sessionId, step: step.action, minutes },
+      });
+    } catch {
+      /* best-effort */
+    }
+    return true;
+  }
+
+  /** A step that was taken as interrupted has returned after all. Its outcome is said; the ladder has moved on. */
+  #lateStep(employee: SupervisedEmployee, step: SupervisorStep, result: SupervisorActionResult): void {
+    if (this.#unreturned.get(employee.id) === step) this.#unreturned.delete(employee.id);
+    try {
+      this.ports.log(
+        `[supervisor] ${employee.name} (${employee.id}): ${step.action} returned after it was taken as interrupted ` +
+          `-> ${result.outcome}${result.detail ? ' ' + result.detail : ''}`
+      );
+    } catch {
+      /* best-effort */
+    }
   }
 
   /**
