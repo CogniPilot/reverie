@@ -678,7 +678,9 @@ export class DockerSupervisorLaptops {
    * Record which filesystem the directories of this employee's finished, running laptop are on, so that a later
    * device renumbering can be proved. It is asked for every finished laptop alike: one a set-up made, one a
    * rebuild made and one a plan move made. Attendance is not asked, as for the limits: a laptop that runs has a
-   * home, wherever its employee is. `unsupported`: this office has no verifier that can make the read.
+   * home, wherever its employee is. `unsupported`: this office has no verifier, or one that was built before the
+   * read existed. A configured image that was not in the Engine when the office last looked is asked again: it
+   * may have been loaded since, and the first read that answers settles what it can do.
    */
   async rememberHome(
     employee: SupervisedEmployee,
@@ -686,7 +688,7 @@ export class DockerSupervisorLaptops {
   ): Promise<'recorded' | 'not-running' | 'not-recorded' | 'unsupported' | 'failed'> {
     const row = this.#row(employee.id),
       storage = this.deps.storage;
-    if (!storage?.remember || !['full', 'unknown'].includes(this.storedHomeCheck())) return 'unsupported';
+    if (!storage?.remember || ['none', 'compare-only'].includes(this.storedHomeCheck())) return 'unsupported';
     if (!row?.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-running';
     try {
       return await storage.remember(row, this.#authority(employee, guard).require);

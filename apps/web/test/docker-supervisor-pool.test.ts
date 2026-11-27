@@ -573,13 +573,17 @@ describe('the stored home of a stopped laptop', () => {
     w.state.records.delete(A.id);
     await expect(w.laptops.rememberHome(A, guard)).resolves.toBe('not-running');
     // A verifier image that cannot read what is mounted, and an office with none, record nothing.
-    for (const capability of ['compare-only', 'image-missing', 'none'] as const) {
+    for (const capability of ['compare-only', 'none'] as const) {
       w.state.capability = capability;
       await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('unsupported');
     }
-    // An image that has not answered the probe yet is asked: the first read settles what it can do.
-    w.state.capability = 'unknown';
-    await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('recorded');
+    expect(w.state.remembered).toEqual([]);
+    // An image that has not answered the probe yet is asked: the first read settles what it can do. So is one
+    // that was not in the Engine when the office started: it may have been loaded since.
+    for (const capability of ['unknown', 'image-missing'] as const) {
+      w.state.capability = capability;
+      await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('recorded');
+    }
   });
 });
 
