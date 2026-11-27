@@ -141,7 +141,7 @@ describe('configured display timezone', () => {
     }
     expect(owners).toEqual(['company-owner', 'company-owner', 'company-owner']);
     const server = readFileSync(new URL('../src/web/server.ts', import.meta.url), 'utf8');
-    expect(server).toMatch(/this\.inputWatch = createInputWatch\(\{\s*ledgerFile:[^\n]+\n\s*timeZone: owner => this\.companyService\.view\(owner\)\.settings\.timeZone,/);
+    expect(server).toMatch(/this\.inputWatch = createInputWatch\(\{\s*ledgerFile:[^\n]+\n\s*timeZone: owner => this\.companyService\.settings\(owner\)\.timeZone,/);
   });
 });
 
