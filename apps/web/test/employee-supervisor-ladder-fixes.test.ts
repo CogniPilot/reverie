@@ -65,7 +65,11 @@ const held = (code: string, extra: Partial<NonNullable<SupervisorObservation['la
     },
   });
 const withLaptop = (base: SupervisorObservation, laptop: Patch['laptop'], session: Patch['session'] = {}) =>
-  ({ ...base, session: { ...base.session, ...session }, laptop: { ...base.laptop, ...laptop } }) as SupervisorObservation;
+  ({
+    ...base,
+    session: { ...base.session, ...session },
+    laptop: { ...base.laptop, ...laptop },
+  }) as SupervisorObservation;
 const since = (at: number, fingerprint: string, patch: Partial<SupervisorHistory> = {}): SupervisorHistory => ({
   ...EMPTY_SUPERVISOR_HISTORY,
   fingerprint,
@@ -131,7 +135,10 @@ describe('a step that an office restart interrupted', () => {
   });
 
   it('leaves a step that had returned, and a rebuild that is never counted, as they were', () => {
-    const done = { ...since(T, FAILED), lastAction: { action: 'rebuild-laptop' as const, at: T + HOUR, outcome: 'done' as const } };
+    const done = {
+      ...since(T, FAILED),
+      lastAction: { action: 'rebuild-laptop' as const, at: T + HOUR, outcome: 'done' as const },
+    };
     expect(resumeSupervisorHistory(done)).toEqual(done);
     const uncounted = issueSupervisorAttempt(since(T, FAILED), 'rebuild-laptop', T + HOUR, true);
     expect(resumeSupervisorHistory(uncounted).rebuilds).toEqual([]);
@@ -156,13 +163,16 @@ describe('a laptop whose own read says it is ready, with an agent running in it'
     ['a code that says the agent could not be verified', 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED'],
     ['a code that says the laptop is stopped', 'DOCKER_CONTINUATION_DESTINATION_STOPPED'],
     ['a code the table does not list', 'DOCKER_SOMETHING_NOBODY_LISTED'],
-  ])('is never rebuilt for the office’s older attach report, stuck on %s: the terminal is what is wrong', (_title, code) => {
-    const seen = contradicted(code);
-    expect(classifyEmployee(seen)).toMatchObject({ condition: 'viewer-lost', code });
-    expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, rebuilds)).toBeUndefined();
-    // What is tried is the step that discards nothing.
-    expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, (result) => result.next.action === 'reconnect-viewer')).toBe(0);
-  });
+  ])(
+    'is never rebuilt for the office’s older attach report, stuck on %s: the terminal is what is wrong',
+    (_title, code) => {
+      const seen = contradicted(code);
+      expect(classifyEmployee(seen)).toMatchObject({ condition: 'viewer-lost', code });
+      expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, rebuilds)).toBeUndefined();
+      // What is tried is the step that discards nothing.
+      expect(until(EMPTY_SUPERVISOR_HISTORY, seen, T, (result) => result.next.action === 'reconnect-viewer')).toBe(0);
+    }
+  );
 
   it('is not rebuilt because a health report calls the agent dead while the read finds it running', () => {
     const dead = observed({
@@ -215,7 +225,8 @@ describe('a laptop whose own read says it is ready, with an agent running in it'
 
 describe('a laptop that reports a code while an agent runs in it', () => {
   /** An agent runs in the held laptop; the office terminal is attached and has shown the pane idle for a long time. */
-  const reachable = (seen: SupervisorObservation) => withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0 });
+  const reachable = (seen: SupervisorObservation) =>
+    withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0 });
   /** The same, with no reading of the pane at all. */
   const unreachable = (seen: SupervisorObservation) => withLaptop(seen, { provider: 'running' });
 
@@ -263,11 +274,14 @@ describe('a laptop that reports a code while an agent runs in it', () => {
     expect(until(EMPTY_SUPERVISOR_HISTORY, working, T, rebuilds)).toBeUndefined();
   });
 
-  it.each(others)('is rebuilt for %s only after two hours in which the office had no reading of its pane', (_title, seen) => {
-    const after = until(EMPTY_SUPERVISOR_HISTORY, unreachable(seen), T, rebuilds)!;
-    expect(after).toBeGreaterThanOrEqual(2 * HOUR);
-    expect(after).toBeLessThanOrEqual(2 * HOUR + 15 * MINUTE);
-  });
+  it.each(others)(
+    'is rebuilt for %s only after two hours in which the office had no reading of its pane',
+    (_title, seen) => {
+      const after = until(EMPTY_SUPERVISOR_HISTORY, unreachable(seen), T, rebuilds)!;
+      expect(after).toBeGreaterThanOrEqual(2 * HOUR);
+      expect(after).toBeLessThanOrEqual(2 * HOUR + 15 * MINUTE);
+    }
+  );
 
   it('says why a laptop the office can reach is kept', () => {
     const seen = reachable(held('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED'));
@@ -298,7 +312,11 @@ describe('a laptop that reports a code while an agent runs in it', () => {
   it('watches a hold that names no code at all for thirty minutes, like any code it does not know', () => {
     const nameless = observed({
       session: { available: false },
-      laptop: { record: { phase: 'resources-issued', version: 2, operationId: 'op-1' }, restoration: { state: 'held', code: '' }, provider: 'exited' },
+      laptop: {
+        record: { phase: 'resources-issued', version: 2, operationId: 'op-1' },
+        restoration: { state: 'held', code: '' },
+        provider: 'exited',
+      },
     });
     expect(classifyEmployee(nameless).condition).toBe('held-needs-rebuild');
     expect(until(EMPTY_SUPERVISOR_HISTORY, nameless, T, rebuilds)).toBe(30 * MINUTE);
@@ -309,7 +327,11 @@ describe('work an agent left running when its turn ended', () => {
   const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
   /** An agent runs in the held laptop; its pane is idle and silent since long ago. */
   const idle = (background: boolean, seen = failed) =>
-    withLaptop(seen, { provider: 'running' }, { turn: 'idle', idleSince: 0, ...(background ? { background: true } : {}) });
+    withLaptop(
+      seen,
+      { provider: 'running' },
+      { turn: 'idle', idleSince: 0, ...(background ? { background: true } : {}) }
+    );
   /** Roll what the driver rolls: the classification and what the idle pane says of work left running. */
   const rollOn = (history: SupervisorHistory, seen: SupervisorObservation, from: number, to: number) => {
     for (let now = from; now < to; now += 30_000) history = rollSupervisorHistory(history, sightEmployee(seen), now);
@@ -363,7 +385,12 @@ describe('work an agent left running when its turn ended', () => {
     // A shell that never ends does not keep the laptop for good: four hours from its first sighting.
     expect(dueAfter(history, idle(true), T + 2 * HOUR + MINUTE)).toBe(2 * HOUR - MINUTE);
     // The work finished, and later the agent left other work running: that has its own four hours.
-    history = rollOn(rollOn(history, idle(false), T + 3 * HOUR, T + 3 * HOUR + MINUTE), failed, T + 3 * HOUR + MINUTE, T + 5 * HOUR);
+    history = rollOn(
+      rollOn(history, idle(false), T + 3 * HOUR, T + 3 * HOUR + MINUTE),
+      failed,
+      T + 3 * HOUR + MINUTE,
+      T + 5 * HOUR
+    );
     expect(rollSupervisorHistory(history, sightEmployee(idle(true)), T + 5 * HOUR).backgroundSince).toBe(T + 5 * HOUR);
   });
 
@@ -376,7 +403,10 @@ describe('work an agent left running when its turn ended', () => {
   it('gets the same four hours behind a terminal whose input is held', () => {
     const heldInput = observed({
       session: { inputHeld: true, turn: 'idle', idleSince: 0, background: true },
-      laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }, provider: 'running' },
+      laptop: {
+        restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' },
+        provider: 'running',
+      },
     });
     const refused: SupervisorHistory = {
       ...since(T, classifyEmployee(heldInput).fingerprint, { attempts: tried('reconnect-viewer', 1, T + 45_000) }),
