@@ -2700,7 +2700,7 @@ describe('employee supervisor: after a host restart', () => {
 
   it('asks what runs in the laptop first, then waits for the shared pool, for as long as it is down', () => {
     expect(assess().next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
-    for (const pool of [undefined, 'down', 'unknown'] as const)
+    for (const pool of [undefined, 'down'] as const)
       for (const at of [10 * MINUTE, 6 * HOUR, 72 * HOUR]) {
         const waiting = assess({ provider: 'no-laptop', ...(pool ? { pool } : {}) }, at);
         expect(waiting.next, `${pool} at ${at}`).toMatchObject({
@@ -2710,6 +2710,67 @@ describe('employee supervisor: after a host restart', () => {
         expect(waiting.needsHuman).toBeUndefined();
         expect(waiting.condition).toBe('held-needs-rebuild');
       }
+  });
+
+  it('says why the pool is still stopped after fifteen minutes, with the refusal’s own code, and still rebuilds nothing', () => {
+    const stuck = (poolDetail: NonNullable<SupervisorObservation['laptop']['poolDetail']>, at: number) =>
+      assess({ provider: 'no-laptop', pool: 'down', poolDetail }, at);
+    const refused = { since: 0, code: 'DOCKER_POOL_COLD_WORKERS_RUNNING' };
+    expect(stuck(refused, 14 * MINUTE).needsHuman).toBeUndefined();
+    expect(stuck(refused, 14 * MINUTE).next.waitingFor).toMatch(/the shared pool/);
+    for (const at of [15 * MINUTE, 6 * HOUR, 72 * HOUR]) {
+      const late = stuck(refused, at);
+      expect(late.next.action, String(at)).toBeNull();
+      expect(late.needsHuman).toMatch(
+        /^The shared pool of this office has been stopped since 1970-01-01 00:00 UTC, and no laptop can be set up without it\. A laptop container of this office is running, paused or restarting although the pool's anchor is stopped.*\(DOCKER_POOL_COLD_WORKERS_RUNNING\) The office looks at the pool again every minute, and brings this employee back by itself once the pool runs\.$/
+      );
+    }
+    const sentences: Array<[string, RegExp]> = [
+      ['DOCKER_POOL_COLD_WRITER_UNCONFIRMED', /helper container that writes the pool's limits is still running, or is of an image/],
+      ['DOCKER_POOL_COLD_ANCHOR_DEAD', /reports the pool's anchor container as dead.*the owner has to remove that container/],
+      ['DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED', /neither running nor stopped: it is paused or restarting/],
+      ['DOCKER_POOL_COLD_POLICY_CHANGED', /approved with different limits for the shared pool, and no record says which approval is the newer one.*Approve the same pool limits for every employee/],
+      ['DOCKER_POOL_COLD_ATTEMPT_HELD', /was started and did not finish.*starts no second one beside it/],
+    ];
+    for (const [code, sentence] of sentences) {
+      expect(stuck({ since: 0, code }, HOUR).needsHuman, code).toMatch(sentence);
+      expect(stuck({ since: 0, code }, HOUR).needsHuman, code).toContain(`(${code})`);
+    }
+    // A code the office has no sentence for is still named.
+    expect(stuck({ since: 0, code: 'DOCKER_POOL_SOMETHING_NEW' }, HOUR).needsHuman).toMatch(
+      /The pool service refused to start it \(DOCKER_POOL_SOMETHING_NEW\)\./
+    );
+    // A step that was refused: its code, and when the office takes the step again.
+    const again = stuck(
+      { since: 0, code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', step: 'recover-pool', stepAt: 3 * HOUR, refused: 'DOCKER_RESOURCE_HELPER_FAILED' },
+      HOUR
+    );
+    expect(again.needsHuman).toMatch(
+      /refused to start it \(DOCKER_RESOURCE_HELPER_FAILED\)\. The office looks at the pool again every minute and takes its next step \(recover-pool\) at 1970-01-01 03:00 UTC/
+    );
+    // The step needs the owner's switch for repairs, and it is off: that is what is needed.
+    const off = stuck({ since: 0, code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', step: 'recover-pool', repairOff: true }, HOUR);
+    expect(off.needsHuman).toMatch(/supervisorAutoRepair is off.*Switch supervisorAutoRepair on.*cold-preview/);
+    // Another laptop of the box is attached: the pool is alive, whatever an earlier look found.
+    expect(assess({ provider: 'no-laptop', pool: 'down', poolAlive: true, poolDetail: refused }, HOUR).next.action).toBe(
+      'rebuild-laptop'
+    );
+  });
+
+  it('waits for a pool it could not read for fifteen minutes and no longer, and never takes it for stopped', () => {
+    const unread = (since: number, at: number) =>
+      assess({ provider: 'no-laptop', pool: 'unknown', poolDetail: { since, code: 'the read failed' } }, at);
+    for (const at of [10 * MINUTE, 14 * MINUTE]) {
+      expect(unread(0, at).next, String(at)).toMatchObject({
+        action: null,
+        waitingFor: 'a read of the shared pool, which the office could not make yet',
+        at: 15 * MINUTE,
+      });
+      expect(unread(0, at).needsHuman).toBeUndefined();
+    }
+    // After that the ladder goes on as it would without the look: a pool that cannot be read is not a dead end.
+    for (const at of [15 * MINUTE, 6 * HOUR]) expect(unread(0, at).next.action, String(at)).toBe('rebuild-laptop');
+    expect(unread(50 * MINUTE, HOUR).next.action).toBeNull();
   });
 
   it('never takes an unread laptop or an unread pool for a stopped one', () => {
@@ -2831,8 +2892,18 @@ describe('employee supervisor: after a host restart', () => {
       action: null,
       waitingFor: expect.stringMatching(/the shared pool/),
     });
-    // A pool the office could not read holds no start: the set-up finds out, as it did before the office looked.
-    expect(fresh({ pool: 'unknown' }).next.action).toBe('start-continuation');
+    // A pool the office could not read yet holds the start for fifteen minutes, so that the round's starts are
+    // not used up in the minutes after a host restart. After that the set-up finds out, as it did before.
+    expect(fresh({ pool: 'unknown', poolDetail: { since: 0 } }).next).toMatchObject({
+      action: null,
+      waitingFor: 'a read of the shared pool, which the office could not make yet',
+      at: 15 * MINUTE,
+    });
+    expect(fresh({ pool: 'unknown', poolDetail: { since: -6 * MINUTE } }).next.action).toBe('start-continuation');
+    // Stopped for fifteen minutes: the start still waits, and the report says why.
+    const stuck = fresh({ pool: 'down', poolDetail: { since: -6 * MINUTE, code: 'DOCKER_POOL_COLD_POLICY_CHANGED' } });
+    expect(stuck.next.action).toBeNull();
+    expect(stuck.needsHuman).toMatch(/approved with different limits for the shared pool/);
   });
 
   it('keeps its switch: with repairs off the rebuild is named and nothing is waited for on the owner\'s behalf', () => {
@@ -2920,11 +2991,14 @@ describe('employee supervisor: after a host restart', () => {
     it('does not rebuild a laptop that has been starting for fifteen minutes before the pool is back', () => {
       expect(classifyEmployee(restarted({ continuation: { state: 'pending', phase: 'resources-issued', allowedActions: ['observe'] } })).condition).toBe('starting');
       expect(stalled({}).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['no-agent-running'] });
-      for (const pool of ['down', 'unknown'] as const)
-        expect(stalled({ provider: 'no-laptop', pool }).next, pool).toMatchObject({
-          action: null,
-          waitingFor: 'the shared pool, which the office is recovering after a host restart',
-        });
+      expect(stalled({ provider: 'no-laptop', pool: 'down' }).next).toMatchObject({
+        action: null,
+        waitingFor: 'the shared pool, which the office is recovering after a host restart',
+      });
+      expect(stalled({ provider: 'no-laptop', pool: 'unknown', poolDetail: { since: 10 * MINUTE } }).next).toMatchObject({
+        action: null,
+        waitingFor: 'a read of the shared pool, which the office could not make yet',
+      });
       expect(stalled({ provider: 'no-laptop', pool: 'up' }).next.action).toBe('rebuild-laptop');
     });
 
@@ -2957,7 +3031,13 @@ describe('employee supervisor: after a host restart', () => {
         action: null,
         waitingFor: 'the shared pool, which the office is recovering after a host restart',
       });
-      for (const pool of ['up', 'unknown', 'none'] as const) expect(offered({ pool }).next.action, pool).toBe('resend-continuation');
+      for (const pool of ['up', 'none'] as const) expect(offered({ pool }).next.action, pool).toBe('resend-continuation');
+      // A pool that could not be read holds the request for fifteen minutes, and no longer.
+      expect(offered({ pool: 'unknown', poolDetail: { since: 0 } }).next).toMatchObject({
+        action: null,
+        waitingFor: 'a read of the shared pool, which the office could not make yet',
+      });
+      expect(offered({ pool: 'unknown', poolDetail: { since: -5 * MINUTE } }).next.action).toBe('resend-continuation');
       // Another laptop that is attached says the pool is alive, whatever an earlier look found.
       expect(offered({ pool: 'down', poolAlive: true }).next.action).toBe('resend-continuation');
     });

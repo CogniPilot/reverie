@@ -344,10 +344,13 @@ brings everyone back without the owner:
    `docker-pool/cold-preview`, then `docker-pool/cold-recover` with that
    preview's digest, through the service behind those routes. The service
    itself refuses while any laptop of the box runs, while an earlier pool
-   writer is not accounted for, or when the anchor is not cleanly stopped; the
+   writer is not accounted for, or when the anchor is not stopped; the
    supervisor decides none of that and never takes a failed read for a stopped
    pool. Any employee's laptop record can stand for the pool, those in the
-   office first; nobody is started or returned to the office by this step.
+   office first. When the preview is refused through one record, whatever the
+   refusal, the next record is tried. Nobody is started or returned to the
+   office by this step. The table below says what the step does in every
+   state a host restart can leave.
 4. Once the anchor runs, each employee is taken through the ordinary steps: the
    stored home is read (next section), the laptop is rebuilt, and the fresh
    laptop is started, which resumes the saved conversation. Two steps are
@@ -367,8 +370,39 @@ carries `uncounted`. Everything else a rebuild
 needs still holds for it: the layout, the pool, the stored home, the two
 attempts of a round and `supervisorAutoRepair`.
 
+What the pool step does, by what it finds. In every row the office looks again
+one minute later, and `supervisor.pool` shows the finding (`pool`, `detail`),
+the step it will take (`step`), when it looks again (`nextLookAt`), when it
+takes the step (`stepAt`) and since when the pool has not been up
+(`downSince`).
+
+| What the office finds | What it does |
+| --- | --- |
+| The anchor runs and its observation is on record | nothing; `pool: up` |
+| The anchor runs and only its observation record is missing | `reconcile-pool` after one minute |
+| The anchor runs and its limits or their acknowledgement are missing | nothing cold; `pool: up`, and the limits check puts them back in place |
+| The anchor is stopped, by any exit status, killed for memory, or left by a start that failed | `recover-pool` after one minute: preview, then recover |
+| A recovery was issued and did not finish | `finish-pool-recovery`: the same attempt is finished as itself, through the employee it was issued for first |
+| The anchor is stopped and a pool helper was created and never started, or ended (with any status) before the office recorded it | the helper is proved unable to write anything more (a configured image, its fixed configuration, never started or ended, twice the same) and the pool is recovered past it. Nothing is read from it and nobody starts it |
+| The anchor is stopped and a pool helper still runs, or is of an image this office is not configured with | `pool: down`, `DOCKER_POOL_COLD_WRITER_UNCONFIRMED`; recovered once the helper has ended. One of an unknown image has to be removed by the owner |
+| The anchor is stopped and a laptop on record no longer exists | the Engine is asked for exactly that ID; a laptop it positively reports absent runs nothing, and the pool is recovered. One that is there and cannot be read stops the step |
+| The anchor is stopped and any container with this box's laptop label runs, is paused or is restarting, on record or not | `pool: down`, `DOCKER_POOL_COLD_WORKERS_RUNNING`; recovered once none does. The office never stops a laptop for this |
+| The anchor is paused or restarting | `pool: down`, `DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`; recovered once the Engine reports it stopped |
+| The Engine reports the anchor dead | `pool: down`, `DOCKER_POOL_COLD_ANCHOR_DEAD`. A dead container cannot be started and the office has no operation that removes an anchor: the owner has to remove it. A host restart does not leave this state |
+| The anchor on record is gone, or another container is the anchor now | that record cannot stand for the pool and the next one is tried. When none can, `pool: none`: nothing is waited for and the next laptop set-up creates or starts the pool |
+| Employees are approved with different pool limits | `pool: down`, `DOCKER_POOL_COLD_POLICY_CHANGED`. A policy carries no time of approval, so the office cannot tell the newer one and does not choose: the owner approves one for everyone |
+| The pool cannot be read at all | `pool: unknown` with the code. Never recovered cold. Rebuilds, starts and re-sent set-ups wait for fifteen minutes, then go on as they would without the look |
+| `supervisorAutoRepair` is off and the step would start the anchor | the step is not taken; `stepNeedsRepairSwitch`, and the report names the switch and the calls |
+
+While the pool is stopped every employee who waits for it shows
+`waitingFor: the shared pool, …`. Once it has been stopped for fifteen minutes
+without a break the same employees show a `needsHuman` that names the cause
+with the refusal's own code, and the time of the next step. That is information
+only: the office goes on looking every minute and brings everyone back by itself
+once the cause is gone.
+
 A recovery that fails is tried again one minute later, then after 5, 15 and 60
-minutes, then every six hours for as long as the pool is down. Nothing here
+minutes, then every hour for as long as the pool is down. Nothing here
 stops for good. A recovery that was issued and did not finish (the office
 stopped, an Engine reply was lost, the helper failed) is finished as itself
 before anything else: its anchor start is repeated only when every native fact
@@ -394,15 +428,17 @@ What this does not cover, stated plainly:
   finished record whose holder says so. Its rebuild is counted against the
   limit per day like any other.
 - A pool that cannot be read (its status is refused for a reason other than a
-  stopped anchor) is never recovered cold. Rebuilds wait, the look is repeated
-  every minute, and `supervisor.pool.detail` carries the code. A fresh laptop
-  that already exists is still started, as it was before.
+  stopped anchor) is never recovered cold. The look is repeated every minute
+  and `supervisor.pool.detail` carries the code. Rebuilds, starts and re-sent
+  set-ups wait for it for fifteen minutes and then go on.
+- A pool helper that ended with status 0 before the office recorded it does not
+  stop the cold start, but the pool observation that follows is refused
+  (`DOCKER_POOL_ORIGINAL_ACK_CHANGED`) until the operation that owns the helper
+  has recorded how it ended. The anchor runs by then, so that operation can go
+  on. This path is reasoned from the code and has no test of its own.
 - When no laptop record, current or retired by a rebuild, names the pool, the
   stopped anchor cannot be recovered by anyone. That is an office that never
   finished a laptop, where the first set-up creates the pool.
-- Employees whose approved limits name different pool policies cannot share
-  one pool; the recovery is refused for all of them until the owner approves
-  one policy.
 - This is source and component coverage. A restart of a real host has not been
   qualified with it.
 

@@ -92,6 +92,18 @@ export interface SupervisorPolicy {
    * long without a break, the report says what is needed; the office still never rebuilds by the recorded path.
    */
   readonly storedHomeUnreadMs: number;
+  /**
+   * A shared pool that has been stopped this long without a break, while the office looked at it every minute, is
+   * said in the report of every employee who waits for it, with the code of what stands in the way. The office
+   * goes on looking and recovers the pool by itself once that clears.
+   */
+  readonly poolStuckMs: number;
+  /**
+   * A shared pool the office could not read holds a laptop set-up and a rebuild back for this long, so that no
+   * attempt is spent while the office is still finding out whether the pool is stopped. After that they go on as
+   * they would without the look: a pool that cannot be read is never taken for one that is stopped.
+   */
+  readonly poolUnreadGraceMs: number;
 }
 
 const SECOND = 1000;
@@ -219,6 +231,8 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
   unrecognizedAfterMs: 30 * MINUTE,
   blindRebuildMs: 2 * 60 * MINUTE,
   storedHomeUnreadMs: 30 * MINUTE,
+  poolStuckMs: 15 * MINUTE,
+  poolUnreadGraceMs: 15 * MINUTE,
 };
 
 /** The two owner switches. Both off means the supervisor only describes what it sees. */
@@ -415,6 +429,19 @@ export interface SupervisorObservation {
       readonly cause?: SupervisorStoredHomeCause;
       readonly since: number;
       readonly reads: number;
+    };
+    /**
+     * With `pool`, while it is not up: since when (`since`), the code of the last look (`code`), the step the
+     * office takes next and when (`step`, `stepAt`), the code with which that step was last refused (`refused`),
+     * and whether the step needs the owner's switch for repairs while it is off (`repairOff`).
+     */
+    readonly poolDetail?: {
+      readonly since: number;
+      readonly code?: string;
+      readonly step?: string;
+      readonly stepAt?: number;
+      readonly refused?: string;
+      readonly repairOff?: boolean;
     };
     /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
     readonly rebuildPending?: boolean;
@@ -805,6 +832,79 @@ const REPAIR_POOL_BY_HAND =
   '(or …/docker-pool/reconcile when the status offers that instead). No laptop is stopped.';
 /** Shown while a rebuild or a start waits for the pool that the office is recovering after a host restart. */
 const POOL_WAIT = 'the shared pool, which the office is recovering after a host restart';
+const POOL_READ_WAIT = 'a read of the shared pool, which the office could not make yet';
+/** Why the office could not start a stopped pool, by the code the pool service refused with. */
+const POOL_STUCK: Readonly<Record<string, string>> = {
+  DOCKER_POOL_COLD_WORKERS_RUNNING:
+    "A laptop container of this office is running, paused or restarting although the pool's anchor is stopped, and " +
+    'the pool is never started beside one. The office starts the pool by itself once no container with the laptop ' +
+    'label of this office runs.',
+  DOCKER_POOL_COLD_WRITER_UNCONFIRMED:
+    "A helper container that writes the pool's limits is still running, or is of an image this office is not " +
+    'configured with, so the office cannot prove that it writes nothing more. The office starts the pool by itself ' +
+    'once every such helper has ended. One of an image it does not know has to be removed by the owner.',
+  DOCKER_POOL_COLD_ANCHOR_DEAD:
+    "The container engine reports the pool's anchor container as dead. A dead container cannot be started, and " +
+    'the office has no operation that removes an anchor: the owner has to remove that container. The office then ' +
+    'sets the pool up again with the next laptop.',
+  DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED:
+    "The pool's anchor container is neither running nor stopped: it is paused or restarting. The office starts it " +
+    'by itself once the container engine reports it stopped.',
+  DOCKER_POOL_COLD_POLICY_CHANGED:
+    'The employees of this office are approved with different limits for the shared pool, and no record says ' +
+    'which approval is the newer one, so the office does not choose between them. Approve the same pool limits ' +
+    'for every employee and the office starts the pool at its next look.',
+  DOCKER_POOL_COLD_ATTEMPT_HELD:
+    'A recovery of the pool was started and did not finish, and the office cannot yet prove how its helper ended. ' +
+    'It finishes that recovery as itself and starts no second one beside it.',
+  DOCKER_POOL_COLD_SOURCE_CHANGED:
+    'What the office found changed between its look and its step. It looks again and steps on what it finds then.',
+};
+const POOL_REPAIR_OFF =
+  'Starting the stopped anchor is a repair, and the company setting supervisorAutoRepair is off, so the office ' +
+  'does not take that step. Switch supervisorAutoRepair on (PUT /api/company/settings), or recover the pool ' +
+  'yourself: GET /api/company/employees/:id/docker-pool/cold-preview, then POST the same path with cold-recover.';
+
+/** What is said once a pool has stayed stopped for `poolStuckMs`: why, by code, and what the office does next. */
+function poolStuck(detail: NonNullable<SupervisorObservation['laptop']['poolDetail']>): string {
+  const code = detail.refused ?? detail.code;
+  const reason = detail.repairOff
+    ? POOL_REPAIR_OFF
+    : ((code && POOL_STUCK[code]) ??
+      (code ? `The pool service refused to start it (${code}).` : 'The office has not been able to start it.'));
+  const next = detail.step
+    ? ` and takes its next step (${detail.step})${detail.stepAt === undefined ? '' : ' at ' + when(detail.stepAt)}`
+    : '';
+  return (
+    `The shared pool of this office has been stopped since ${when(detail.since)}, and no laptop can be set up ` +
+    `without it. ${reason}${code && !detail.repairOff && POOL_STUCK[code] ? ` (${code})` : ''} The office looks at ` +
+    `the pool again every minute${next}, and brings this employee back by itself once the pool runs.`
+  );
+}
+
+/**
+ * The wait for the shared pool, when it holds this employee back. A pool that is known to be stopped always does,
+ * and once it has stayed stopped for `poolStuckMs` the report says why instead of only that it waits. With
+ * `unread`, a pool the office could not read holds back as well, for `poolUnreadGraceMs` and no longer.
+ */
+function poolWait(
+  observed: SupervisorObservation,
+  now: number,
+  policy: SupervisorPolicy,
+  unread = false
+): Gate | undefined {
+  if (observed.laptop.poolAlive === true) return undefined;
+  const pool = observed.laptop.pool,
+    detail = observed.laptop.poolDetail;
+  if (pool === 'unknown' && unread) {
+    const until = (detail?.since ?? now) + policy.poolUnreadGraceMs;
+    return now < until ? { kind: 'wait', waitingFor: POOL_READ_WAIT, at: until } : undefined;
+  }
+  if (pool !== 'down') return undefined;
+  return detail && now - detail.since >= policy.poolStuckMs
+    ? { kind: 'human', needsHuman: poolStuck(detail) }
+    : { kind: 'wait', waitingFor: POOL_WAIT };
+}
 /** A refused local-model launch check: its code carries the reason after this prefix and its message says the rest. */
 const LOCAL_MODEL_PREFIX = 'DOCKER_CONTINUATION_LOCAL_MODEL_';
 
@@ -1004,7 +1104,8 @@ function continueMoveGate(
   if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
   // A move cannot go on while the anchor of the pool is stopped: its laptops are stopped with it. No continue is
   // spent against that, and the wait has no end of its own (see `abandonMoveGate`).
-  if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+  const pool = poolWait(observed, now, policy);
+  if (pool) return pool;
   const outside = moveCauseOutside(observed);
   if (!outside || history.since <= 0) return { kind: 'ok' };
   const at = outsideProbeAt(history, policy);
@@ -1045,7 +1146,8 @@ function abandonMoveGate(
   // tried for it with a pool that works, and closing it would not bring the employee back any sooner, because no
   // laptop can be rebuilt or started either. Once the pool is back the move is continued as often as any other,
   // and closed after that if it is still held.
-  if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+  const pool = poolWait(observed, now, policy);
+  if (pool) return pool;
   const outside = moveCauseOutside(observed);
   if (!outside) return { kind: 'ok' };
   if (!moveCauseOverdue(history, now)) return outsideCauseWait(outside, history);
@@ -1609,6 +1711,10 @@ function rebuildGate(
       waitingFor: `the code to clear by itself; if it still stands, the laptop is treated as held at ${when(settles)}`,
       at: settles,
     };
+  // With the owner's switch for repairs off the office neither reads what runs in the laptop nor starts the
+  // stopped pool. What the owner is told then is the pool, which comes before any rebuild by hand.
+  const stopped = poolWait(observed, now, policy);
+  if (stopped?.kind === 'human' && observed.laptop.poolDetail?.repairOff) return stopped;
   const provider = observed.laptop.provider;
   if (provider === 'unknown' && !(watched > 0 && now - watched >= policy.stalledAfterMs))
     return { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
@@ -1617,8 +1723,15 @@ function rebuildGate(
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
   // looks like. The office recovers the shared pool itself, and no laptop is rebuilt before that: a rebuild
   // retires the laptop record the recovery reads, and a fresh laptop could not be set up without the pool.
-  if (provider === 'no-laptop' && observed.laptop.poolAlive === false && !poolUsable(observed))
-    return { kind: 'wait', waitingFor: POOL_WAIT };
+  // A pool the office could not read holds the rebuild back only for a while: see `poolWait`. Before the office
+  // has looked at all, a box in which no laptop is attached is waited for.
+  const unseen = observed.laptop.poolAlive === false && observed.laptop.pool === undefined;
+  const pool =
+    provider !== 'no-laptop'
+      ? undefined
+      : (poolWait(observed, now, policy, true) ??
+        (unseen ? { kind: 'wait' as const, waitingFor: POOL_WAIT } : undefined));
+  if (pool) return pool;
   // A finding that stops the rebuild is known without asking again what runs in the laptop.
   const stored = observed.laptop.storedHome,
     home = (found: SupervisorStoredHome | undefined) =>
@@ -1776,14 +1889,6 @@ function storedHomeGate(
   return { kind: 'ok', preconditions: ['stored-home'] };
 }
 
-/**
- * The office's own look found the pool's anchor stopped, or a recovery of it open, and no other laptop of the box
- * is attached. A pool it could not read is not known to be down.
- */
-function poolDown(observed: SupervisorObservation): boolean {
-  return observed.laptop.pool === 'down' && observed.laptop.poolAlive !== true;
-}
-
 /** Another laptop of the box is attached, or the office's own look found the pool's anchor running, or found
  * that no laptop record names a pool at all, so that there is nothing to wait for. */
 function poolUsable(observed: SupervisorObservation): boolean {
@@ -1854,8 +1959,9 @@ function gate(
         resendAnswered(offered, seen?.code, history)
       )
         return { kind: 'skip' };
-      // No step of a set-up and no repair in place gets past a stopped anchor, so none is spent against one.
-      return poolDown(observed) ? { kind: 'wait', waitingFor: POOL_WAIT } : { kind: 'ok' };
+      // No step of a set-up and no repair in place gets past a stopped anchor, so none is spent against one, nor
+      // against a pool the office is still finding out about.
+      return poolWait(observed, now, policy, true) ?? { kind: 'ok' };
     }
     case 'apply-standing-limits': {
       // The owner's standing default is the most restrictive limits approved for the other employees
@@ -1872,13 +1978,16 @@ function gate(
             : `No employee of this office has approved resource limits, so the office has no approved value to give this one. ${OWNER_STEPS[POLICY_REQUIRED]}`,
       };
     }
-    case 'start-continuation':
-      // A fresh laptop cannot be set up while the pool's anchor is stopped or a recovery of it is open. Only a
-      // look that found exactly that holds the start: a pool the office could not read is tried, as it always was.
-      if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+    case 'start-continuation': {
+      // A fresh laptop cannot be set up while the pool's anchor is stopped or a recovery of it is open. A pool the
+      // office could not read yet holds the start for a bounded time, so that the round's starts are not used up
+      // in the minutes after a host restart; after that it is tried, as it always was.
+      const pool = poolWait(observed, now, policy, true);
+      if (pool) return pool;
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
+    }
     case 'continue-move':
       return continueMoveGate(observed, history, now, policy);
     case 'reconnect-viewer':

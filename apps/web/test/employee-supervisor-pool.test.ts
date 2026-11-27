@@ -339,17 +339,67 @@ describe('EmployeeSupervisor: the shared pool after a host restart', () => {
     expect(w.state.acts.filter((line) => line.includes('rebuild-laptop'))).toEqual([]);
     expect(w.supervisor.pool()).toMatchObject({ pool: 'down', detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING' });
     expect(w.supervisor.pool()!.step).toBeUndefined();
+    // It does not wait in silence: after fifteen minutes the waiting employee's report says what stands in the
+    // way, with the refusal's own code, and the pool report says when the office looks again.
+    expect(w.report('b').needsHuman).toMatch(
+      /The shared pool of this office has been stopped since .* A laptop container of this office is running, paused or restarting although the pool's anchor is stopped.*\(DOCKER_POOL_COLD_WORKERS_RUNNING\) The office looks at the pool again every minute/
+    );
+    const pool = w.supervisor.pool()!;
+    expect(pool.downSince).toBe(START + 30 * SECOND);
+    expect(pool.nextLookAt! - pool.at).toBe(MINUTE);
+    expect(pool.stepAt).toBeUndefined();
+    // The laptop stops: the office recovers the pool by itself and nobody is asked any more.
+    w.state.people[0]!.laptop = 'stopped';
+    await w.run(20 * MINUTE);
+    expect(w.state.steps.at(-1)).toMatch(/:recover-pool:done$/);
+    expect(w.report('b').needsHuman).toBeUndefined();
+    expect(w.report('b').condition).toBe('healthy');
+  });
+
+  it('says nothing for the first fifteen minutes of a pool that is stopped', async () => {
+    const w = box([person('a', 'running-detached'), person('b')]);
+    await w.run(14 * MINUTE);
+    expect(w.report('b').waitingFor).toBe('the shared pool, which the office is recovering after a host restart');
+    expect(w.report('b').needsHuman).toBeUndefined();
+  });
+
+  it('says that the step needs the switch for repairs when it is off, and takes it once the switch is on', async () => {
+    const w = box([person('a'), person('b')]);
+    w.state.flags = { enabled: true, autoRepair: false };
+    await w.run(20 * MINUTE);
+    expect(w.state.steps).toEqual([]);
+    expect(w.supervisor.pool()).toMatchObject({ pool: 'down', step: 'recover-pool', stepNeedsRepairSwitch: true });
+    expect(w.report('a').needsHuman).toMatch(/supervisorAutoRepair is off, so the office does not take that step/);
+    w.state.flags = { enabled: true, autoRepair: true };
+    await w.run(5 * MINUTE);
+    expect(w.state.steps.at(-1)).toMatch(/:recover-pool:done$/);
+    await w.run(20 * MINUTE);
+    expect(w.report('a').needsHuman).toBeUndefined();
+    expect(w.report('a').condition).toBe('healthy');
+  });
+
+  it('goes on without the look once a pool has been unreadable for fifteen minutes: that is no dead end', async () => {
+    const w = box([person('a'), person('b')]);
+    w.state.unreadable = true;
+    w.state.anchor = 'running';
+    await w.run(40 * MINUTE);
+    // Nothing was ever recovered cold on a guess, and the employees were still brought back.
+    expect(w.state.steps).toEqual([]);
+    expect(w.state.acts.every((line) => Number(line.split(':')[0]) >= 15 * 60)).toBe(true);
+    expect(w.report('a').condition).toBe('healthy');
+    expect(w.report('b').condition).toBe('healthy');
   });
 
   it('takes a pool it cannot read for unknown, never for stopped, and waits', async () => {
     const w = box([person('a'), person('b')]);
     w.state.unreadable = true;
-    await w.run(30 * MINUTE);
+    await w.run(14 * MINUTE);
     expect(w.state.steps).toEqual([]);
     expect(w.state.acts).toEqual([]);
     expect(w.state.looks.every((line) => line.endsWith(':read'))).toBe(true);
     expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild', pool: { pool: 'unknown' } });
-    expect(w.report('a').waitingFor).toMatch(/the shared pool/);
+    expect(w.report('a').waitingFor).toBe('a read of the shared pool, which the office could not make yet');
+    expect(w.report('a').needsHuman).toBeUndefined();
     // The read comes back: the stopped pool is seen for a minute first, then recovered.
     w.state.unreadable = false;
     const from = (w.state.now - START) / SECOND;
@@ -363,16 +413,26 @@ describe('EmployeeSupervisor: the shared pool after a host restart', () => {
     w.state.recover = () => 'refused';
     await w.run(50 * HOUR);
     const times = w.state.steps.map((line) => Number(line.split(':')[0]));
-    // A minute after it was first seen, then after 1, 5, 15 and 60 minutes, then every six hours for good.
+    // A minute after it was first seen, then after 1, 5, 15 and 60 minutes, then every hour for good: the whole
+    // office waits for this step, so it is never left alone for longer.
     expect(times.slice(0, 5)).toEqual([90, 150, 450, 1350, 4950]);
     const gaps = times.slice(1).map((value, index) => value - times[index]!);
-    expect(gaps.slice(4)).toEqual(new Array(gaps.length - 4).fill(6 * 60 * 60));
-    expect(times.length).toBeGreaterThanOrEqual(11);
-    expect(times.at(-1)!).toBeGreaterThan(44 * 60 * 60);
-    // No laptop was rebuilt against the dead pool, no attempt of anyone's ladder was spent, nobody was asked.
+    expect(gaps.slice(4)).toEqual(new Array(gaps.length - 4).fill(60 * 60));
+    expect(times.length).toBeGreaterThanOrEqual(50);
+    expect(times.at(-1)!).toBeGreaterThan(48 * 60 * 60);
+    // No laptop was rebuilt against the dead pool and no attempt of anyone's ladder was spent.
     expect(w.state.acts).toEqual([]);
     expect(w.state.histories.get('a')?.attempts ?? {}).toEqual({});
-    expect(w.report('a').needsHuman).toBeUndefined();
+    // Every waiting employee's report says why, with the code the step was refused with, and when it is tried
+    // again; the pool report carries the same times.
+    for (const id of ['a', 'b'])
+      expect(w.report(id).needsHuman, id).toMatch(
+        /The pool service refused to start it \(DOCKER_RESOURCE_HELPER_FAILED\)\. The office looks at the pool again every minute and takes its next step \(recover-pool\) at \d{4}-\d\d-\d\d \d\d:\d\d UTC/
+      );
+    const pool = w.supervisor.pool()!;
+    expect(pool).toMatchObject({ pool: 'down', step: 'recover-pool', downSince: START + 30 * SECOND });
+    expect(pool.stepAt! - pool.last!.at).toBe(HOUR);
+    expect(pool.nextLookAt! - pool.at).toBe(MINUTE);
     expect(w.state.audits.filter((entry) => entry.action === 'supervisor_recover_pool')).toHaveLength(times.length);
     // The cause goes away: the next attempt recovers the pool and everyone is brought back.
     w.state.recover = () => 'done';

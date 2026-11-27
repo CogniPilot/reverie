@@ -282,8 +282,18 @@ export function fixture(
         return JSON.stringify([value]);
       }
       if (args[0] === 'container' && args[1] === 'ls') {
-        const filters = args.flatMap((value, index) => (value === '--filter' ? [args[index + 1]!] : []));
+        const every = args.flatMap((value, index) => (value === '--filter' ? [args[index + 1]!] : []));
+        // As the Engine does it: several status filters are alternatives, every other filter must hold.
+        const statuses = every.filter((filter) => filter.startsWith('status=')).map((filter) => filter.slice(7)),
+          filters = every.filter((filter) => !filter.startsWith('status='));
+        const status = (raw: Record<string, unknown>) => {
+          const state = raw.State as { Status?: string; Running?: boolean; Paused?: boolean; Restarting?: boolean };
+          if (state.Paused) return 'paused';
+          if (state.Restarting) return 'restarting';
+          return state.Running ? 'running' : (state.Status ?? 'exited');
+        };
         return [...containers]
+          .filter(([, raw]) => !statuses.length || statuses.includes(status(raw)))
           .filter(([id, raw]) =>
             filters.every((filter) => {
               if (filter.startsWith('id=')) return id === filter.slice(3);

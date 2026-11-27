@@ -335,7 +335,18 @@ export class DockerContainedResources implements DockerContainedResourceControll
     for (const id of ids.sort()) {
       cid.parse(id);
       if (id === worker) continue;
-      const raw = await this.#inspect(id, command);
+      let raw: Record<string, unknown>;
+      try {
+        raw = await this.#inspect(id, command);
+      } catch (error) {
+        // A laptop on record that cannot be inspected is unknown, and stops this read, unless the Engine
+        // positively reports that no container of exactly this ID exists. Such a laptop was removed while it was
+        // stopped, as its rebuild will record. It runs nothing, exactly like one that is stopped, and it is kept
+        // in the bindings so that the set of laptops read is still compared whole.
+        if (await this.#listedById(id, command)) throw error;
+        bindings?.push({ Id: id, absent: true });
+        continue;
+      }
       const config = z.object({ Labels: z.record(z.string(), z.string()) }).parse(raw.Config);
       const host = z.record(z.string(), z.unknown()).parse(raw.HostConfig);
       if (config.Labels['reverie.boxed.instance'] !== this.configuration.deployment || host.PidMode === 'host')
@@ -351,6 +362,15 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (init) args.push('--member', `${id}:${init.pid}:${init.startTicks}`);
     }
     return args;
+  }
+  /** Whether the Engine lists a container of exactly this ID, in any state. Unscoped, so that a changed label
+   * cannot hide one that is still there. */
+  async #listedById(id: string, command: DockerEngineCommand = this.command): Promise<boolean> {
+    const listed = (
+      await command.run(['container', 'ls', '--all', '--no-trunc', '--filter', 'id=' + id, '--format', '{{.ID}}'])
+    ).trim();
+    if (listed !== '' && listed !== id) refuse('DOCKER_RESOURCE_MEMBERS_UNKNOWN');
+    return listed === id;
   }
   #configuration(
     role: DockerContinuationTaskRole,
@@ -479,7 +499,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
           args[0] === 'exec' &&
           args[2] === '/bin/reverie-docker-resources' &&
           ['probe-pool', 'probe-worker'].includes(args[3] ?? '');
-        if (input !== undefined || (!inspect && !init && !probe)) refuse('DOCKER_RESOURCE_PROBE_READ_REQUIRED');
+        // The exact-ID census that tells a removed laptop from an unreadable one. A read.
+        const census =
+          args.length === 8 &&
+          args.slice(0, 5).join(' ') === 'container ls --all --no-trunc --filter' &&
+          /^id=[a-f0-9]{64}$/.test(args[5] ?? '') &&
+          args.slice(6).join(' ') === '--format {{.ID}}';
+        if (input !== undefined || (!inspect && !init && !probe && !census))
+          refuse('DOCKER_RESOURCE_PROBE_READ_REQUIRED');
         return this.command.run(args, undefined, remaining());
       },
       create: async () => refuse('DOCKER_RESOURCE_PROBE_READ_REQUIRED'),
@@ -1001,6 +1028,43 @@ export class DockerContainedResources implements DockerContainedResourceControll
         }
       : undefined;
   }
+  /** One inspection of a fixed writer container that shows it was created and
+   * never started: it has run nothing and written nothing. Undefined for any
+   * other state. */
+  async #neverStarted(id: string, config: Config, current: () => void) {
+    const value = await this.#fixed(id, config);
+    current();
+    const state = z
+      .object({
+        Status: z.literal('created'),
+        Running: z.literal(false),
+        Pid: z.literal(0),
+        Paused: z.literal(false),
+        Restarting: z.literal(false),
+        Dead: z.literal(false),
+      })
+      .safeParse(value.State);
+    return state.success ? { digest: dockerContinuationDigest(value.State) } : undefined;
+  }
+  /** One inspection of a fixed writer container that shows it ran and has
+   * ended, with whatever status: it can write nothing more. Undefined for any
+   * other state. It says nothing about what the writer acknowledged. */
+  async #endedTerminal(id: string, config: Config, current: () => void) {
+    const value = await this.#fixed(id, config);
+    current();
+    const state = z
+      .object({
+        Status: z.literal('exited'),
+        Running: z.literal(false),
+        Pid: z.literal(0),
+        Paused: z.literal(false),
+        Restarting: z.literal(false),
+        Dead: z.literal(false),
+        ExitCode: z.number().int().min(0).max(255),
+      })
+      .safeParse(value.State);
+    return state.success ? { digest: dockerContinuationDigest(value.State) } : undefined;
+  }
   /** The fixed configuration a pool writer of this box was created with,
    * rebuilt from its own command under the image it is recorded with. */
   #poolWriterConfiguration(name: string, imageId: string, raw: Record<string, unknown>): Config | undefined {
@@ -1261,11 +1325,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
         raw.Image !== imageId ||
         z
           .object({ Status: z.literal('exited'), ExitCode: z.number().int().min(1).max(255) })
-          .safeParse(raw.State).success
+          .safeParse(raw.State).success ||
+        z.object({ Status: z.literal('created'), Running: z.literal(false) }).safeParse(raw.State).success
       ) {
-        // A writer of another helper image generation, or one that exited with
-        // an error, printed no acknowledgement this office reads. It is admitted
-        // as a closed writer only: never as an acknowledgement, never as unknown.
+        // A writer of another helper image generation, one that exited with an
+        // error, or one that was created and never started printed no
+        // acknowledgement this office reads. It is admitted as a closed writer
+        // only: never as an acknowledgement, never as unknown.
         closed.push(await this.#closedPoolWriter(candidate, taskName, raw, current));
         current();
         continue;
@@ -1430,7 +1496,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
    * writer that is recorded finished is proved under its own journaled
    * configuration. One that is on no record, as the failed attempt of an
    * operation that has since issued the next one is, must be of a configured
-   * image, fixed, and exited with an error. */
+   * image, fixed, and either exited with an error or never started. A writer
+   * that was created and never started is what an operation leaves when the
+   * office or the host stops between its CREATE and its START: it has written
+   * nothing, and it acknowledges nothing. */
   async #closedPoolWriter(
     id: string,
     name: string,
@@ -1452,11 +1521,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const config = [this.configuration.helperImageId, this.configuration.poolRestoreHelperImageId].includes(image)
       ? this.#poolWriterConfiguration(name, image, raw)
       : undefined;
-    const first = config && (await this.#failedTerminal(id, config, current));
-    if (!config || !first) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+    if (!config) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+    const read = async () =>
+      (await this.#failedTerminal(id, config, current)) ?? (await this.#neverStarted(id, config, current));
+    const first = await read();
+    if (!first) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
     return async () => {
-      if (!isDeepStrictEqual(await this.#failedTerminal(id, config, current), first))
-        refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+      if (!isDeepStrictEqual(await read(), first)) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
     };
   }
   #requireHistoricalPoolWriter(task: DockerContinuationTask): void {
@@ -1949,16 +2020,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
       /* Housekeeping only: the repair above is already acknowledged. */
     }
   }
-  async #closedPoolHelper(id: string, current: () => void): Promise<void> {
-    const raw = await this.#inspect(id);
-    current();
-    const labels = z.record(z.string(), z.string()).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Labels);
-    const name = z
-      .string()
-      .regex(/^reverie-boxed-pool-helper-[a-f0-9]{64}$/)
-      .parse(labels['reverie.box.resource.name']);
-    await this.#closedPoolWriter(id, name, raw, current);
-  }
   async observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null> {
     const anchor = await this.#anchor(row);
     if (!anchor) return null;
@@ -1998,8 +2059,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
     for (const helper of helpers) {
       if (retained.some(task => (task.phase === 'completed' || task.phase === 'failed') && task.containerId === helper))
         continue;
-      // On no record: only a writer proved terminal and failed, which wrote nothing it may still change.
-      await this.#closedPoolHelper(helper, current).catch((cause: unknown) => {
+      // Not recorded as finished. A host that stops in the middle of an operation leaves such writers: one that
+      // was created and never started, one that was stopped with the host, and one that ended before the office
+      // could record it. Each is admitted when it is proved unable to write anything more to a pool whose anchor
+      // is stopped: of a configured image, fixed, and either never started or ended. Nothing is read from it.
+      await this.#coldClosedHelper(helper, current).catch((cause: unknown) => {
         throw new DockerEmployeeContinuationError('DOCKER_POOL_COLD_WRITER_UNCONFIRMED', 409, { cause });
       });
     }
@@ -2011,24 +2075,69 @@ export class DockerContainedResources implements DockerContainedResourceControll
       original, state, members, helpers, policy: row.policy.pool,
     }) };
   }
+  /** A pool writer that no record names as finished, proved unable to write
+   * anything more: of a configured image, fixed, and either never started or
+   * ended with any status, the same across two inspections. */
+  async #coldClosedHelper(id: string, current: () => void): Promise<void> {
+    const raw = await this.#inspect(id);
+    current();
+    const labels = z.record(z.string(), z.string()).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Labels);
+    const name = z
+      .string()
+      .regex(/^reverie-boxed-pool-helper-[a-f0-9]{64}$/)
+      .parse(labels['reverie.box.resource.name']);
+    const image = z.string().parse(raw.Image);
+    const config = [this.configuration.helperImageId, this.configuration.poolRestoreHelperImageId].includes(image)
+      ? this.#poolWriterConfiguration(name, image, raw)
+      : undefined;
+    if (!config) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+    const read = async () =>
+      (await this.#endedTerminal(id, config, current)) ?? (await this.#neverStarted(id, config, current));
+    const first = await read();
+    if (!first || !isDeepStrictEqual(await read(), first)) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+  }
+  /** The one fixed anchor of this box, stopped. An anchor that ended by any
+   * exit status, that was killed for memory, or whose last start failed is
+   * stopped all the same and can be started. One the Engine reports dead
+   * cannot be started by anyone, and that is said with its own code; any
+   * other state is not a stopped anchor. */
   async #stoppedPoolAnchor(id: string, configuration: Config, current: () => void) {
     const anchors = await this.#poolCensus('anchor');
     current();
     if (anchors.length !== 1 || anchors[0] !== id) refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
     const raw = await this.#fixed(id, configuration);
     current();
-    return z.object({
+    const state = z.object({ Status: z.string(), Dead: z.boolean() }).passthrough().safeParse(raw.State);
+    if (state.success && (state.data.Dead || state.data.Status === 'dead')) refuse('DOCKER_POOL_COLD_ANCHOR_DEAD');
+    const stopped = z.object({
       Status: z.literal('exited'), Running: z.literal(false), Restarting: z.literal(false),
       Paused: z.literal(false), Dead: z.literal(false), Pid: z.literal(0),
-      OOMKilled: z.literal(false), Error: z.literal(''),
+      OOMKilled: z.boolean(), Error: z.string().max(4096),
       StartedAt: z.string().datetime(), FinishedAt: z.string().datetime(),
-    }).passthrough().parse(raw.State);
+    }).passthrough().safeParse(raw.State);
+    if (!stopped.success) refuse('DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED');
+    return stopped.data;
   }
+  /** No laptop of this box runs. Every laptop on record is read; one the
+   * Engine positively reports absent runs nothing. Then the Engine is asked
+   * for every container that carries this box's laptop label and is running,
+   * paused or restarting, recorded or not: the pool is never recovered cold
+   * beside one. */
   async #coldPoolMembers(current: () => void): Promise<string> {
     const bindings: Record<string, unknown>[] = [];
     const active = await this.#members(undefined, this.command, bindings);
     current();
     if (active.length) refuse('DOCKER_POOL_COLD_WORKERS_RUNNING');
+    const labelled = (
+      await this.command.run([
+        'container', 'ls', '--all', '--no-trunc',
+        '--filter', 'label=reverie.boxed.box=' + this.configuration.boxId,
+        '--filter', 'status=running', '--filter', 'status=paused', '--filter', 'status=restarting',
+        '--format', '{{.ID}}',
+      ])
+    ).trim();
+    current();
+    if (labelled !== '') refuse('DOCKER_POOL_COLD_WORKERS_RUNNING');
     return dockerContinuationDigest(bindings);
   }
   /** The caller's exclusive durable attempt precedes the anchor START. The

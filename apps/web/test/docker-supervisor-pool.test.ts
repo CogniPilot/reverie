@@ -252,7 +252,9 @@ describe('the shared pool after a host restart', () => {
     const w = world();
     w.state.laptopRunning = true;
     const found = await w.laptops.keepPool([A, B], w.guard, 'recover-pool');
-    expect(found).toEqual({ pool: 'down', detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING', employeeId: A.id });
+    // Every record was tried, and the refusal's own code is what the look reports.
+    expect(found).toEqual({ pool: 'down', detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING' });
+    expect(w.made('cold-preview').map(([, id]) => id)).toEqual([A.id, B.id]);
     expect(w.made('cold-recover')).toEqual([]);
     expect(w.state.anchor).toBe('stopped');
   });
@@ -282,9 +284,40 @@ describe('the shared pool after a host restart', () => {
     await expect(w.laptops.keepPool([A], w.guard, 'recover-pool')).resolves.toEqual({
       pool: 'down',
       detail: 'DOCKER_POOL_COLD_WRITER_UNCONFIRMED',
-      employeeId: A.id,
     });
     expect(w.made('cold-recover')).toEqual([]);
+  });
+
+  it.each([
+    'DOCKER_POOL_COLD_WRITER_UNCONFIRMED',
+    'DOCKER_POOL_COLD_SOURCE_CHANGED',
+    'DOCKER_POOL_COLD_POLICY_CHANGED',
+    'DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED',
+    'DOCKER_CONTINUATION_UNCONFIRMED',
+  ])('tries the next employee when the preview through one record is refused with %s', async (code) => {
+    const w = world();
+    w.state.preview = (id) => (id === A.id ? refuse(code) : undefined);
+    // The look offers the step through the record that can stand for the pool.
+    await expect(w.laptops.keepPool([A, B, C], w.guard)).resolves.toEqual({
+      pool: 'down',
+      detail: 'DOCKER_POOL_ANCHOR_UNCONFIRMED',
+      step: 'recover-pool',
+      employeeId: B.id,
+    });
+    await expect(w.laptops.keepPool([A, B, C], w.guard, 'recover-pool')).resolves.toMatchObject({
+      pool: 'up',
+      outcome: 'done',
+      employeeId: B.id,
+    });
+    expect(w.made('cold-recover').map(([, id]) => id)).toEqual([B.id]);
+    // Refused through every record: the first refusal is what stands in the way.
+    const all = world();
+    all.state.preview = (id) => refuse(id === A.id ? code : 'DOCKER_POOL_COLD_WORKERS_RUNNING');
+    await expect(all.laptops.keepPool([A, B], all.guard, 'recover-pool')).resolves.toEqual({
+      pool: 'down',
+      detail: code,
+    });
+    expect(all.made('cold-recover')).toEqual([]);
   });
 
   it('reports a recovery that the service refused, and leaves the pool down', async () => {
@@ -322,8 +355,9 @@ describe('the shared pool after a host restart', () => {
     });
     const all = world();
     all.state.preview = () => refuse('DOCKER_POOL_COLD_POLICY_CHANGED');
+    // The anchor is known to be stopped, and the refusal says what stands in the way of starting it.
     await expect(all.laptops.keepPool([A, B], all.guard, 'recover-pool')).resolves.toEqual({
-      pool: 'unknown',
+      pool: 'down',
       detail: 'DOCKER_POOL_COLD_POLICY_CHANGED',
     });
     expect(all.made('cold-recover')).toEqual([]);

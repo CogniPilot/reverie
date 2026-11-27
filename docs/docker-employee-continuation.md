@@ -194,6 +194,20 @@ record of the employee's storage. See
 [owner operations](owner-operations.md#the-stored-home-of-a-stopped-laptop) for
 what the supervisor does with each finding.
 
+A cold recovery of the shared pool admits a stopped anchor however it ended,
+refuses a dead one with `DOCKER_POOL_COLD_ANCHOR_DEAD` and any other state with
+`DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`. A pool writer that no record names as
+finished is admitted when it is of a configured image, fixed, and either never
+started or ended, the same across two inspections: it can write nothing more to
+a pool whose anchor is stopped. A pool observation admits a writer that was
+created and never started as a closed writer, never as an acknowledgement. In
+every read of the laptops of a box, a laptop on record that the Engine
+positively reports absent, by an exact-ID census, runs nothing; one that is
+listed and cannot be inspected still stops the read. Besides the laptops on
+record, the cold recovery asks the Engine for every container with the box's
+laptop label (`reverie.boxed.box`) that is running, paused or restarting, and
+refuses with `DOCKER_POOL_COLD_WORKERS_RUNNING` while there is one.
+
 The office also recovers the shared pool and brings every employee back after a
 host restart without the owner, through the existing cold recovery, rebuild and
 set-up services; see

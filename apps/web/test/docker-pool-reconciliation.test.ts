@@ -928,6 +928,133 @@ describe('owner recovery of a stopped shared pool', () => {
     expect(result.json().data.state).toBe('retained');
     expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
   });
+  // What a host restart can leave behind. Each state has a way forward, or its own code.
+  const anchorState = (f: Awaited<ReturnType<typeof fixture>>, patch: Record<string, unknown>) => {
+    const raw = f.physical.containers.get(f.anchor.containerId)!;
+    raw.State = { ...(raw.State as object), ...patch };
+  };
+  it.each([
+    ['stopped with the host', { ExitCode: 137 }],
+    ['killed for memory', { ExitCode: 137, OOMKilled: true }],
+    ['left by a start that failed', { ExitCode: 128, Error: 'failed to create task for container: timeout' }],
+  ])('starts an anchor that was %s', async (_name, patch) => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    anchorState(f, patch);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it.each([
+    ['dead', { Status: 'dead', Dead: true }, 'DOCKER_POOL_COLD_ANCHOR_DEAD'],
+    ['paused', { Status: 'paused', Paused: true, Running: true, Pid: 7 }, 'DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED'],
+    ['restarting', { Status: 'restarting', Restarting: true }, 'DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED'],
+  ])('names an anchor that is %s with a code of its own, and starts nothing', async (_name, patch, code) => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    anchorState(f, patch);
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe(code);
+    expect(effects).toEqual([]);
+  });
+  const leftover = (f: Awaited<ReturnType<typeof fixture>>, id: string, state: Record<string, unknown>) => {
+    const raw = structuredClone(f.physical.containers.get(f.completed.containerId)!);
+    raw.Id = id;
+    (raw.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] =
+      'reverie-boxed-pool-helper-' + id;
+    raw.State = { Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0, ...state };
+    f.physical.containers.set(id, raw);
+  };
+  it('recovers past a pool helper that the interrupted run created and never started', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    leftover(f, 'f'.repeat(64), { Status: 'created' });
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    // The helper that never ran was read from nowhere and started by nobody.
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    expect((f.physical.containers.get('f'.repeat(64))!.State as { Status: string }).Status).toBe('created');
+  });
+  it.each([0, 137, 255])(
+    'previews past a pool helper on no record that ended with status %d before the host stopped',
+    async (ExitCode) => {
+      const f = await fixture({ cold: true });
+      leftover(f, 'f'.repeat(64), { Status: 'exited', ExitCode, OOMKilled: false, Error: '' });
+      await preview(f);
+    }
+  );
+  it.each([
+    ['still runs', { Status: 'running', Running: true, Pid: 9 }],
+    ['is being restarted', { Status: 'restarting', Restarting: true }],
+    ['is dead', { Status: 'dead', Dead: true }],
+  ])('recovers nothing while a pool helper on no record %s', async (_name, state) => {
+    const f = await fixture({ cold: true });
+    leftover(f, 'f'.repeat(64), state);
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_WRITER_UNCONFIRMED');
+  });
+  it('recovers past a recorded laptop that the Engine positively reports absent', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    // The laptop on record was removed while everything was stopped.
+    f.physical.selectWorker();
+    f.physical.containers.delete(workerId);
+    const result = await recover(f, await preview(f), id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+  });
+  it('still refuses when a recorded laptop is there and cannot be read', async () => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    f.physical.selectWorker();
+    const raw = f.physical.containers.get(workerId) ?? {
+      Id: workerId,
+      Config: { Labels: { 'reverie.boxed.instance': deployment } },
+      HostConfig: { PidMode: '' },
+      State: { Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0 },
+    };
+    f.physical.containers.set(workerId, raw);
+    const observed = vi.mocked(f.physical.command.run).getMockImplementation()!;
+    vi.mocked(f.physical.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === workerId) throw Error('Engine timed out');
+      return observed(args, input);
+    });
+    // The Engine lists it, so it is not absent: unreadable is unknown, and nothing is recovered beside unknown.
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode).not.toBe(200);
+    expect(effects).toEqual([]);
+  });
+  it.each([
+    ['runs', { Status: 'running', Running: true, Pid: 4242 }],
+    ['is paused', { Status: 'paused', Running: true, Paused: true, Pid: 4242 }],
+    ['is being restarted', { Status: 'restarting', Running: false, Restarting: true, Pid: 0 }],
+  ])('recovers nothing while any container with the laptop label of this box %s, on record or not', async (_name, state) => {
+    const f = await fixture({ cold: true }), effects = observeEffects(f, randomUUID());
+    const stray = 'e'.repeat(64);
+    f.physical.containers.set(stray, {
+      Id: stray,
+      Image: 'sha256:' + '7'.repeat(64),
+      Config: { Labels: { 'reverie.boxed.box': 'b'.repeat(64), 'reverie.boxed.instance': deployment } },
+      HostConfig: { PidMode: '' },
+      State: { Paused: false, Restarting: false, Dead: false, ...state },
+    });
+    // No record names it: the office's own list of laptops is empty.
+    const refused = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_WORKERS_RUNNING');
+    expect(effects).toEqual([]);
+    // Stopped, it stands in nobody's way. One of another box never did.
+    (f.physical.containers.get(stray)!.State as Record<string, unknown>) = {
+      Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0,
+    };
+    f.physical.containers.set('9'.repeat(64), {
+      Id: '9'.repeat(64),
+      Image: 'sha256:' + '7'.repeat(64),
+      Config: { Labels: { 'reverie.boxed.box': 'a'.repeat(64) } },
+      HostConfig: { PidMode: '' },
+      State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 5 },
+    });
+    await preview(f);
+  });
   it('recovers nothing for an employee who has no laptop record of their own, current or retired', async () => {
     const f = await fixture({ cold: true });
     await f.companyStore.update((state) => { state.dockerEmployeeContinuations = []; });

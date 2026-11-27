@@ -62,7 +62,10 @@
  * of the box runs; this file never decides that. A recovery that was issued and did not finish is finished as
  * itself (`cold-resume`) before anything new is previewed. A pool that runs and only lacks its observation record
  * gets that record (`reconcile`). The pool is shared, so any employee's record can stand for it: the attendance of
- * that employee is not asked, and nobody is started, attached or returned to the office by this step.
+ * that employee is not asked, and nobody is started, attached or returned to the office by this step. When the
+ * service refuses the preview through one employee's record, whatever the refusal, the next employee's is tried:
+ * a refusal can belong to that one record. Only when every record was tried is the pool reported as stopped with
+ * the refusal's own code, which every waiting employee's report then shows.
  *
  * STORED HOME (`storedHome`). Before a finished laptop that is stopped is rebuilt, the office asks whether the HOME
  * and Nix directories at its recorded paths are still the ones its storage holder recorded. A rebuilt laptop is
@@ -525,16 +528,21 @@ export class DockerSupervisorLaptops {
     const order = held
       ? [...candidates].sort((a, b) => Number(b.id === held!.employeeId) - Number(a.id === held!.employeeId))
       : candidates;
-    let unread: string | undefined;
+    let unread: string | undefined, refused: string | undefined;
     for (const employee of order) {
       const found = held
         ? await this.#finishPool(employee, guard, step === 'finish-pool-recovery')
         : await this.#poolFor(employee, guard, step);
-      if (typeof found === 'object') return { ...found, employeeId: employee.id };
-      if (found !== NO_SOURCE) unread ??= found;
+      if (typeof found === 'string') {
+        if (found !== NO_SOURCE) unread ??= found;
+      } else if ('refused' in found) refused ??= found.refused;
+      else return { ...found, employeeId: employee.id };
     }
-    // Nobody's record could be read: nothing is known. Every record was read and none names the pool: an open
-    // recovery stays open, and otherwise there is no pool to recover (a laptop set-up creates one).
+    // The anchor is stopped and the service refused to recover it through every record that names it: the pool
+    // is down, and the first refusal says why. Nobody's record could be read: nothing is known. Every record was
+    // read and none names the pool: an open recovery stays open, and otherwise there is no pool to recover (a
+    // laptop set-up creates one).
+    if (refused !== undefined) return { pool: 'down', detail: refused };
     if (unread !== undefined) return { pool: 'unknown', detail: unread };
     return held
       ? { pool: 'down', detail: 'DOCKER_POOL_COLD_ATTEMPT_HELD' }
@@ -569,13 +577,14 @@ export class DockerSupervisorLaptops {
     return { pool: down ? 'down' : 'unknown', ...(status.code ? { detail: status.code } : {}) };
   }
 
-  /** The pool as one employee's record shows it. `NO_SOURCE` when that record cannot stand for the pool, and the
-   * code of the failure when the pool could not be read through it. */
+  /** The pool as one employee's record shows it. `NO_SOURCE` when that record cannot stand for the pool, the code
+   * of the failure when the pool could not be read through it, and `refused` with the service's code when the
+   * anchor is stopped and the service does not recover it through this record. */
   async #poolFor(
     employee: SupervisedEmployee,
     guard: SupervisorPoolGuard,
     asked: SupervisorPoolStep | undefined
-  ): Promise<SupervisorPoolResult | string> {
+  ): Promise<SupervisorPoolResult | string | { refused: string }> {
     const pool = this.deps.pool;
     let status: Awaited<ReturnType<DockerPoolReconciliation['status']>>;
     try {
@@ -606,8 +615,8 @@ export class DockerSupervisorLaptops {
     } catch (error) {
       const code = this.#code(error);
       if (NO_POOL_SOURCE.has(code) || error instanceof CompanyError) return NO_SOURCE;
-      // This record does not carry the pool policy every employee is approved with; another one may.
-      return code === 'DOCKER_POOL_COLD_POLICY_CHANGED' ? code : { pool: 'down', detail: code };
+      // Whatever the refusal, another employee's record may not meet it.
+      return { refused: code };
     }
     return this.#poolStep('recover-pool', seen, asked, async () =>
       pool.coldRecover!(

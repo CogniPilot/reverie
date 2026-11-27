@@ -123,6 +123,14 @@ export interface SupervisorPoolReport {
   readonly since: number;
   /** Steps taken since then. */
   readonly attempts: number;
+  /** Since when the pool has not been up, without a break. Absent while it is up, or there is none. */
+  readonly downSince?: number;
+  /** When the office looks at the pool again. */
+  readonly nextLookAt?: number;
+  /** The earliest time at which the office takes `step`. */
+  readonly stepAt?: number;
+  /** `step` needs the owner's switch for repairs (`supervisorAutoRepair`), and it is off: the step is not taken. */
+  readonly stepNeedsRepairSwitch?: true;
   /** The last step that was taken for the pool, and how it ended. */
   readonly last?: {
     readonly step: SupervisorPoolStep;
@@ -257,7 +265,8 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   limitsCheckMs: 10 * 60_000,
   poolReadMs: 60_000,
   poolDwellMs: 60_000,
-  poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000],
+  // Nobody can be brought back while the pool is stopped, so the step is never left alone for longer than an hour.
+  poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
   storedHomeReadMs: 10 * 60_000,
   storedHomeRetryMs: [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000],
   homeRecordsPerTick: 2,
@@ -351,6 +360,8 @@ export class EmployeeSupervisor {
   readonly #limitsDue = new Map<string, number>();
   /** The last look at the shared pool. Undefined while a terminal is attached, when nobody looks. In memory. */
   #pool?: SupervisorPoolReport;
+  /** The owner whose switches the pool step was last decided with. */
+  #poolOwner: string | undefined;
   #poolDue = 0;
   #poolLastStep = 0;
   #poolFlight?: Promise<void>;
@@ -499,20 +510,15 @@ export class EmployeeSupervisor {
       return;
     }
     // Nobody is attached and nothing has been read yet: the pool is unknown, never assumed to be up.
-    this.#pool ??= { pool: 'unknown', at: now, since: now, attempts: 0 };
+    this.#pool ??= { pool: 'unknown', at: now, since: now, attempts: 0, downSince: now, nextLookAt: now };
     if (now < this.#poolDue) return;
     const before = this.#pool;
     // The employees in the office come first; anyone's laptop record can stand for the pool they all share.
     const candidates = [...inOffice, ...employees.filter((row) => !inOffice.includes(row) && !row.bindingMigration)];
-    const backoff = this.#resolved.poolBackoffMs;
-    const stepAt = before.step
-      ? Math.max(
-          before.since + this.#resolved.poolDwellMs,
-          before.attempts ? this.#poolLastStep + (backoff[Math.min(before.attempts, backoff.length) - 1] ?? 0) : 0
-        )
-      : undefined;
+    const stepAt = this.#poolStepAt(before);
     // A step is taken only for what an earlier look already found, and only with the switch it needs.
     const owner = inOffice[0]!.owner;
+    this.#poolOwner = owner;
     const allowed = !!before.step && (POOL_STEP_TIER[before.step] === 'retry' || this.ports.flags(owner).autoRepair);
     const act = allowed && stepAt !== undefined && stepAt <= now ? before.step : undefined;
     if (act) this.#poolLastStep = now;
@@ -537,6 +543,33 @@ export class EmployeeSupervisor {
     if (timer) clearTimeout(timer);
   }
 
+  /** The earliest time at which the step a pool report calls for is taken: after the dwell, and after the wait
+   * that follows the steps already taken for it. */
+  #poolStepAt(report: Pick<SupervisorPoolReport, 'step' | 'since' | 'attempts'>): number | undefined {
+    if (!report.step) return undefined;
+    const backoff = this.#resolved.poolBackoffMs;
+    return Math.max(
+      report.since + this.#resolved.poolDwellMs,
+      report.attempts ? this.#poolLastStep + (backoff[Math.min(report.attempts, backoff.length) - 1] ?? 0) : 0
+    );
+  }
+
+  /** What the policy is told about a pool that is not up. See `poolDetail` of the observation. */
+  #poolDetail(): NonNullable<SupervisorObservation['laptop']['poolDetail']> | undefined {
+    const pool = this.#pool;
+    if (!pool || pool.downSince === undefined) return undefined;
+    const refused =
+      pool.step && pool.last?.step === pool.step && pool.last.outcome !== 'done' ? pool.last.detail : undefined;
+    return {
+      since: pool.downSince,
+      ...(pool.detail ? { code: pool.detail } : {}),
+      ...(pool.step ? { step: pool.step } : {}),
+      ...(pool.stepAt === undefined ? {} : { stepAt: pool.stepAt }),
+      ...(refused ? { refused } : {}),
+      ...(pool.stepNeedsRepairSwitch ? { repairOff: true } : {}),
+    };
+  }
+
   /** Record one look at the pool. A line and an audit entry are written for every step that was taken, and one
    * line when what the pool is, or what it needs, changes. */
   #poolLooked(
@@ -550,7 +583,8 @@ export class EmployeeSupervisor {
     const last = took
       ? { step: result.step!, at, outcome: result.outcome!, ...(result.detail ? { detail: result.detail } : {}) }
       : before.last;
-    const report: SupervisorPoolReport = {
+    const usable = result.pool === 'up' || result.pool === 'none';
+    const base = {
       pool: result.pool,
       ...(result.step ? { step: result.step } : {}),
       ...(result.detail ? { detail: result.detail } : {}),
@@ -558,6 +592,17 @@ export class EmployeeSupervisor {
       since: same ? before.since : at,
       attempts: (same || took ? before.attempts : 0) + (took ? 1 : 0),
       ...(last ? { last } : {}),
+    };
+    const stepAt = this.#poolStepAt(base);
+    const blocked =
+      !!result.step && POOL_STEP_TIER[result.step] === 'repair' && !this.ports.flags(this.#poolOwner).autoRepair;
+    // What the step waits for and when it is tried again is part of every report.
+    const report: SupervisorPoolReport = {
+      ...base,
+      ...(usable ? {} : { downSince: before.downSince ?? at }),
+      nextLookAt: this.#poolDue,
+      ...(stepAt === undefined ? {} : { stepAt: Math.max(stepAt, this.#poolDue) }),
+      ...(blocked ? { stepNeedsRepairSwitch: true as const } : {}),
     };
     this.#pool = report;
     try {
@@ -937,6 +982,7 @@ export class EmployeeSupervisor {
         ...(occupied && now - occupied.at < this.limits.idleReadMs ? { provider: occupied.presence } : {}),
         ...(storedFresh ? storedSeen(stored) : {}),
         ...(this.#pool ? { pool: this.#pool.pool } : {}),
+        ...(this.#poolDetail() ? { poolDetail: this.#poolDetail()! } : {}),
       },
     });
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
