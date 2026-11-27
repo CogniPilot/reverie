@@ -282,7 +282,10 @@ limit fallback (`modelLimitFallback`) changes the model within the same plan
 and does not help a plan that is signed out. After an office restart the
 office has no record that it launched a pane, so a screen it can only know by
 its words is recognised again at that laptop's next launch; a sign-in screen
-is recognised at once, by its widget.
+is recognised at once, by its widget. A start-up screen that no table row
+names is recognised only for a CLI that declares both its composer mark and its
+composer glyph (Claude Code, Codex, OpenCode), because for any other the office
+cannot show that a pane is without a composer.
 
 ## Employee disk budget
 
