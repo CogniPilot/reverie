@@ -443,8 +443,9 @@ export interface SupervisorObservation {
     /**
      * Whether anything of the employee runs in their running laptop besides the agent and the laptop's own fixed
      * processes, by a read made inside the laptop: see `SupervisorOtherWork`. `true` is treated exactly like
-     * work the pane shows its agent left running. `unknown` and absent say nothing: they start no wait and end
-     * none. Present from the read of what runs in the laptop until a later read replaces it or it has gone stale.
+     * work the pane shows its agent left running, and so is `unknown`: a read that could not say is never taken
+     * for "nothing else runs" (`mayHoldOtherWork`). Absent, as where the office cannot read inside a laptop,
+     * says nothing: it starts no wait and ends none. Present from the read of what runs in the laptop until a later read replaces it or it has gone stale.
      */
     readonly otherWork?: SupervisorOtherWork['otherWork'];
     /** Everything that read reported. Data for reports; no rule reads it. */
@@ -1431,20 +1432,30 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
  * in the laptop. Two readings say something about that. An idle pane shows whether its agent left work running;
  * any other pane says nothing. The read made inside the laptop says whether anything else of the employee runs
  * there (`laptop.otherWork`): `true` is work left running whatever the pane shows, `false` agrees with a pane
- * that shows none, and `unknown` says nothing, so it neither starts the clock of such work nor ends it.
+ * that shows none. `unknown`, a read that could not say, counts as work that may be running (`mayHoldOtherWork`):
+ * it starts that clock and keeps it, so that a laptop is never rebuilt at once because the office could not look.
+ * The clock gives such a laptop the same grace as work that was seen, and then the rebuild follows.
  */
 export function sightEmployee(
   observed: SupervisorObservation
 ): SupervisorClassification & { readonly background?: boolean } {
-  const { turn, background } = observed.session,
-    other = observed.laptop.otherWork;
+  const { turn, background } = observed.session;
   const left =
-    other === true || (turn === 'idle' && background === true)
+    mayHoldOtherWork(observed) || (turn === 'idle' && background === true)
       ? true
-      : turn === 'idle' && other !== 'unknown'
+      : turn === 'idle'
         ? false
         : undefined;
   return { ...classifyEmployee(observed), ...(left === undefined ? {} : { background: left }) };
+}
+
+/**
+ * The read made inside the laptop found work besides the agent, or could not say whether there is any. Absent,
+ * where no such read is made, says nothing.
+ */
+export function mayHoldOtherWork(observed: Pick<SupervisorObservation, 'laptop'>): boolean {
+  const other = observed.laptop.otherWork;
+  return other === true || other === 'unknown';
 }
 
 /** Waits that say an operation of the office's own is running or pending. They are no failure to read a laptop. */
@@ -1875,7 +1886,8 @@ function laptopHeld(observed: SupervisorObservation): readonly SupervisorPrecond
  * - The pane is seen idle and has been silent for `heldInputIdleMs`: the laptop is rebuilt (`proof`).
  * - A turn is in progress: it is waited for, however long it takes.
  * - The agent ended its turn with work left running: that is waited for until `backgroundGraceMs` after the office
- *   first saw it (`backgroundSince`), and then the idle laptop is rebuilt with it.
+ *   first saw it (`backgroundSince`), and then the idle laptop is rebuilt with it. A read inside the laptop that
+ *   found work beside the agent, or could not say, is given the same time (`mayHoldOtherWork`).
  * - The office is not reading the pane. `unknown` is never treated as idle. A read made inside the laptop is asked
  *   first, and a laptop it shows to be empty is rebuilt at once. Otherwise the laptop is rebuilt `blindRebuildMs`
  *   after the problem was first seen (`agent-unreadable`): see `SUPERVISOR_POLICY` for why that long. The wait
@@ -1894,7 +1906,7 @@ function betweenTurnsGate(
   const { turn = 'unknown', idleSince } = observed.session;
   // Work the pane shows its agent left running, and work a read inside the laptop found beside the agent (a job
   // started detached, a tmux server of the employee's own): one and the same thing here.
-  const background = observed.session.background === true || observed.laptop.otherWork === true;
+  const background = observed.session.background === true || mayHoldOtherWork(observed);
   const watched = watchedSince(history);
   // Work left running has a clock of its own, from when it was first seen. An agent parked on a start-up screen
   // has no conversation that could have started any, so what its pane shows is given the short wait only.
@@ -1914,9 +1926,9 @@ function betweenTurnsGate(
   // A laptop that this read shows to be empty never comes here: `rebuildGate` decides for it.
   if (observed.laptop.provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
   const at = watched + policy.blindRebuildMs;
-  // A pane that cannot be read shows no work left running, but the read inside the laptop may have found some:
-  // that is given its time here as well.
-  if (watched > 0 && now >= at && observed.laptop.otherWork === true && !overdue)
+  // A pane that cannot be read shows no work left running, but the read inside the laptop may have found some, or
+  // may not have been able to say: that is given its time here as well.
+  if (watched > 0 && now >= at && mayHoldOtherWork(observed) && !overdue)
     return {
       kind: 'wait',
       waitingFor: HELD_INPUT_BACKGROUND_WAIT,

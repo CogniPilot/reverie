@@ -446,11 +446,12 @@ describe('work an agent left running when its turn ended', () => {
     );
   });
 
-  it('lets a read that could not tell grant nothing and block nothing by itself', () => {
-    // No clock is started by it, and the idle, silent laptop is rebuilt as if no read had been made.
-    expect(sightEmployee(other('unknown')).background).toBeUndefined();
-    expect(rollOn(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T, T + HOUR).backgroundSince).toBeUndefined();
-    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T)).toBe(3 * MINUTE);
+  it('gives a read that could not tell the same four hours as work that was found, never a rebuild at once', () => {
+    // A read that could not say what runs beside the agent is not taken for "nothing": it starts the clock, and
+    // the idle, silent laptop is rebuilt when the four hours are up, as for work that was seen.
+    expect(sightEmployee(other('unknown')).background).toBe(true);
+    expect(rollOn(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T, T + HOUR).backgroundSince).toBe(T);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T)).toBe(4 * HOUR);
     // It ends no clock either: work that was seen keeps its four hours from its first sighting, and no more.
     const seen = rollOn(EMPTY_SUPERVISOR_HISTORY, other(true), T, T + HOUR);
     const unread = rollOn(seen, other('unknown'), T + HOUR, T + 2 * HOUR);
@@ -466,7 +467,7 @@ describe('work an agent left running when its turn ended', () => {
     const blind = withLaptop(failed, { provider: 'running' });
     expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, blind, T)).toBe(2 * HOUR);
     expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(true, blind), T)).toBe(4 * HOUR);
-    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown', blind), T)).toBe(2 * HOUR);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown', blind), T)).toBe(4 * HOUR);
     expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(false, blind), T)).toBe(2 * HOUR);
   });
 
@@ -544,6 +545,8 @@ function officeOf(
   options: {
     saved?: Map<string, SupervisorHistory>;
     officeRestart?: { asked: string[]; answer: 'pending' | 'refused'; lastAt?: number };
+    /** What a read inside each laptop finds beside the agent. Without it the office cannot make that read. */
+    otherWork?: (id: string) => true | false | 'unknown';
   } = {}
 ) {
   const start = 1_800_000_000_000;
@@ -599,6 +602,9 @@ function officeOf(
     readLaptop: async (employee) => desks.get(employee.id)!.reading,
     readSource: async () => 'unknown',
     readProvider: async (employee) => desks.get(employee.id)!.provider,
+    ...(options.otherWork
+      ? { readOtherWork: async (employee: SupervisedEmployee) => ({ otherWork: options.otherWork!(employee.id), at: state.now }) }
+      : {}),
     actions: {
       'rebuild-laptop': async (employee, _guard, _move, proved) => {
         rebuilt.push({
@@ -1056,4 +1062,40 @@ describe('the office asking for its own restart beside what a closed plan move s
       expect(officeRestart.asked[0]).toMatch(/reads none of its laptops/);
     }
   );
+});
+
+describe('a read inside the laptop that could not say what else runs there', () => {
+  /** A reachable agent, idle and silent, on a laptop held for a cause a rebuild settles. */
+  const reachable = (found: true | false | 'unknown') =>
+    officeOf(
+      ['a'],
+      () => ({
+        session: ATTACHED_IDLE,
+        restoration: VIEW_LOST,
+        reading: heldAt('DOCKER_RESOURCE_HELPER_FAILED'),
+        provider: 'running',
+      }),
+      { otherWork: () => found }
+    );
+
+  it.each<[true | false | 'unknown', number, number]>([
+    [false, 0, 10],
+    [true, 235, 250],
+    ['unknown', 235, 250],
+  ])('with the read saying %s, rebuilds between minute %i and %i', async (found, from, to) => {
+    const o = reachable(found);
+    await o.run(5 * 60);
+    expect(o.rebuilt.length).toBeGreaterThan(0);
+    expect(o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(from);
+    expect(o.rebuilt[0]!.minute).toBeLessThanOrEqual(to);
+    expect(o.report('a').needsHuman).toBeUndefined();
+  });
+
+  it('says what it waits for meanwhile, and when that ends', async () => {
+    const o = reachable('unknown');
+    await o.run(30);
+    expect(o.rebuilt).toEqual([]);
+    expect(o.report('a').waitingFor).toBe('the work the agent left running to finish');
+    expect(o.report('a').waitingUntil).toBeGreaterThan(o.state.now + 3 * HOUR);
+  });
 });

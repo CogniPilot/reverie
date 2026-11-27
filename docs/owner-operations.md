@@ -757,10 +757,15 @@ until a later read replaces it, for up to ten minutes, so those four hours
 count from the first sighting and not from every read anew. A later read that
 finds none, with a pane that shows none, ends the wait at once.
 
-`unknown` means the read could not be made or gave no answer: the laptop on
-record does not run, the supervisor may not act for the employee, or the
-program refused. It is never reported as `false`, and it grants nothing and
-blocks nothing by itself: it starts no wait and ends none. The program refuses
+`unknown` means the read could not be made or gave no answer: the supervisor
+may not act for the employee, or the program refused. It is never reported as
+`false`, and it is never taken for "nothing else runs": the policy treats it
+like `true`. It starts the same four-hour wait and keeps it, and when the four
+hours are up the laptop is rebuilt as for work that was seen, under the same
+office-wide brake. A laptop whose read never answers is therefore rebuilt four
+hours after the office first could not tell, never at once and never not at
+all. Where the office cannot make the read at all, nothing is shown and the
+read says nothing. The program refuses
 in one case of its own: tmux cannot be asked on the laptop's own socket while
 some tmux process of the laptop's user is alive. That may be the agent's own
 server under a socket file that was cleared, and without tmux's word the
