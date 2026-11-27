@@ -19,6 +19,11 @@
  * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running;
  * - a lost terminal whose input is also held for good: what the office's own terminal object says of that hold and
  *   of the agent's turn (`readSupervisedTerminal`), read from memory. The rebuild that follows is a laptop step;
+ * - any other laptop that only a rebuild settles while an agent runs in it: what that same terminal object shows
+ *   of the agent's turn (`readTerminalTurn`), so that the laptop is rebuilt between turns and never during one;
+ * - an employee with no approved resource limits: `DockerSupervisorLaptops.applyStandingLimits`, which saves the
+ *   owner's standing default through the store method behind the docker-policy route;
+ * - a session that is not in a laptop: the same wake;
  * - a laptop at the provider's sign-in screen: the plan sign-in reconciler's own pass for that one plan, asked for
  *   now instead of at its next read. It places only a sign-in some holder of that plan already has;
  * - keeping a running laptop's approved limits in place: `DockerSupervisorLaptops.keepLimits`, for an employee in
@@ -39,6 +44,7 @@ import type {
 } from './employee-supervisor.js';
 import {
   readSupervisedTerminal,
+  readTerminalTurn,
   type SupervisedTerminal,
   type SupervisorBusy,
   type SupervisorHistory,
@@ -64,6 +70,8 @@ export interface OfficeSupervisorDeps {
   inputHeldOnRecord?(sessionId: string): boolean;
   /** The office has restored its sessions; false while it is starting or shutting down. */
   ready(): boolean;
+  /** What the office is doing about not being ready, when that takes a while; see `EmployeeSupervisorPorts`. */
+  notReady?(): string | undefined;
   /** Present only under the boxed laptop runtime. */
   readonly laptops?: DockerSupervisorLaptops;
   /** The laptop runtime's own last attempt to attach each office terminal. */
@@ -118,6 +126,12 @@ const holds = (guard: SupervisorGuard) => () => {
     return false;
   }
 };
+
+/** What a terminal the office is reading shows of its agent's turn; nothing for one it is not reading. */
+function shownTurn(session: OfficeSession | undefined): Partial<ReturnType<typeof readTerminalTurn>> {
+  const seen = readTerminalTurn(session);
+  return seen.turn === 'unknown' ? {} : seen;
+}
 
 export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSupervisorPorts {
   const now = deps.now ?? Date.now;
@@ -200,6 +214,9 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         viewerHealth: viewerHealth(session),
         ...(health ? { providerHealth: health } : {}),
         ...(startupScreen ? { startupScreen } : {}),
+        // What the pane shows of the agent's turn is read for every laptop: a rebuild is judged by it. A pane
+        // that is not read reports nothing, which the policy takes for unknown. A held input is reported on top.
+        ...(deps.laptops ? shownTurn(session) : {}),
         ...readSupervisedTerminal(session, !session && deps.inputHeldOnRecord?.(employee.sessionId) === true),
       },
       laptop: {
@@ -306,6 +323,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
   return {
     now,
     ready: () => deps.ready(),
+    ...(deps.notReady ? { notReady: () => deps.notReady!() } : {}),
     employees,
     flags,
     glance,
@@ -322,6 +340,8 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         ? {
             'resend-continuation': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
               laptops.resend(employee, guard),
+            'apply-standing-limits': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
+              laptops.applyStandingLimits(employee, guard),
             'start-continuation': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
               laptops.start(employee, guard),
             'rebuild-laptop': (

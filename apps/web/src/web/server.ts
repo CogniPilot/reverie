@@ -117,6 +117,7 @@ import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
 import { EmployeeSupervisor } from '../employee-supervisor.js';
 import { officeSupervisorPorts } from '../employee-supervisor-office.js';
+import { OfficeSelfRestart, OfficeSelfRestartRecord, ownRestartPolicy } from '../office-self-restart.js';
 import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
 import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
 import { PlanSignInReconciler, type SignInHolderPort } from '../plan-signin-reconciler.js';
@@ -538,6 +539,7 @@ export class WebServer extends EventEmitter {
   private companyWakeReady = false;
   /** Present only under the boxed laptop runtime. */
   private employeeSupervisor?: EmployeeSupervisor;
+  private officeSelfRestart?: OfficeSelfRestart;
   private planSignIn?: PlanSignInReconciler;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
@@ -2627,6 +2629,33 @@ export class WebServer extends EventEmitter {
       // The office recovery supervisor. Every step it takes is a call to the service method behind the owner's
       // own route for that step; what it presents instead of an owner request is documented in
       // employee-supervisor-office.ts and docker-employee-supervisor-laptops.ts.
+      // A laptop runtime that is no longer the one the office started with is settled by a new office process and
+      // by nothing else. office-self-restart.ts says when the office may end itself for it, and how often.
+      const restartRecord = new OfficeSelfRestartRecord(dataPath('office-self-restart.json'));
+      const officeSelfRestart = new OfficeSelfRestart({
+        now: Date.now,
+        started: () => this.companyWakeReady,
+        stale: () => !dockerRuntime.current(),
+        stamp: () => dockerRuntime.identityStamp(),
+        startable: () => dockerRuntime.restartWouldKeepIdentity(),
+        allowed: () => this.companyService.view(undefined).settings.supervisorAutoRepair !== false,
+        restartPolicy: () => {
+          let mounts = '';
+          try {
+            mounts = readFileSync('/proc/self/mountinfo', 'utf8');
+          } catch {
+            /* the host name alone is tried */
+          }
+          return ownRestartPolicy((args) => dockerRuntime.engineRead(args), getHostname(), mounts);
+        },
+        load: () => restartRecord.load(),
+        save: (times) => restartRecord.save(times),
+        // The process's usual graceful shutdown, as for a stop signal from outside.
+        exit: () => void process.emit('SIGTERM'),
+        log: (line) => console.log(line),
+        audit: (entry) => void appendAdminAudit(entry),
+      });
+      this.officeSelfRestart = officeSelfRestart;
       const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
       this.employeeSupervisor = new EmployeeSupervisor(
         officeSupervisorPorts({
@@ -2634,6 +2663,7 @@ export class WebServer extends EventEmitter {
           session: (id) => this.sessions.get(id),
           inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
           ready: () => this.companyWakeReady && dockerRuntime.current(),
+          notReady: () => officeSelfRestart.status(),
           laptops: dockerRuntime.supervisorLaptops(),
           restorations: () => dockerRuntime.restorationReports,
           providerHealth: (employee) => this.workerProviderHealth?.read(employee),
@@ -4908,7 +4938,10 @@ export class WebServer extends EventEmitter {
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
       // The office supervisor rides the same half-minute pass, after the crash-recovery expert has had its turn.
       // Neither promise rejects: each logs its own failure.
-      const tickRecovery = () => void tickWake().then(() => this.employeeSupervisor?.tick());
+      const tickRecovery = () =>
+        void tickWake()
+          .then(() => this.officeSelfRestart?.tick())
+          .then(() => this.employeeSupervisor?.tick());
       tickRecovery();
       this.cleanup.setInterval(tickRecovery, 30_000, { description: 'Company crash recovery' });
       // Asked often, reads once a minute; every few seconds only around the renewal of a shared sign-in.

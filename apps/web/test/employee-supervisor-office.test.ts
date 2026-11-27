@@ -220,10 +220,20 @@ describe('office supervisor ports', () => {
     // The terminal lost its client: what it last showed is not what the pane shows now.
     o.state.sessions.set('session-a', { ...held, runtimeHealth: 'disconnected' });
     expect(seen()).toMatchObject({ inputHeld: true, turn: 'unknown' });
-    // A terminal that takes input reports none of this, and its own word is taken over the saved record's.
+    // A terminal that takes input reports no hold, and its own word is taken over the saved record's. What its
+    // pane shows of the turn is still reported: any rebuild of a laptop an agent runs in is judged by it.
     o.state.heldOnRecord = ['session-a'];
     o.state.sessions.set('session-a', { pid: 10, status: 'busy', isWorking: true, runtimeHealth: 'unknown' });
-    expect(seen()).toEqual({ available: true, runtimeHealth: 'unknown', viewerHealth: 'connected', providerHealth: 'healthy' });
+    expect(seen()).toEqual({
+      available: true,
+      runtimeHealth: 'unknown',
+      viewerHealth: 'connected',
+      providerHealth: 'healthy',
+      turn: 'working',
+    });
+    o.state.sessions.set('session-a', { pid: 10, status: 'idle', isWorking: false, runtimeHealth: 'unknown', lastActivityAt: 700_000, watching: 'a monitor' });
+    expect(seen()).toMatchObject({ turn: 'idle', idleSince: 700_000, background: true });
+    expect(seen()).not.toHaveProperty('inputHeld');
     expect(o.state.recordReads).toEqual([]);
   });
 
@@ -435,7 +445,8 @@ describe('office supervisor ports', () => {
   it('offers no relaunch step and no laptop steps without the laptop runtime', () => {
     const o = office();
     expect(Object.keys(o.ports.actions).sort()).toEqual([
-      'abandon-move', 'continue-move', 'rebuild-laptop', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
+      'abandon-move', 'apply-standing-limits', 'continue-move', 'rebuild-laptop', 'reconnect-viewer', 'resend-continuation',
+      'start-continuation',
     ]);
   });
 

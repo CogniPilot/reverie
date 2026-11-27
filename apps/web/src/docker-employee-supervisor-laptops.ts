@@ -32,21 +32,31 @@
  * of the owner's confirmation:
  *
  * - a read made inside that laptop says no agent runs there; or
- * - an agent runs there, the policy chose the rebuild because the office terminal's input is held for good
- *   (`terminal-input-held`), and that terminal, read again at this moment, still has its input held and shows no
- *   turn in progress. The office can never type to that agent again, so nothing is gained by keeping it between
- *   turns. A turn in progress, a pane the office is not reading, a second running laptop or a running laptop that
- *   is not the recorded one all refuse, as they always did.
+ * - an agent runs there, or the read cannot say, and the policy chose the rebuild between that agent's turns: the
+ *   step was asked to prove one of `SUPERVISOR_OCCUPIED_PROOFS`. The office terminal, read again at this moment,
+ *   must show no turn in progress. A turn in progress is waited for. A pane the office is not reading refuses,
+ *   unless the policy found that it cannot be read at all and the long wait for that has passed
+ *   (`agent-unreadable`). Where the reason is a held terminal input (`terminal-input-held`) the input must still
+ *   be held, and where it is a held laptop (`laptop-held`) the laptop's own read must still say so. A second
+ *   running laptop or a running laptop that is not the recorded one refuses, as it always did.
  *
  * One kind of running laptop is not counted among those: the candidate that an abandoned plan move of this employee
  * created for the new plan, when it is not the employee's recorded laptop and a read inside it, made now, finds no
  * agent (`#withoutEmptyCandidates`). A move starts that container before it launches an agent in it, so a move that
  * was abandoned in between leaves it running and empty, and the rebuild is the product's own way to remove what an
- * abandoned move left behind.
+ * abandoned move left behind. No proof of the policy excuses such a candidate: only that read does, and a candidate
+ * in which anything runs, or which cannot be read, refuses like any other laptop that is not the recorded one.
+ *
+ * THE OWNER'S STANDING DEFAULTS (company setting `supervisorStandingDefaults`, on unless the owner switched it off)
+ * stand where the owner's own approval of limits and of a layout stood, for an employee who has none: see
+ * docker-standing-defaults.ts for what they are. The supervisor still never chooses a value: both are derived from
+ * what the owner approved for the other employees, and the limits are saved through the same store method the
+ * owner's docker-policy route calls. The switch is read again inside that save.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
+import type { CompanyState } from './company-types.js';
 import type { DockerAbsentReprovision, DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
 import type { DockerLaptopLimitUpkeep } from './docker-laptop-limit-upkeep.js';
 import type { DockerPoolReconciliation } from './docker-pool-reconciliation.js';
@@ -59,8 +69,12 @@ import {
   type DockerContinuationResult,
   type DockerEmployeeContinuation,
 } from './docker-employee-continuation.js';
-import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
+import type {
+  DockerEmployeeContinuationRecord,
+  DockerEmployeeResourcePolicy,
+} from './docker-employee-continuation-data.js';
 import { describeDockerProviderExit } from './docker-provider-exit.js';
+import { standingLayout, standingLimits } from './docker-standing-defaults.js';
 import type {
   SupervisedEmployee,
   SupervisorActionResult,
@@ -69,6 +83,8 @@ import type {
 } from './employee-supervisor.js';
 import {
   readSupervisedTerminal,
+  readTerminalTurn,
+  SUPERVISOR_OCCUPIED_PROOFS,
   type SupervisedTerminal,
   type SupervisorObservation,
   type SupervisorPrecondition,
@@ -80,6 +96,13 @@ export interface DockerSupervisorLaptopDeps {
   readonly store: {
     record(employeeId: string): DockerEmployeeContinuationRecord | undefined;
     policy(employeeId: string): unknown;
+    /** The save behind the owner's docker-policy route. Absent where standing limits cannot be given. */
+    savePolicy?(
+      employeeId: string,
+      owner: string | undefined,
+      policy: DockerEmployeeResourcePolicy,
+      current: () => void
+    ): Promise<void>;
   };
   readonly engine: {
     observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
@@ -94,6 +117,8 @@ export interface DockerSupervisorLaptopDeps {
   readonly moves?: () => Pick<DockerAbsentReprovisionPlanMoves, 'abandonedCandidateRecords'> | undefined;
   /** The office's own terminal object for a session, when it has one. */
   readonly sessions: { get(sessionId: string): SupervisedTerminal | undefined };
+  /** The saved record of a session says its terminal input is held. Asked only while there is no terminal object. */
+  inputHeldOnRecord?(sessionId: string): boolean;
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
@@ -138,8 +163,8 @@ export class DockerSupervisorLaptops {
   }
 
   /** The newest laptop operation the owner (or an earlier pass) recorded for this employee. */
-  #head(employeeId: string) {
-    const heads = reprovisionHeads(this.deps.company.store.snapshot().retiredDockerEmployeeContinuations, employeeId);
+  #head(employeeId: string, state: CompanyState = this.deps.company.store.snapshot()) {
+    const heads = reprovisionHeads(state.retiredDockerEmployeeContinuations, employeeId);
     return heads.length === 1 ? heads[0] : undefined;
   }
 
@@ -154,12 +179,49 @@ export class DockerSupervisorLaptops {
       : undefined;
   }
 
+  /** The owner left the standing defaults switched on for this company. */
+  #standingEnabled(owner: string | undefined, state: CompanyState): boolean {
+    return state.settings.find((row) => row.owner === owner)?.supervisorStandingDefaults !== false;
+  }
+
+  /** The other employees of the same company. Standing defaults are read from them and never from the employee. */
+  #others(employeeId: string, state: CompanyState) {
+    const self = state.employees.find((value) => value.id === employeeId);
+    return self ? state.employees.filter((value) => value.id !== employeeId && value.owner === self.owner) : [];
+  }
+
+  /** The standing default limits for this employee; see docker-standing-defaults.ts. */
+  #standingLimits(employeeId: string, state: CompanyState): DockerEmployeeResourcePolicy | undefined {
+    return standingLimits(
+      this.#others(employeeId, state).flatMap((value) =>
+        value.dockerResourcePolicy ? [value.dockerResourcePolicy] : []
+      )
+    );
+  }
+
+  /** The standing default layout for this employee; see docker-standing-defaults.ts. */
+  #standingLayout(employeeId: string, state: CompanyState): DockerLaptopTemplate | undefined {
+    return standingLayout(
+      this.#others(employeeId, state).flatMap((value) => {
+        const template = this.#head(value.id, state)?.template;
+        return template ? [template] : [];
+      })
+    );
+  }
+
   /**
    * The laptop layout a rebuild would use: the one the owner approved for this employee's most recent laptop
-   * operation, verbatim. The supervisor never writes one; an employee with none on record is rebuilt by hand once.
+   * operation, verbatim. The supervisor never writes one. An employee with none on record is given the owner's
+   * standing default, while that is switched on and the other laptops have one in common.
    */
   #template(employeeId: string): DockerLaptopTemplate | undefined {
-    return this.#head(employeeId)?.template;
+    const state = this.deps.company.store.snapshot(),
+      own = this.#head(employeeId, state)?.template;
+    if (own) return own;
+    const employee = state.employees.find((value) => value.id === employeeId);
+    return employee && this.#standingEnabled(employee.owner, state)
+      ? this.#standingLayout(employeeId, state)
+      : undefined;
   }
 
   /** What is already in memory about the laptop. No Engine call. */
@@ -167,16 +229,22 @@ export class DockerSupervisorLaptops {
     employeeId: string
   ): Pick<
     SupervisorObservation['laptop'],
-    'record' | 'bound' | 'policyApproved' | 'templateOnRecord' | 'rebuildPending'
+    'record' | 'bound' | 'policyApproved' | 'templateOnRecord' | 'rebuildPending' | 'standing'
   > {
     const row = this.#row(employeeId);
-    const employee = this.deps.company.store.snapshot().employees.find((value) => value.id === employeeId);
+    const state = this.deps.company.store.snapshot();
+    const employee = state.employees.find((value) => value.id === employeeId);
     const pending = !!this.#pending(employeeId);
     return {
       record: row ? { phase: row.phase, version: row.version, operationId: row.request.operationId } : null,
       bound: !!employee?.dockerBinding,
       policyApproved: !!employee?.dockerResourcePolicy,
-      templateOnRecord: !!this.#template(employeeId),
+      templateOnRecord: !!this.#head(employeeId, state)?.template,
+      standing: {
+        enabled: this.#standingEnabled(employee?.owner, state),
+        limits: !!this.#standingLimits(employeeId, state),
+        layout: !!this.#standingLayout(employeeId, state),
+      },
       ...(pending ? { rebuildPending: true } : {}),
     };
   }
@@ -374,6 +442,37 @@ export class DockerSupervisorLaptops {
     }
   }
 
+  /**
+   * Give an employee who has no approved resource limits the owner's standing default, through the save behind the
+   * owner's docker-policy route. Inside that save the supervisor's authority, the owner's switch and the default
+   * itself are read again: limits that were derived from a state that has moved on are not written.
+   */
+  async applyStandingLimits(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
+    const save = this.deps.store.savePolicy?.bind(this.deps.store);
+    if (!save) return { outcome: 'refused', detail: 'this office cannot save resource limits' };
+    const derive = () => {
+      const state = this.deps.company.store.snapshot();
+      const employed = state.employees.find((value) => value.id === employee.id);
+      if (!employed || employed.dockerResourcePolicy || !this.#standingEnabled(employee.owner, state)) return undefined;
+      return this.#standingLimits(employee.id, state);
+    };
+    const policy = derive();
+    if (!policy) return { outcome: 'refused', detail: 'no standing default limits to give' };
+    try {
+      const authority = this.#authority(employee, guard),
+        digest = dockerContinuationDigest(policy);
+      await save(employee.id, employee.owner, policy, () => {
+        authority.require();
+        const again = derive();
+        if (!again || dockerContinuationDigest(again) !== digest)
+          throw new CompanyError('The standing default limits changed', 409);
+      });
+      return { outcome: 'done', detail: 'standing limits ' + digest.slice(0, 12) };
+    } catch (error) {
+      return refusal(error);
+    }
+  }
+
   /** The owner's "read the policy, then continue" for a stopped source that has no set-up yet. */
   async start(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
     if (this.#row(employee.id)) return { outcome: 'refused', detail: 'a laptop set-up already exists' };
@@ -424,20 +523,32 @@ export class DockerSupervisorLaptops {
   }
 
   /**
-   * The held terminal, read again now: why the laptop its agent runs in may not be discarded for it, or undefined
-   * when it may. A turn in progress tried nothing and is waited for; everything else is a refusal.
+   * The office terminal, read again now: why the laptop an agent may run in may not be discarded, or undefined
+   * when it may. A turn in progress tried nothing and is waited for; everything else is a refusal. A pane that is
+   * not read refuses unless the policy found that it cannot be read and waited the long time for that
+   * (`agent-unreadable`). A held input is asked for only where that is the reason (`terminal-input-held`); with no
+   * terminal object, as after an office restart, the saved session record says whether it is held.
    */
-  #heldTerminalRefusal(employee: SupervisedEmployee): SupervisorActionResult | undefined {
-    const { inputHeld, turn } = readSupervisedTerminal(this.deps.sessions.get(employee.sessionId));
-    if (!inputHeld) return { outcome: 'refused', detail: "the office terminal's input is not held" };
+  #occupiedRefusal(
+    employee: SupervisedEmployee,
+    proved: readonly SupervisorPrecondition[]
+  ): SupervisorActionResult | undefined {
+    const terminal = this.deps.sessions.get(employee.sessionId);
+    const onRecord = !terminal && this.deps.inputHeldOnRecord?.(employee.sessionId) === true;
+    if (proved.includes('terminal-input-held') && !readSupervisedTerminal(terminal, onRecord).inputHeld)
+      return { outcome: 'refused', detail: "the office terminal's input is not held" };
+    const { turn } = readTerminalTurn(terminal);
     if (turn === 'working') return { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
-    if (turn !== 'idle') return { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
+    if (turn !== 'idle' && !proved.includes('agent-unreadable'))
+      return { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
     return undefined;
   }
 
   /**
    * Why the running laptops a rebuild would stop may not be discarded, read now; undefined when they may. See the
-   * file comment: only the one recorded laptop, and only when it is empty or its terminal's input is held for good.
+   * file comment: only the one recorded laptop, and only when it is empty or the policy chose the rebuild between
+   * its agent's turns. A read that cannot say what runs there counts as an agent running, never as an empty laptop.
+   * The empty candidate of an abandoned plan move is taken off the list first (`#withoutEmptyCandidates`).
    */
   async #discardRefusal(
     employee: SupervisedEmployee,
@@ -450,14 +561,14 @@ export class DockerSupervisorLaptops {
     const recorded = !!row?.destination && running.length === 1 && running[0] === row.destination.containerId;
     const presence = recorded ? await this.#destinationPresence(row!) : 'running';
     if (presence === 'exited' || presence === 'absent') return undefined;
-    if (recorded && presence === 'running' && proved.includes('terminal-input-held'))
-      return this.#heldTerminalRefusal(employee);
+    if (recorded && SUPERVISOR_OCCUPIED_PROOFS.some((name) => proved.includes(name)))
+      return this.#occupiedRefusal(employee, proved);
     return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
   }
 
   /**
    * The owner's rebuild: preview, then apply with the preview's own digest. A pending one is finished instead.
-   * `proved` is what the policy asked to be proved for this step; see `#discardRefusal` for its one use.
+   * `proved` is what the policy asked to be proved for this step; see `#discardRefusal` and the file comment.
    */
   async rebuild(
     employee: SupervisedEmployee,
@@ -484,6 +595,9 @@ export class DockerSupervisorLaptops {
       }
       const template = this.#template(employee.id);
       if (!template) return { outcome: 'refused', detail: 'no approved laptop layout on record' };
+      // The hold that the rebuild was chosen for is read once more. A laptop that has finished meanwhile is kept.
+      if (proved.includes('laptop-held') && (await this.read(employee, guard))?.state === 'ready')
+        return { outcome: 'refused', detail: 'the laptop is no longer held' };
       const preview = await this.deps.absent.previewRebuild(employee.id, template, this.#authority(employee, guard));
       const blocked = 'code' in preview ? preview.code : undefined;
       if (blocked || !(preview.allowedActions as readonly string[]).includes('rebuild'))
