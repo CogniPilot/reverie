@@ -28,8 +28,15 @@
  * in the office and never brings anyone back. Nothing is attached, no agent is read or started.
  *
  * A rebuild is requested without `confirmDiscardRunning` unless one running laptop is exactly the recorded
- * destination and a read made inside it just now says no agent runs there. That statement is the supervisor's only
- * use of the owner's confirmation.
+ * destination and one of two statements holds, read just now. Those two statements are the supervisor's only uses
+ * of the owner's confirmation:
+ *
+ * - a read made inside that laptop says no agent runs there; or
+ * - an agent runs there, the policy chose the rebuild because the office terminal's input is held for good
+ *   (`terminal-input-held`), and that terminal, read again at this moment, still has its input held and shows no
+ *   turn in progress. The office can never type to that agent again, so nothing is gained by keeping it between
+ *   turns. A turn in progress, a pane the office is not reading, a second running laptop or a running laptop that
+ *   is not the recorded one all refuse, as they always did.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
@@ -54,7 +61,13 @@ import type {
   SupervisorGuard,
   SupervisorLaptopReading,
 } from './employee-supervisor.js';
-import type { SupervisorObservation, SupervisorProviderPresence } from './employee-supervisor-policy.js';
+import {
+  readSupervisedTerminal,
+  type SupervisedTerminal,
+  type SupervisorObservation,
+  type SupervisorPrecondition,
+  type SupervisorProviderPresence,
+} from './employee-supervisor-policy.js';
 
 export interface DockerSupervisorLaptopDeps {
   readonly company: Pick<CompanyService, 'recoveryAction' | 'store'>;
@@ -72,7 +85,7 @@ export interface DockerSupervisorLaptopDeps {
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
   /** The office's own terminal object for a session, when it has one. */
-  readonly sessions: { get(sessionId: string): { readonly pid: number | null } | undefined };
+  readonly sessions: { get(sessionId: string): SupervisedTerminal | undefined };
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
@@ -357,8 +370,10 @@ export class DockerSupervisorLaptops {
   }
 
   /**
-   * Nothing that could start an agent in the laptop has moved since the read that found it empty: no set-up step
-   * is in flight and the office terminal is the same object under the same process, or gone.
+   * Nothing that could start an agent in the laptop has moved since the read that allowed its discard: no set-up
+   * step is in flight and the office terminal is the same object under the same process, or gone. A held terminal
+   * stays held for as long as it is that object, and what its pane shows is not asked again here: the pane of a
+   * laptop that is being stopped prints, which says nothing about a turn.
    */
   #quiet(employee: SupervisedEmployee): () => void {
     const before = this.deps.sessions.get(employee.sessionId),
@@ -372,8 +387,45 @@ export class DockerSupervisorLaptops {
     };
   }
 
-  /** The owner's rebuild: preview, then apply with the preview's own digest. A pending one is finished instead. */
-  async rebuild(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
+  /**
+   * The held terminal, read again now: why the laptop its agent runs in may not be discarded for it, or undefined
+   * when it may. A turn in progress tried nothing and is waited for; everything else is a refusal.
+   */
+  #heldTerminalRefusal(employee: SupervisedEmployee): SupervisorActionResult | undefined {
+    const { inputHeld, turn } = readSupervisedTerminal(this.deps.sessions.get(employee.sessionId));
+    if (!inputHeld) return { outcome: 'refused', detail: "the office terminal's input is not held" };
+    if (turn === 'working') return { outcome: 'busy', detail: 'the agent is in the middle of a turn' };
+    if (turn !== 'idle') return { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
+    return undefined;
+  }
+
+  /**
+   * Why the running laptops a rebuild would stop may not be discarded, read now; undefined when they may. See the
+   * file comment: only the one recorded laptop, and only when it is empty or its terminal's input is held for good.
+   */
+  async #discardRefusal(
+    employee: SupervisedEmployee,
+    running: readonly string[],
+    proved: readonly SupervisorPrecondition[]
+  ): Promise<SupervisorActionResult | undefined> {
+    const row = this.#row(employee.id);
+    const recorded = !!row?.destination && running.length === 1 && running[0] === row.destination.containerId;
+    const presence = recorded ? await this.#destinationPresence(row!) : 'running';
+    if (presence === 'exited' || presence === 'absent') return undefined;
+    if (recorded && presence === 'running' && proved.includes('terminal-input-held'))
+      return this.#heldTerminalRefusal(employee);
+    return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+  }
+
+  /**
+   * The owner's rebuild: preview, then apply with the preview's own digest. A pending one is finished instead.
+   * `proved` is what the policy asked to be proved for this step; see `#discardRefusal` for its one use.
+   */
+  async rebuild(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard,
+    proved: readonly SupervisorPrecondition[] = []
+  ): Promise<SupervisorActionResult> {
     try {
       const pending = this.#pending(employee.id);
       if (pending) {
@@ -400,15 +452,8 @@ export class DockerSupervisorLaptops {
         return { outcome: 'refused', detail: blocked ?? 'the rebuild is not offered' };
       let fence: (() => void) | undefined;
       if (preview.runningLaptops.length) {
-        const row = this.#row(employee.id);
-        const presence =
-          row?.destination &&
-          preview.runningLaptops.length === 1 &&
-          preview.runningLaptops[0] === row.destination.containerId
-            ? await this.#destinationPresence(row)
-            : 'running';
-        if (presence !== 'exited' && presence !== 'absent')
-          return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+        const refused = await this.#discardRefusal(employee, preview.runningLaptops, proved);
+        if (refused) return refused;
         fence = this.#quiet(employee);
       }
       const result = await this.deps.absent.rebuild(

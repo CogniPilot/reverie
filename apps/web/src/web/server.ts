@@ -2632,6 +2632,7 @@ export class WebServer extends EventEmitter {
         officeSupervisorPorts({
           company: this.companyService,
           session: (id) => this.sessions.get(id),
+          inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
           ready: () => this.companyWakeReady && dockerRuntime.current(),
           laptops: dockerRuntime.supervisorLaptops(),
           restorations: () => dockerRuntime.restorationReports,

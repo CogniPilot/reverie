@@ -12,6 +12,8 @@
  * - abandoning a held plan move: `PlanMoves.abandonHeldDockerMove` with the supervisor's guard as its `authorized`
  *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them;
  * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running;
+ * - a lost terminal whose input is also held for good: what the office's own terminal object says of that hold and
+ *   of the agent's turn (`readSupervisedTerminal`), read from memory. The rebuild that follows is a laptop step;
  * - a laptop at the provider's sign-in screen: the plan sign-in reconciler's own pass for that one plan, asked for
  *   now instead of at its next read. It places only a sign-in some holder of that plan already has;
  * - keeping a running laptop's approved limits in place: `DockerSupervisorLaptops.keepLimits`, for an employee in
@@ -30,24 +32,31 @@ import type {
   SupervisorGuard,
   SupervisorMove,
 } from './employee-supervisor.js';
-import type { SupervisorBusy, SupervisorHistory, SupervisorObservation } from './employee-supervisor-policy.js';
+import {
+  readSupervisedTerminal,
+  type SupervisedTerminal,
+  type SupervisorBusy,
+  type SupervisorHistory,
+  type SupervisorObservation,
+  type SupervisorPrecondition,
+} from './employee-supervisor-policy.js';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoves } from './plan-move.js';
 import { viewerHealth } from './worker-provider-health.js';
 
-interface OfficeSession {
-  readonly pid: number | null;
-  readonly status?: string;
+interface OfficeSession extends SupervisedTerminal {
   readonly runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   readonly runtimeHealthScope?: 'provider' | 'terminal';
-  readonly paneExit?: unknown;
-  readonly viewerInputHeld?: boolean;
-  readonly paneLifecycleInFlight?: boolean;
   startupScreen?(): NonNullable<SupervisorObservation['session']['startupScreen']> | null;
 }
 
 export interface OfficeSupervisorDeps {
   readonly company: Pick<CompanyService, 'registeredEmployees' | 'view' | 'employeeRecoveryAvailable' | 'store'>;
   session(sessionId: string): OfficeSession | undefined;
+  /**
+   * The saved record of a session says its terminal input is held. Asked only while the office has no terminal
+   * object for that session, as after an office restart: the hold is saved and outlives the object.
+   */
+  inputHeldOnRecord?(sessionId: string): boolean;
   /** The office has restored its sessions; false while it is starting or shutting down. */
   ready(): boolean;
   /** Present only under the boxed laptop runtime. */
@@ -163,6 +172,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         viewerHealth: viewerHealth(session),
         ...(health ? { providerHealth: health } : {}),
         ...(startupScreen ? { startupScreen } : {}),
+        ...readSupervisedTerminal(session, !session && deps.inputHeldOnRecord?.(employee.sessionId) === true),
       },
       laptop: {
         record: null,
@@ -235,8 +245,12 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
               laptops.resend(employee, guard),
             'start-continuation': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
               laptops.start(employee, guard),
-            'rebuild-laptop': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
-              laptops.rebuild(employee, guard),
+            'rebuild-laptop': (
+              employee: SupervisedEmployee,
+              guard: SupervisorGuard,
+              _move: SupervisorMove | undefined,
+              proved?: readonly SupervisorPrecondition[]
+            ) => laptops.rebuild(employee, guard, proved),
           }
         : {}),
       ...(deps.signIn

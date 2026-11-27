@@ -90,9 +90,9 @@ ten healthy minutes):
 | Put approved limits back in place (the shared pool first, then the laptop's own) | a running laptop's read offers `repair-pool` or `repair` | the same 4 |
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
-| Wake (attach a provider that already runs) | the terminal is not connected | 6 |
+| Wake (attach a provider that already runs) | the terminal is not connected | 6; once when the terminal's input is also held for good and the wake was refused |
 | Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
-| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop | 2, and 2 per day |
+| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns | 2, and 2 per day |
 
 A laptop record can offer `continue` for a step it has not issued while the
 request is refused before that step, for example a set-up that was made for a
@@ -104,9 +104,32 @@ problem was first seen, and then starts the fresh laptop. With
 `supervisorAutoRepair` off it sends the request once and then names that switch
 and the rebuild calls.
 
+An office terminal whose input is held for good is the one case in which the
+supervisor rebuilds a laptop its agent still runs in. The hold records an input
+that may have been sent and was never confirmed; neither a healthy laptop nor a
+new terminal client clears it, so every wake is refused, chat cannot reach the
+employee and the office can never type to that agent again. The supervisor
+wakes once. When that is refused it goes on to the rebuild, three minutes after
+the problem was first seen, but never in the middle of a turn: the office
+terminal must show the agent idle and its pane must have been silent for two
+minutes, and both are read again immediately before the rebuild is requested.
+The running laptop is discarded only when it is the one recorded laptop of that
+employee. While a turn is in progress, or while the office is not reading the
+pane (after an office restart it has no terminal on a held session), it waits;
+after thirty minutes `needsHuman` says so and names the calls, and the office
+still rebuilds by itself as soon as the turn has ended. An agent that ended its
+turn with work left running (a monitor, a background shell) is given those same
+thirty minutes for it, and is then rebuilt with that work still running. The
+home directory is
+kept and the fresh laptop is started as after any rebuild. With
+`supervisorAutoRepair` off it wakes once and then names that switch and the
+calls, including `confirmDiscardRunning`. A terminal that is not connected but
+still takes input is only woken, never rebuilt.
+
 It never answers a sign-in or an owner's decision screen, never approves limits
 or a laptop layout, never returns anyone to the office, and never rebuilds
-while an agent runs in the laptop or while it cannot read the laptop. A rebuild
+while it cannot read the laptop or, with that one exception, while an agent
+runs in the laptop. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
 employee with none on record is rebuilt by hand once. A stopped or missing
 laptop is rebuilt only while another laptop of the box runs; when none does,

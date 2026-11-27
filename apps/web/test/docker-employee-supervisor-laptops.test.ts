@@ -54,7 +54,7 @@ function world() {
     policy: { memory: 1 } as unknown,
     approved: true,
     retired: [retired()] as Array<Record<string, unknown>>,
-    session: { pid: 77 } as { pid: number | null } | undefined,
+    session: { pid: 77 } as ({ pid: number | null } & Record<string, unknown>) | undefined,
     observed: { state: 'running', provider: { kind: 'exited', exit: {} } } as unknown,
     preview: {
       sessionId: EMPLOYEE.sessionId,
@@ -658,5 +658,122 @@ describe('rebuilding a laptop', () => {
       expectedScopeDigest: '5'.repeat(64),
       template: TEMPLATE,
     });
+  });
+});
+
+describe('rebuilding a laptop whose office terminal can never be typed into again', () => {
+  const HELD = ['terminal-input-held'] as const;
+  const NOT_EMPTY = { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+  /** The one running laptop is the recorded one, an agent runs in it, and the terminal's input is held between turns. */
+  const stuck = (terminal: Record<string, unknown> = {}) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'running', operationId: 'o', sessionId: 's' } };
+    w.state.session = { pid: 77, status: 'idle', isWorking: false, terminalInputHeld: true, lastActivityAt: 1000, ...terminal };
+    return w;
+  };
+
+  it('confirms the discard when the policy chose the rebuild for that reason and the terminal, read again, still shows it', async () => {
+    const w = stuck();
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).toEqual({ outcome: 'done', detail: 'rebuilt new' });
+    expect(w.made('rebuild')).toEqual([
+      {
+        operationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        sessionId: EMPLOYEE.sessionId,
+        sessionGeneration: 3,
+        expectedScopeDigest: '6'.repeat(64),
+        template: TEMPLATE,
+        confirmDiscardRunning: true,
+      },
+    ]);
+    expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination', 'rebuild']);
+  });
+
+  it('never confirms it without that reason, whatever the terminal shows', async () => {
+    const w = stuck();
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual(NOT_EMPTY);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, [])).toEqual(NOT_EMPTY);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, ['no-agent-running'])).toEqual(NOT_EMPTY);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it.each([
+    ['the hold is gone', { terminalInputHeld: false }, { outcome: 'refused', detail: "the office terminal's input is not held" }],
+    ['a turn began', { isWorking: true, status: 'busy' }, { outcome: 'busy', detail: 'the agent is in the middle of a turn' }],
+    ['the pane only looks busy', { status: 'busy' }, { outcome: 'busy', detail: 'the agent is in the middle of a turn' }],
+    ['the terminal has no process', { pid: null }, { outcome: 'refused', detail: "the office is not reading the agent's terminal" }],
+    ['the terminal lost its client', { runtimeHealth: 'disconnected' }, { outcome: 'refused', detail: "the office is not reading the agent's terminal" }],
+    ['the terminal is being reconnected', { viewerInputHeld: true }, { outcome: 'refused', detail: "the office is not reading the agent's terminal" }],
+  ])('reads the terminal again and requests nothing when %s', async (_title, terminal, expected) => {
+    const w = stuck(terminal);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).toEqual(expected);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('requests nothing when the office has no terminal object at all', async () => {
+    const w = stuck();
+    w.state.session = undefined;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).toEqual({ outcome: 'refused', detail: "the office terminal's input is not held" });
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('reads the terminal last: a turn that begins while the laptop is being read stops the rebuild', async () => {
+    const w = stuck();
+    const running = w.state.observed;
+    Object.defineProperty(w.state, 'observed', {
+      get: () => {
+        w.state.session = { ...w.state.session!, isWorking: true };
+        return running;
+      },
+    });
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).toEqual({ outcome: 'busy', detail: 'the agent is in the middle of a turn' });
+    expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination']);
+  });
+
+  it.each([
+    ['the running laptop is not the recorded one', { state: 'running', provider: { kind: 'running' } }, ['f'.repeat(64)]],
+    ['a second laptop runs', { state: 'running', provider: { kind: 'running' } }, [DESTINATION, 'f'.repeat(64)]],
+    ['the laptop cannot be read', { state: 'running', provider: { kind: 'unknown' } }, [DESTINATION]],
+    ['the read of the laptop fails', new Error('exec failed'), [DESTINATION]],
+  ])('confirms it only for the one recorded laptop with a running agent: not when %s', async (_title, observed, running) => {
+    const w = stuck();
+    w.state.preview = { ...w.state.preview, runningLaptops: running };
+    w.state.observed = observed;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).toEqual(NOT_EMPTY);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('leaves the other cases as they were: an empty laptop needs no held terminal, and no running laptop needs no confirmation', async () => {
+    const empty = stuck({ terminalInputHeld: false, isWorking: true });
+    empty.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    expect((await empty.laptops.rebuild(EMPLOYEE, empty.guard, HELD)).outcome).toBe('done');
+    expect(empty.made('rebuild')).toEqual([expect.objectContaining({ confirmDiscardRunning: true })]);
+    const none = stuck();
+    none.state.preview = { ...none.state.preview, runningLaptops: [] };
+    expect((await none.laptops.rebuild(EMPLOYEE, none.guard, HELD)).outcome).toBe('done');
+    expect(none.made('rebuild')).toEqual([expect.not.objectContaining({ confirmDiscardRunning: true })]);
+    expect(none.made('observeDestination')).toEqual([]);
+  });
+
+  it('holds the same fence while the rebuild runs, and does not take the stopping laptop’s output for a turn', async () => {
+    const cases: Array<[string, (state: ReturnType<typeof world>['state']) => void, boolean]> = [
+      ['a set-up step took flight', (state) => (state.flight = true), true],
+      ['the office terminal was replaced', (state) => (state.session = { ...state.session!, pid: 99 }), true],
+      ['the office terminal went away, as the rebuild itself does', (state) => (state.session = undefined), false],
+      ['the stopping laptop printed into the pane', (state) => ((state.session as Record<string, unknown>).isWorking = true), false],
+    ];
+    for (const [title, change, stops] of cases) {
+      const w = stuck();
+      w.state.during = () => change(w.state);
+      const result = await w.laptops.rebuild(EMPLOYEE, w.guard, HELD);
+      if (stops) expect([title, result]).toEqual([title, { outcome: expect.stringMatching(/busy|refused/), detail: expect.stringMatching(/^DOCKER_/) }]);
+      else expect([title, result.outcome]).toEqual([title, 'done']);
+    }
+  });
+
+  it('presents the supervisor’s own authority for it and is refused once the switch is off', async () => {
+    const w = stuck();
+    w.state.during = () => (w.state.guard = false);
+    await expect(w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).rejects.toThrow(/switched off/);
   });
 });

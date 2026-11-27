@@ -1,16 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
   EMPTY_SUPERVISOR_HISTORY,
+  SUPERVISOR_HELD_INPUT_PATH,
   SUPERVISOR_PATHS,
   SUPERVISOR_POLICY,
   assessEmployee,
   classifyEmployee,
   classifyMoveError,
   issueSupervisorAttempt,
+  readSupervisedTerminal,
   recordSupervisorAttempt,
   settleSupervisorAttempt,
   rollSupervisorHistory,
   supervisorCodeKind,
+  type SupervisedTerminal,
   type SupervisorAction,
   type SupervisorCondition,
   type SupervisorFlags,
@@ -1023,5 +1026,258 @@ describe('employee supervisor: a set-up made for an image the office no longer u
         'resend-continuation',
       ]);
     }
+  });
+});
+
+describe('employee supervisor: a terminal the office can never type into again', () => {
+  const VIEW = 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED';
+  const FINGERPRINT = 'code:' + VIEW;
+  const T0 = 100 * MINUTE;
+  const lost = (patch: Patch = {}) =>
+    observed({ ...patch, laptop: { restoration: { state: 'held', code: VIEW }, ...patch.laptop } });
+  /** The agent runs in its laptop, idle for ten minutes already, but the office terminal's input is held for good. */
+  const heldInput = (session: Patch['session'] = {}, laptop: Patch['laptop'] = {}) =>
+    lost({ session: { inputHeld: true, turn: 'idle', idleSince: T0 - 10 * MINUTE, ...session }, laptop });
+  /** The problem was first seen at T0 and the one nudge, 45 s later, was refused. */
+  const refusedOnce = (patch: Partial<SupervisorHistory> = {}) =>
+    recordSupervisorAttempt(since(T0, FINGERPRINT, patch), 'reconnect-viewer', T0 + 45_000, 'refused', 'start-unconfirmed');
+  const at = (minutes: number) => T0 + minutes * MINUTE;
+
+  it('says what is wrong in one sentence and keeps the code and the clock of the lost terminal', () => {
+    expect(classifyEmployee(heldInput())).toEqual({
+      condition: 'viewer-lost',
+      sentence:
+        "The office can no longer type into Stan's terminal, so the laptop has to be rebuilt once the agent's current turn has ended.",
+      code: VIEW,
+      fingerprint: FINGERPRINT,
+    });
+    expect(classifyEmployee(lost()).sentence).toBe("The office terminal could not be connected to Stan's laptop.");
+    // The same holds when the laptop's own attach was never reported and only the viewer reads as lost.
+    const unreported = observed({ session: { viewerHealth: 'disconnected', inputHeld: true, turn: 'idle' }, laptop: { restoration: undefined } });
+    expect(classifyEmployee(unreported)).toMatchObject({ condition: 'viewer-lost', sentence: expect.stringMatching(/can no longer type/) });
+  });
+
+  it('nudges the terminal once, and goes on to the rebuild as soon as that nudge was refused', () => {
+    expect(assessEmployee(heldInput(), since(T0, FINGERPRINT), ON, T0).next).toMatchObject({
+      action: 'reconnect-viewer',
+      at: T0 + 45_000,
+    });
+    // Refused 45 s in. The rebuild keeps its own three minutes, and nothing waits for five more nudges.
+    expect(assessEmployee(heldInput(), refusedOnce(), ON, at(1))).toMatchObject({
+      condition: 'viewer-lost',
+      next: { action: 'rebuild-laptop', at: at(3), preconditions: ['terminal-input-held'] },
+    });
+    expect(assessEmployee(heldInput(), refusedOnce(), ON, at(1)).needsHuman).toBeUndefined();
+  });
+
+  it('keeps a lost terminal that still takes input exactly as it was: nudged six times and never rebuilt', () => {
+    const plain = assessEmployee(lost(), refusedOnce(), ON, at(1));
+    expect(plain.next).toMatchObject({ action: 'reconnect-viewer', at: T0 + 45_000 + 30_000, preconditions: [] });
+    const spent = assessEmployee(lost(), since(T0, FINGERPRINT, { attempts: tried('reconnect-viewer', 6, T0) }), ON, at(60));
+    expect(spent.next.action).toBeNull();
+    expect(spent.needsHuman).toMatch(/could not reconnect the terminal/);
+    // Not even while what the pane shows was reported for some other reason.
+    const stray = assessEmployee(lost({ session: { turn: 'idle', idleSince: T0 } }), refusedOnce(), ON, at(60));
+    expect(stray.next.action).toBe('reconnect-viewer');
+  });
+
+  it('gives a nudge that failed or found the employee busy its ordinary attempts', () => {
+    for (const outcome of ['failed', 'busy'] as const) {
+      const history = recordSupervisorAttempt(since(T0, FINGERPRINT), 'reconnect-viewer', T0 + 45_000, outcome);
+      expect([outcome, assessEmployee(heldInput(), history, ON, at(10)).next.action]).toEqual([outcome, 'reconnect-viewer']);
+    }
+    // A refusal of an earlier problem says nothing about this one.
+    const earlier = { ...refusedOnce(), since: at(5) };
+    expect(assessEmployee(heldInput(), earlier, ON, at(6)).next.action).toBe('reconnect-viewer');
+    // Six nudges that all failed still end at the rebuild, after the last one has had time to settle.
+    const spent = since(T0, FINGERPRINT, { attempts: tried('reconnect-viewer', 6, at(20)) });
+    expect(assessEmployee(heldInput(), spent, ON, at(24)).next).toMatchObject({ action: null, at: at(25) });
+    expect(assessEmployee(heldInput({ idleSince: at(20) }), spent, ON, at(25)).next.action).toBe('rebuild-laptop');
+  });
+
+  it('never rebuilds in the middle of a turn: it waits for the turn to end and the pane to stay quiet', () => {
+    const working = assessEmployee(heldInput({ turn: 'working', idleSince: undefined }), refusedOnce(), ON, at(10));
+    expect(working.next).toEqual({ action: null, waitingFor: "the agent's current turn to end", preconditions: [] });
+    expect(working.needsHuman).toBeUndefined();
+    // The turn ended at minute 10. Two silent minutes later the rebuild may run.
+    const quiet = (now: number) => assessEmployee(heldInput({ idleSince: at(10) }), refusedOnce(), ON, now);
+    expect(quiet(at(11)).next).toEqual({
+      action: null,
+      waitingFor: "the agent's terminal to stay quiet a little longer",
+      preconditions: [],
+    });
+    expect(quiet(at(12) - 1).next.action).toBeNull();
+    expect(quiet(at(12)).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
+    expect(SUPERVISOR_POLICY.heldInputIdleMs).toBe(2 * MINUTE);
+  });
+
+  it('gives work the agent left running thirty minutes to finish, then rebuilds with it still running', () => {
+    // The turn ended long ago, and the pane says a monitor or a background shell is still going.
+    const left = (now: number) => assessEmployee(heldInput({ background: true }), refusedOnce(), ON, now);
+    expect(left(at(10)).next).toEqual({
+      action: null,
+      waitingFor: 'the work the agent left running to finish',
+      preconditions: [],
+    });
+    expect(left(at(10)).needsHuman).toBeUndefined();
+    expect(left(at(30) - 1).next.action).toBeNull();
+    // A shell that never ends does not keep the employee out of reach for good.
+    expect(left(at(30)).next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
+    expect(left(at(30)).needsHuman).toBeUndefined();
+    // The work finished before that: the ordinary rule applies at once.
+    expect(assessEmployee(heldInput(), refusedOnce(), ON, at(10)).next.action).toBe('rebuild-laptop');
+  });
+
+  it('never takes a pane it is not reading for an idle one', () => {
+    const waits = (session: Patch['session']) => assessEmployee(heldInput(session), refusedOnce(), ON, at(10)).next;
+    const unread = { action: null, waitingFor: "a reading of the agent's terminal", preconditions: [] };
+    expect(waits({ turn: 'unknown', idleSince: undefined })).toEqual(unread);
+    expect(waits({ turn: undefined, idleSince: undefined })).toEqual(unread);
+    // Idle, but nothing says since when.
+    expect(waits({ idleSince: undefined })).toMatchObject({ action: null, waitingFor: expect.stringMatching(/stay quiet/) });
+  });
+
+  it('tells a person when the turn has not ended after thirty minutes, and still rebuilds once it has', () => {
+    const working = heldInput({ turn: 'working', idleSince: undefined });
+    expect(assessEmployee(working, refusedOnce(), ON, at(30) - 1).needsHuman).toBeUndefined();
+    const overdue = assessEmployee(working, refusedOnce(), ON, at(30));
+    expect(overdue.next).toEqual({ action: null, preconditions: [] });
+    expect(overdue.needsHuman).toBe(
+      "The office rebuilds this laptop only after the agent's current turn has ended, and after 30 minutes it still " +
+        'cannot see that it has. It goes on waiting and rebuilds as soon as the turn ends. To rebuild now instead: POST ' +
+        '/api/company/employees/:id/docker-rebuild/preview, then /apply with confirmDiscardRunning (that ends whatever ' +
+        'the agent is doing), then continue it.'
+    );
+    // The same is said of a pane nobody reads, and of one that never stays quiet.
+    for (const session of [{ turn: 'unknown' as const, idleSince: undefined }, { idleSince: at(89) }])
+      expect(assessEmployee(heldInput(session), refusedOnce(), ON, at(90)).needsHuman).toMatch(/cannot see that it has/);
+    // Hours later the turn ends: the office rebuilds on its own.
+    const ended = assessEmployee(heldInput({ idleSince: at(200) }), refusedOnce(), ON, at(203));
+    expect(ended.next).toMatchObject({ action: 'rebuild-laptop', preconditions: ['terminal-input-held'] });
+    expect(ended.needsHuman).toBeUndefined();
+    expect(SUPERVISOR_POLICY.heldInputTurnMs).toBe(30 * MINUTE);
+  });
+
+  it('with automatic repairs switched off names the switch and the calls, and waits for nothing', () => {
+    const off = { ...ON, autoRepair: false };
+    for (const [session, now] of [
+      [{}, at(10)],
+      [{ turn: 'working' as const, idleSince: undefined }, at(10)],
+      [{ turn: 'working' as const, idleSince: undefined }, at(90)],
+    ] as const) {
+      const result = assessEmployee(heldInput(session), refusedOnce(), off, now);
+      expect(result.next).toEqual({ action: null, preconditions: [] });
+      expect(result.needsHuman).toMatch(/^Automatic repairs are switched off \(company setting supervisorAutoRepair\)\. Rebuild the laptop: .*docker-rebuild\/preview, then \/apply with confirmDiscardRunning/);
+    }
+    // The nudge is a retry and is still sent once.
+    expect(assessEmployee(heldInput(), since(T0, FINGERPRINT), off, at(1)).next.action).toBe('reconnect-viewer');
+    const disabled = assessEmployee(heldInput(), refusedOnce(), { ...ON, enabled: false }, at(10));
+    expect(disabled.next.action).toBeNull();
+    expect(disabled.needsHuman).toMatch(/supervisorEnabled.*confirmDiscardRunning/);
+  });
+
+  it('keeps every limit of a rebuild', () => {
+    const noLayout = assessEmployee(heldInput({}, { templateOnRecord: false }), refusedOnce(), ON, at(10));
+    expect(noLayout.next.action).toBeNull();
+    expect(noLayout.needsHuman).toMatch(/No owner-approved laptop layout.*confirmDiscardRunning/);
+    const today = assessEmployee(heldInput(), refusedOnce({ rebuilds: [T0 - 60 * MINUTE, T0 - 30 * MINUTE] }), ON, at(10));
+    expect(today.next.action).toBeNull();
+    expect(today.needsHuman).toMatch(/already rebuilt this laptop 2 times today.*confirmDiscardRunning/);
+    // Fifteen minutes between two rebuilds, and two per episode.
+    const once = recordSupervisorAttempt(refusedOnce(), 'rebuild-laptop', at(3), 'refused', 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED');
+    expect(assessEmployee(heldInput(), once, ON, at(4)).next).toMatchObject({ action: 'rebuild-laptop', at: at(18) });
+    const twice = recordSupervisorAttempt(once, 'rebuild-laptop', at(18), 'refused', 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED');
+    expect(assessEmployee(heldInput(), twice, ON, at(20)).next).toMatchObject({ action: null, waitingFor: 'the outcome of the last attempt' });
+    const spent = assessEmployee(heldInput(), twice, ON, at(60));
+    expect(spent.next.action).toBeNull();
+    expect(spent.needsHuman).toMatch(/^The office could not rebuild the laptop on its own\. Rebuild the laptop: .*confirmDiscardRunning/);
+    expect(assessEmployee({ ...heldInput(), busy: 'laptop-operation' }, refusedOnce(), ON, at(10)).next).toMatchObject({
+      action: null,
+      waitingFor: 'another laptop operation that is running',
+    });
+  });
+
+  it('does not go back to the nudge after a rebuild that was refused or found a turn in progress', () => {
+    for (const outcome of ['refused', 'busy', 'failed'] as const) {
+      const history = recordSupervisorAttempt(refusedOnce(), 'rebuild-laptop', at(3), outcome);
+      expect([outcome, assessEmployee(heldInput(), history, ON, at(30)).next.action]).toEqual([outcome, 'rebuild-laptop']);
+    }
+    // A turn that started in the last moment gave the attempt back, so the rebuild runs as soon as it has ended.
+    const given = recordSupervisorAttempt(refusedOnce(), 'rebuild-laptop', at(3), 'busy', 'the agent is in the middle of a turn');
+    expect(given.attempts['rebuild-laptop']).toEqual({ count: 0, lastAt: at(3) });
+    expect(assessEmployee(heldInput({ idleSince: at(5) }), given, ON, at(7)).next).toMatchObject({ action: 'rebuild-laptop', at: at(3) });
+  });
+
+  it('opens the exception for nothing else: a held input beside another problem keeps the ordinary rule', () => {
+    const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
+    const result = assessEmployee(
+      { ...failed, session: { ...failed.session, inputHeld: true, turn: 'idle', idleSince: 0 }, laptop: { ...failed.laptop, provider: 'running' } },
+      since(T0, 'code:DOCKER_RESOURCE_HELPER_FAILED'),
+      ON,
+      at(60)
+    );
+    expect(result.next.action).toBeNull();
+    expect(result.needsHuman).toMatch(/would discard its conversation.*That needs the owner/);
+    // And the steps of this one path run from the least to the most destructive, the repair behind the switch.
+    expect(SUPERVISOR_HELD_INPUT_PATH).toEqual(['reconnect-viewer', 'rebuild-laptop']);
+    expect(SUPERVISOR_HELD_INPUT_PATH.map((action) => SUPERVISOR_POLICY.ladder[action].tier)).toEqual(['retry', 'repair']);
+    expect(SUPERVISOR_PATHS['viewer-lost']).toEqual(['reconnect-viewer']);
+  });
+
+  describe('reading the office terminal', () => {
+    const terminal = (patch: Partial<SupervisedTerminal> = {}): SupervisedTerminal => ({
+      pid: 77,
+      status: 'idle',
+      runtimeHealth: 'unknown',
+      terminalInputHeld: true,
+      isWorking: false,
+      lastActivityAt: 5000,
+      lastPromptTime: 4000,
+      paneStartedAt: 1000,
+      ...patch,
+    });
+
+    it('reports nothing for a terminal that takes input, whatever its pane shows', () => {
+      expect(readSupervisedTerminal(terminal({ terminalInputHeld: false }))).toEqual({});
+      expect(readSupervisedTerminal(terminal({ terminalInputHeld: false, isWorking: true }), true)).toEqual({});
+      expect(readSupervisedTerminal(undefined)).toEqual({});
+    });
+
+    it('calls the pane idle since its last output, its last ended turn or its last attach, whichever is latest', () => {
+      expect(readSupervisedTerminal(terminal())).toEqual({ inputHeld: true, turn: 'idle', idleSince: 5000 });
+      expect(readSupervisedTerminal(terminal({ lastPromptTime: 9000 })).idleSince).toBe(9000);
+      // An office that attached a moment ago has watched the pane only since then.
+      expect(readSupervisedTerminal(terminal({ paneStartedAt: 20_000 })).idleSince).toBe(20_000);
+      expect(readSupervisedTerminal(terminal({ lastActivityAt: 0, lastPromptTime: 0, paneStartedAt: 0 }))).toEqual({ inputHeld: true, turn: 'idle' });
+    });
+
+    it('says when the idle pane shows work its agent left running', () => {
+      expect(readSupervisedTerminal(terminal({ watching: '1 monitor' }))).toEqual({ inputHeld: true, turn: 'idle', idleSince: 5000, background: true });
+      expect(readSupervisedTerminal(terminal({ watching: null })).background).toBeUndefined();
+      // A turn in progress is waited for by its own rule.
+      expect(readSupervisedTerminal(terminal({ isWorking: true, status: 'busy', watching: '1 monitor' }))).toEqual({ inputHeld: true, turn: 'working' });
+    });
+
+    it('calls a turn in progress working', () => {
+      expect(readSupervisedTerminal(terminal({ isWorking: true, status: 'busy' }))).toEqual({ inputHeld: true, turn: 'working' });
+      expect(readSupervisedTerminal(terminal({ status: 'busy' }))).toEqual({ inputHeld: true, turn: 'working' });
+    });
+
+    it.each([
+      ['has no process', { pid: null }],
+      ['shows an exited pane', { paneExit: { code: 0 } }],
+      ['is being reconnected', { viewerInputHeld: true }],
+      ['is being started or attached', { paneLifecycleInFlight: true }],
+      ['lost its client', { runtimeHealth: 'disconnected' }],
+      ['is stopped', { status: 'stopped' }],
+      ['does not say whether it is working', { isWorking: undefined }],
+    ] as Array<[string, Partial<SupervisedTerminal>]>)('knows nothing of the turn while the terminal %s', (_title, patch) => {
+      expect(readSupervisedTerminal(terminal(patch))).toEqual({ inputHeld: true, turn: 'unknown' });
+    });
+
+    it('asks the saved record only when the office has no terminal object, and then knows nothing of the turn', () => {
+      expect(readSupervisedTerminal(undefined, true)).toEqual({ inputHeld: true, turn: 'unknown' });
+      expect(readSupervisedTerminal(undefined, false)).toEqual({});
+    });
   });
 });

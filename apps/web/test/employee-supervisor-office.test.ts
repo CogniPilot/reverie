@@ -50,6 +50,9 @@ function office() {
     ownerStop: false,
     recovery: true,
     flight: false,
+    /** Sessions whose saved record says their terminal input is held, and each time that record was asked. */
+    heldOnRecord: [] as string[],
+    recordReads: [] as string[],
     screenReads: 0,
     calls: [] as Array<[string, ...unknown[]]>,
     /** Limits checks the laptops service was asked for, by employee. */
@@ -70,6 +73,10 @@ function office() {
       },
     },
     session: (id: string) => state.sessions.get(id),
+    inputHeldOnRecord: (id: string) => {
+      state.recordReads.push(id);
+      return state.heldOnRecord.includes(id);
+    },
     ready: () => state.ready,
     laptops: {
       glance: () => ({ record: { phase: 'ready', version: 2, operationId: 'op' }, bound: true, policyApproved: true, templateOnRecord: true }),
@@ -79,7 +86,11 @@ function office() {
       provider: async () => 'absent',
       resend: async () => ({ outcome: 'done' }),
       start: async () => ({ outcome: 'done' }),
-      rebuild: async () => ({ outcome: 'done' }),
+      rebuild: async (employee: SupervisedEmployee, guard: () => void, proved: readonly string[]) => {
+        guard();
+        state.calls.push(['rebuild', employee.id, proved]);
+        return { outcome: 'done', detail: 'rebuilt new' };
+      },
       keepLimits: async (employee: SupervisedEmployee, guard: () => void) => {
         guard();
         state.keeps.push(employee.id);
@@ -166,6 +177,49 @@ describe('office supervisor ports', () => {
       session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' },
       laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_DESTINATION_STOPPED' }, poolAlive: false },
     });
+  });
+
+  it('says when a terminal can never be typed into again, and what its pane shows of the agent’s turn', () => {
+    const o = office();
+    const seen = () => o.ports.glance(o.employee()).session;
+    const held = { pid: 10, status: 'idle', runtimeHealth: 'unknown', terminalInputHeld: true, isWorking: false };
+    o.state.sessions.set('session-a', { ...held, lastActivityAt: 900_000, lastPromptTime: 800_000, paneStartedAt: 100_000 });
+    expect(seen()).toEqual({
+      available: true,
+      runtimeHealth: 'unknown',
+      viewerHealth: 'connected',
+      providerHealth: 'healthy',
+      inputHeld: true,
+      turn: 'idle',
+      idleSince: 900_000,
+    });
+    o.state.sessions.set('session-a', { ...held, status: 'busy', isWorking: true });
+    expect(seen()).toMatchObject({ inputHeld: true, turn: 'working' });
+    expect(seen()).not.toHaveProperty('idleSince');
+    // The terminal lost its client: what it last showed is not what the pane shows now.
+    o.state.sessions.set('session-a', { ...held, runtimeHealth: 'disconnected' });
+    expect(seen()).toMatchObject({ inputHeld: true, turn: 'unknown' });
+    // A terminal that takes input reports none of this, and its own word is taken over the saved record's.
+    o.state.heldOnRecord = ['session-a'];
+    o.state.sessions.set('session-a', { pid: 10, status: 'busy', isWorking: true, runtimeHealth: 'unknown' });
+    expect(seen()).toEqual({ available: true, runtimeHealth: 'unknown', viewerHealth: 'connected', providerHealth: 'healthy' });
+    expect(o.state.recordReads).toEqual([]);
+  });
+
+  it('reads a hold from the saved record once the office has no terminal object, and then knows nothing of the turn', () => {
+    const o = office();
+    o.state.sessions.delete('session-a');
+    expect(o.ports.glance(o.employee()).session).toEqual({ available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown', providerHealth: 'healthy' });
+    o.state.heldOnRecord = ['session-a'];
+    expect(o.ports.glance(o.employee()).session).toEqual({
+      available: false,
+      runtimeHealth: 'unknown',
+      viewerHealth: 'unknown',
+      providerHealth: 'healthy',
+      inputHeld: true,
+      turn: 'unknown',
+    });
+    expect(o.state.recordReads).toEqual(['session-a', 'session-a']);
   });
 
   it.each([
@@ -301,6 +355,62 @@ describe('office supervisor ports', () => {
     });
     o.state.wake = { awakened: [], skipped: [{ employeeId: 'a', reason: 'recovery-in-progress' }] };
     expect((await o.ports.actions['reconnect-viewer']!(o.employee(), pass, undefined)).outcome).toBe('busy');
+  });
+
+  it('hands the rebuild what was proved for it, so the laptops service can tell why it was chosen', async () => {
+    const o = office();
+    expect(await o.ports.actions['rebuild-laptop']!(o.employee(), pass, undefined, ['terminal-input-held'])).toEqual({
+      outcome: 'done',
+      detail: 'rebuilt new',
+    });
+    await o.ports.actions['rebuild-laptop']!(o.employee(), pass, undefined, []);
+    expect(o.state.calls).toEqual([
+      ['rebuild', 'a', ['terminal-input-held']],
+      ['rebuild', 'a', []],
+    ]);
+  });
+
+  it('drives a held terminal through a whole pass: one refused wake, then a rebuild asked for with its reason', async () => {
+    const o = office();
+    o.state.restorations = [
+      { employeeId: 'a', state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' },
+      { employeeId: 'b', state: 'attached' },
+    ];
+    const terminal = { pid: 10, status: 'idle', runtimeHealth: 'unknown', terminalInputHeld: true, isWorking: false };
+    o.state.sessions.set('session-a', { ...terminal, lastActivityAt: o.state.now - 600_000 });
+    o.state.wake = { awakened: [], skipped: [{ employeeId: 'a', reason: 'start-unconfirmed' }] };
+    const supervisor = new EmployeeSupervisor(o.ports, undefined, { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0, limitsCheckMs: 600_000 });
+    const report = () => supervisor.reports(undefined).find((value) => value.employeeId === 'a')!;
+    const run = async (passes: number) => {
+      for (let pass = 0; pass < passes; pass++) {
+        await supervisor.tick();
+        o.state.now += 30_000;
+      }
+    };
+    // The agent is in the middle of a turn for the first five minutes.
+    o.state.sessions.set('session-a', { ...terminal, status: 'busy', isWorking: true });
+    await run(10);
+    expect(o.state.calls).toEqual([['wake', 'a', true]]);
+    expect(report()).toMatchObject({
+      condition: 'viewer-lost',
+      sentence: "The office can no longer type into A's terminal, so the laptop has to be rebuilt once the agent's current turn has ended.",
+      waitingFor: "the agent's current turn to end",
+      last: { action: 'reconnect-viewer', outcome: 'refused', detail: 'start-unconfirmed' },
+    });
+    // The turn ends; two silent minutes later the rebuild is asked for, once.
+    o.state.sessions.set('session-a', { ...terminal, lastActivityAt: o.state.now, lastPromptTime: o.state.now });
+    await run(3);
+    expect(o.state.calls).toEqual([['wake', 'a', true]]);
+    await run(3);
+    expect(o.state.calls).toEqual([
+      ['wake', 'a', true],
+      ['rebuild', 'a', ['terminal-input-held']],
+    ]);
+    expect(o.state.audits.at(-1)).toMatchObject({
+      admin: 'office supervisor',
+      action: 'supervisor_rebuild_laptop',
+      detail: { condition: 'viewer-lost', outcome: 'done', detail: 'rebuilt new', proved: ['terminal-input-held'] },
+    });
   });
 
   it('offers no relaunch step and no laptop steps without the laptop runtime', () => {

@@ -83,6 +83,31 @@ function hold(target: Person, code: string, allowedActions: string[] = ['observe
   target.reading = { state: 'held', phase: 'resources-issued', code, allowedActions };
   return target;
 }
+/**
+ * The agent runs in its laptop, but the office terminal is not attached and its input is held for good. A turn
+ * that is not in progress ended at `idleSince`.
+ */
+function heldTerminal(target: Person, turn: 'working' | 'idle' | 'unknown', idleSince = 0): Person {
+  target.glance = {
+    ...target.glance,
+    session: {
+      available: true,
+      runtimeHealth: 'unknown',
+      viewerHealth: 'connected',
+      providerHealth: 'healthy',
+      inputHeld: true,
+      turn,
+      ...(turn === 'idle' ? { idleSince } : {}),
+    },
+    laptop: {
+      ...target.glance.laptop,
+      restoration: { state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' },
+    },
+  };
+  target.reading = { state: 'ready', phase: 'ready', allowedActions: ['observe'] };
+  target.provider = 'running';
+  return target;
+}
 function heldMove(target: Person, error: string): Person {
   target.move = {
     id: 'move-' + target.employee.id,
@@ -111,6 +136,8 @@ function world(
     flags: { enabled: true, autoRepair: true },
     reads: [] as string[],
     acts: [] as string[],
+    /** What each step was told had been proved for it, as `[action, proved]`. */
+    proved: [] as Array<[SupervisorAction, readonly string[]]>,
     /** Limits checks, as `<seconds since the start>:<employee>`. */
     kept: [] as string[],
     logs: [] as string[],
@@ -127,9 +154,15 @@ function world(
   const find = (employee: SupervisedEmployee) => state.people.find((row) => row.employee.id === employee.id)!;
   const act =
     (action: SupervisorAction) =>
-    async (employee: SupervisedEmployee, guard: () => void): Promise<SupervisorActionResult> => {
+    async (
+      employee: SupervisedEmployee,
+      guard: () => void,
+      _move?: SupervisorMove,
+      proved: readonly string[] = []
+    ): Promise<SupervisorActionResult> => {
       guard();
       state.acts.push(`${action}:${employee.id}`);
+      state.proved.push([action, proved]);
       return state.respond(action, employee);
     };
   const ports: EmployeeSupervisorPorts = {
@@ -383,6 +416,160 @@ describe('EmployeeSupervisor', () => {
       ['office supervisor', 'supervisor_rebuild_laptop', 'A'],
       ['office supervisor', 'supervisor_start_continuation', 'A'],
     ]);
+  });
+
+  describe('a terminal the office can never type into again, with the agent still running', () => {
+    /** Every reconnect is refused, as it is for a held terminal; a rebuild leaves a fresh source that then starts. */
+    const office = (target: Person, options: Parameters<typeof world>[1] = {}) => {
+      const w = world([target], options);
+      w.state.respond = async (action) => {
+        if (action === 'reconnect-viewer') return { outcome: 'refused', detail: 'start-unconfirmed' };
+        if (action === 'rebuild-laptop') {
+          target.reading = undefined;
+          target.glance = {
+            ...person('a').glance,
+            session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' },
+            laptop: { ...target.glance.laptop, record: null, bound: false, restoration: undefined },
+          };
+        }
+        if (action === 'start-continuation') Object.assign(target, person('a'));
+        return { outcome: 'done' };
+      };
+      return w;
+    };
+
+    it('nudges once, waits for the turn to end and the pane to stay quiet, then rebuilds and starts the laptop', async () => {
+      const stuck = heldTerminal(person('a'), 'working');
+      const w = office(stuck);
+      await w.run(10);
+      // One nudge, not six: the refusal is the answer. Nothing is rebuilt in the middle of the turn.
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a')).toMatchObject({
+        condition: 'viewer-lost',
+        sentence: "The office can no longer type into A's terminal, so the laptop has to be rebuilt once the agent's current turn has ended.",
+        waitingFor: "the agent's current turn to end",
+        last: { action: 'reconnect-viewer', outcome: 'refused', detail: 'start-unconfirmed' },
+      });
+      expect(w.report('a').needsHuman).toBeUndefined();
+      // The turn ends. One silent minute is not enough; after two the laptop is rebuilt.
+      heldTerminal(stuck, 'idle', w.state.now);
+      await w.run(1.5);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a').waitingFor).toBe("the agent's terminal to stay quiet a little longer");
+      await w.run(1);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a', 'rebuild-laptop:a']);
+      await w.run(2);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a', 'rebuild-laptop:a', 'start-continuation:a']);
+      expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+      // What runs in the laptop was never asked: this rebuild is not decided on an empty laptop, and says so.
+      expect(w.state.reads).not.toContain('provider:a');
+      expect(w.state.proved).toEqual([
+        ['reconnect-viewer', []],
+        ['rebuild-laptop', ['terminal-input-held']],
+        ['start-continuation', []],
+      ]);
+      expect(w.state.audits.find((entry) => entry.action === 'supervisor_rebuild_laptop')!.detail).toMatchObject({
+        condition: 'viewer-lost',
+        code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED',
+        outcome: 'done',
+        proved: ['terminal-input-held'],
+      });
+      expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
+    });
+
+    it('tells a person once when the turn has not ended after thirty minutes, and rebuilds when it has', async () => {
+      const stuck = heldTerminal(person('a'), 'working');
+      const w = office(stuck);
+      await w.run(29);
+      expect(w.report('a').needsHuman).toBeUndefined();
+      await w.run(60);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a').needsHuman).toMatch(/after 30 minutes it still cannot see that it has.*confirmDiscardRunning/);
+      expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
+      heldTerminal(stuck, 'idle', w.state.now);
+      await w.run(3);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a', 'rebuild-laptop:a', 'start-continuation:a']);
+      expect(w.state.logs.filter((line) => line.includes('no longer needs a person'))).toHaveLength(1);
+    });
+
+    it('never rebuilds on a pane it is not reading', async () => {
+      const w = office(heldTerminal(person('a'), 'unknown'));
+      await w.run(20);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a').waitingFor).toBe("a reading of the agent's terminal");
+      await w.run(20);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a').needsHuman).toMatch(/cannot see that it has/);
+    });
+
+    it('with automatic repairs switched off nudges once, then names the switch and the calls', async () => {
+      const w = office(heldTerminal(person('a'), 'idle'));
+      w.state.flags = { enabled: true, autoRepair: false };
+      await w.run(60);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.report('a').next).toBeUndefined();
+      expect(w.report('a').needsHuman).toMatch(/supervisorAutoRepair.*docker-rebuild\/preview, then \/apply with confirmDiscardRunning/);
+    });
+
+    it('looks at the terminal once more before it issues the rebuild, and spends no attempt on a turn that just began', async () => {
+      const stuck = heldTerminal(person('a'), 'idle');
+      const w = office(stuck);
+      // The pane is idle whenever a pass begins; while the laptop is being read, the agent starts a turn.
+      let turnStarts = false;
+      const readLaptop = w.ports.readLaptop;
+      w.ports.readLaptop = async (employee, guard) => {
+        if (turnStarts) heldTerminal(stuck, 'working');
+        return readLaptop(employee, guard);
+      };
+      await w.run(2.5);
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      turnStarts = true;
+      for (let pass = 0; pass < 6; pass++) {
+        heldTerminal(stuck, 'idle');
+        w.state.now += 30_000;
+        await w.supervisor.tick();
+      }
+      expect(w.state.acts).toEqual(['reconnect-viewer:a']);
+      expect(w.state.stored.get('a')!.attempts['rebuild-laptop']).toBeUndefined();
+      expect(w.report('a').waitingFor).toBe("the agent's current turn to end");
+      // The same when the hold itself is gone at that moment: no rebuild is issued for a terminal that takes input.
+      w.ports.readLaptop = async (employee, guard) => {
+        stuck.glance = { ...stuck.glance, session: { available: true, runtimeHealth: 'unknown', viewerHealth: 'connected' } };
+        return readLaptop(employee, guard);
+      };
+      heldTerminal(stuck, 'idle');
+      w.state.now += 30_000;
+      await w.supervisor.tick();
+      expect(w.state.acts.filter((act) => act.startsWith('rebuild'))).toEqual([]);
+    });
+
+    it('gives the attempt back when the step itself finds a turn in progress, and rebuilds once that turn has ended', async () => {
+      const stuck = heldTerminal(person('a'), 'idle');
+      const w = office(stuck);
+      const respond = w.state.respond;
+      let inTurn = true;
+      w.state.respond = async (action, employee) =>
+        action === 'rebuild-laptop' && inTurn
+          ? { outcome: 'busy', detail: 'the agent is in the middle of a turn' }
+          : respond(action, employee);
+      await w.run(4);
+      expect(w.state.acts.slice(0, 2)).toEqual(['reconnect-viewer:a', 'rebuild-laptop:a']);
+      expect(w.state.stored.get('a')!.attempts['rebuild-laptop']!.count).toBe(0);
+      // Never back to the nudge.
+      expect(w.state.acts.filter((act) => act.startsWith('reconnect'))).toHaveLength(1);
+      inTurn = false;
+      await w.run(1);
+      expect(w.report('a').last).toMatchObject({ action: 'rebuild-laptop', outcome: 'done' });
+    });
+
+    it('goes on nudging a lost terminal that still takes input, and never rebuilds for it', async () => {
+      const lost = heldTerminal(person('a'), 'idle');
+      lost.glance = { ...lost.glance, session: { available: true, runtimeHealth: 'unknown', viewerHealth: 'connected' } };
+      const w = office(lost);
+      await w.run(120);
+      expect(w.state.acts).toEqual(Array(6).fill('reconnect-viewer:a'));
+      expect(w.report('a').needsHuman).toMatch(/could not reconnect the terminal/);
+    });
   });
 
   it('replaces an unused laptop that was made for an earlier laptop image, then starts the new one', async () => {

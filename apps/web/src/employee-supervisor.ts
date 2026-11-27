@@ -34,6 +34,7 @@ import {
   type SupervisorObservation,
   type SupervisorOutcome,
   type SupervisorPolicy,
+  type SupervisorPrecondition,
   type SupervisorProviderPresence,
   SUPERVISOR_POLICY,
 } from './employee-supervisor-policy.js';
@@ -96,12 +97,17 @@ export interface EmployeeSupervisorPorts {
    * Absent where the office has no laptops.
    */
   keepLimits?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult | undefined>;
-  /** One effect each. A port that is absent is a step this office cannot take. */
+  /**
+   * One effect each. A port that is absent is a step this office cannot take. `proved` is what the policy asked to
+   * be proved again for this step and still stood when it was issued; a step whose effect depends on it proves it
+   * once more itself, last. Absent means nothing was proved.
+   */
   readonly actions: {
     readonly [K in SupervisorAction]?: (
       employee: SupervisedEmployee,
       guard: SupervisorGuard,
-      move: SupervisorMove | undefined
+      move: SupervisorMove | undefined,
+      proved?: readonly SupervisorPrecondition[]
     ) => Promise<SupervisorActionResult>;
   };
   load(): Map<string, SupervisorHistory>;
@@ -567,6 +573,16 @@ export class EmployeeSupervisor {
         return false;
       }
     }
+    if (assessment.next.preconditions.includes('terminal-input-held')) {
+      // The office terminal is looked at once more, from memory, and the decision is taken again with it. The step
+      // proves the same again itself, immediately before it asks for the rebuild.
+      observed = { ...observed, session: this.ports.glance(employee).session };
+      assessment = assessEmployee(observed, history, flags, now, this.policy);
+      if (!due(assessment) || !assessment.next.preconditions.includes('terminal-input-held')) {
+        this.#report(employee, assessment, history, now);
+        return false;
+      }
+    }
     const action = assessment.next.action!;
     history = issueSupervisorAttempt(history, action, now);
     this.#remember(employee.id, history);
@@ -602,7 +618,7 @@ export class EmployeeSupervisor {
       try {
         const guard = this.#guard(employee, tier);
         guard();
-        return await run(employee, guard, move);
+        return await run(employee, guard, move, assessment.next.preconditions);
       } catch (error) {
         return error instanceof SupervisorStopped
           ? { outcome: 'busy', detail: error.message }
@@ -637,6 +653,7 @@ export class EmployeeSupervisor {
             outcome: result.outcome,
             ...(result.detail ? { detail: result.detail } : {}),
             attempt,
+            ...(assessment.next.preconditions.length ? { proved: [...assessment.next.preconditions] } : {}),
             ...(move ? { moveId: move.id } : {}),
           },
         });
