@@ -195,6 +195,15 @@ export interface EmployeeSupervisorPorts {
    */
   storedHomeCheck?(): 'none' | 'full' | 'compare-only' | 'image-missing' | 'unknown';
   /**
+   * Record which filesystem this employee's running laptop has its home on, for a later proof. `recorded`,
+   * `not-running` (no finished laptop runs), `not-recorded` (the read found nothing a proof could use),
+   * `unsupported` (no verifier that can make the read) or `failed`. Absent where the office has no laptops.
+   */
+  rememberHome?(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard
+  ): Promise<'recorded' | 'not-running' | 'not-recorded' | 'unsupported' | 'failed'>;
+  /**
    * One effect each. A port that is absent is a step this office cannot take. `proved` is what the policy asked to
    * be proved again for this step and still stood when it was issued; a step whose effect depends on it proves it
    * once more itself, last. Absent means nothing was proved.
@@ -235,6 +244,10 @@ export interface EmployeeSupervisorLimits {
   readonly storedHomeReadMs?: number;
   /** Wait after read N of a stored home that could not tell, before read N+1. The last value repeats. */
   readonly storedHomeRetryMs?: readonly number[];
+  /** How many employees' running laptops have their home recorded in one pass. */
+  readonly homeRecordsPerTick?: number;
+  /** Wait after attempt N to record a home that was not recorded, before attempt N+1. The last value repeats. */
+  readonly homeRecordRetryMs?: readonly number[];
 }
 export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   actionsPerTick: 2,
@@ -247,6 +260,8 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   poolBackoffMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000, 6 * 60 * 60_000],
   storedHomeReadMs: 10 * 60_000,
   storedHomeRetryMs: [60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000],
+  homeRecordsPerTick: 2,
+  homeRecordRetryMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
 };
 /** Which of the owner's two switches each pool step needs. Starting the stopped anchor is a repair. */
 const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> = {
@@ -344,6 +359,11 @@ export class EmployeeSupervisor {
     string,
     { at: number; found: SupervisorStoredHome; cause?: SupervisorStoredHomeCause; since: number; reads: number }
   >();
+  /**
+   * The laptop operation whose home was last asked to be recorded for each employee, whether that was done, and
+   * how often it was tried without. In memory: an office start records every running laptop again.
+   */
+  readonly #homeRecords = new Map<string, { operationId: string; at: number; done: boolean; tries: number }>();
   readonly #resolved: Required<EmployeeSupervisorLimits>;
   readonly #startedAt: number;
   #flight?: Promise<void>;
@@ -414,6 +434,7 @@ export class EmployeeSupervisor {
         this.#limitsDue.delete(id);
         this.#limits.delete(id);
       }
+    for (const id of [...this.#homeRecords.keys()]) if (!known.has(id)) this.#homeRecords.delete(id);
     // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat. Among employees
     // who are level, as all are after a host restart, the order the office gives them is kept: that is its
     // start-up order (employee-startup-order.ts). The seats of a pass space them out.
@@ -434,6 +455,7 @@ export class EmployeeSupervisor {
       }
     }
     if (!this.#closed) await this.#keepLimits(employees);
+    if (!this.#closed) await this.#keepHomeRecords(employees);
     await this.#persist();
   }
 
@@ -579,6 +601,53 @@ export class EmployeeSupervisor {
       if (tier === 'repair' && !this.ports.flags(employee.owner).autoRepair)
         throw new SupervisorStopped('Automatic repairs were switched off');
     };
+  }
+
+  /**
+   * Keeping a record of each running laptop's home. After a host restart the device number of the filesystem a
+   * home is on can have changed, and what proves that it is the same filesystem is a record the office made
+   * while the laptop ran. The next restart may come at any time, so the record is made promptly: for every
+   * employee whose finished laptop has none on record in this office process, `homeRecordsPerTick` of them per
+   * pass, those in the office first. A laptop operation is recorded once; a new one (a rebuild, a plan move) is
+   * recorded again. An attempt that recorded nothing is tried again after `homeRecordRetryMs`, for as long as it
+   * takes: a laptop that was not running may run later, and a helper that timed out may answer. Like the limits
+   * check it needs the first switch only, asks nothing about attendance, attaches and starts nothing, and spends
+   * no attempt of a repair step.
+   */
+  async #keepHomeRecords(employees: readonly SupervisedEmployee[]): Promise<void> {
+    const remember = this.ports.rememberHome?.bind(this.ports);
+    if (!remember) return;
+    const now = this.ports.now(),
+      retry = this.#resolved.homeRecordRetryMs;
+    const operation = (employee: SupervisedEmployee) => this.ports.glance(employee).laptop.record?.operationId;
+    const due = employees.filter((row) => {
+      const operationId = operation(row),
+        kept = this.#homeRecords.get(row.id);
+      if (!operationId || row.bindingMigration || this.#acting.has(row.id) || !this.ports.flags(row.owner).enabled)
+        return false;
+      if (!kept || kept.operationId !== operationId) return true;
+      return !kept.done && now - kept.at >= (retry[Math.min(kept.tries, retry.length) - 1] ?? 0);
+    });
+    const inOffice = (row: SupervisedEmployee) => Number(row.desiredRunning === true && !row.onVacation);
+    for (const employee of due.sort((a, b) => inOffice(b) - inOffice(a)).slice(0, this.#resolved.homeRecordsPerTick)) {
+      if (this.#closed) return;
+      const operationId = operation(employee)!,
+        kept = this.#homeRecords.get(employee.id),
+        tries = kept?.operationId === operationId ? kept.tries + 1 : 1;
+      const guard = this.#identityGuard(employee);
+      let outcome: Awaited<ReturnType<typeof remember>> | 'busy';
+      try {
+        guard();
+        outcome = await remember(employee, guard);
+      } catch (error) {
+        outcome = error instanceof SupervisorStopped ? 'busy' : 'failed';
+      }
+      const done = outcome === 'recorded';
+      this.#homeRecords.set(employee.id, { operationId, at: now, done, tries });
+      // One line when a home is recorded, and one when an attempt first records nothing.
+      if (done || tries === 1)
+        this.ports.log(`[supervisor] ${employee.name} (${employee.id}): record-home -> ${outcome}`);
+    }
   }
 
   /** The limits check of the one employee whose check is longest overdue. See the file comment. */

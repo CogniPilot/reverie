@@ -57,6 +57,9 @@ export type DockerStorageFilesystemObservation = z.infer<typeof StorageFilesyste
  *   nothing and the grant, which is for the case without a record, does not apply.
  * - `renumbered-unverifiable`: a new device number on something the verifier cannot confirm: not ext4, or the two
  *   directories on two filesystems.
+ * - `renumbered-record-unreadable`: a new device number, and the office's record of employee storage cannot be
+ *   trusted (a damaged file). That is neither a record nor the absence of one: it proves nothing and the grant
+ *   does not apply.
  * - `different`: not the directories the laptop was built on (another inode, owner or mode).
  * - `unobserved`: the verifier could not report what is mounted now. The recorded reference is put to it
  *   unchanged, so it confirms an unchanged home and refuses everything else.
@@ -71,6 +74,7 @@ export type DockerStoredHomeVerdict =
   | 'renumbered'
   | 'renumbered-stale-record'
   | 'renumbered-unverifiable'
+  | 'renumbered-record-unreadable'
   | 'different'
   | 'unobserved';
 
@@ -242,7 +246,12 @@ export class DockerWorkerReattachHelper {
       return { observation: historical };
     }
     const single = !!identity && historical.home.dev === historical.nix.dev;
-    const recorded = this.renumbering?.identity.read(row.employeeId);
+    const held = this.renumbering?.identity.read(row.employeeId);
+    if (held === 'unreadable') {
+      this.#decided(row, 'renumbered-record-unreadable');
+      return { observation: historical };
+    }
+    const recorded = held;
     const sameDirectories = !!recorded && !!identity &&
       isDeepStrictEqual(recorded.home, identity.home) && isDeepStrictEqual(recorded.nix, identity.nix);
     // The office recorded these very directories on another filesystem: what is mounted is not that one.

@@ -306,6 +306,7 @@ export type SupervisorStoredHomeCause =
   | 'no-record-no-grant'
   | 'record-names-other-directories'
   | 'not-one-ext4-filesystem'
+  | 'record-unreadable'
   | 'verifier-refused'
   | 'verifier-image-missing'
   | 'verifier-lacks-command'
@@ -1677,6 +1678,14 @@ const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
     '. ' +
     STORED_HOME_REREAD +
     'it is approved.',
+  'record-unreadable':
+    STORED_HOME_RENUMBERED_FACT +
+    "The office's record of employee storage (docker-storage-identity.jsonl in the office data directory) holds a " +
+    'line that does not read, so it proves nothing, and acceptStorageRenumbering applies only where the office ' +
+    'holds no record. The office sets that file aside and begins a new one the next time a running laptop is ' +
+    'recorded. To accept this home now, ' +
+    APPROVE_ONE_LAPTOP +
+    '.',
   'not-one-ext4-filesystem':
     STORED_HOME_RENUMBERED_FACT +
     'They are not on one ext4 filesystem, which is the only case the verifier can confirm under a new device ' +

@@ -10,8 +10,25 @@
  * that record is what later proves a renumbering.
  *
  * A record is DATA for that one comparison. It never selects a path, never
- * replaces the pinned verifier's own check and never authorizes a write. A
- * file that cannot be read is no record: nothing is proved with it. */
+ * replaces the pinned verifier's own check and never authorizes a write.
+ *
+ * Damage is told apart by where it is:
+ *
+ * - A last line that was never finished is what an append leaves when the
+ *   office or the host stopped in the middle of it. It wrote no record. It is
+ *   left out and every line before it stands. The next record that is written
+ *   sets that file aside as `.previous` and carries the newest record of every
+ *   employee into a new one, so the fragment never becomes a line in the middle.
+ * - A line that does not read and is not the last cannot come from an append,
+ *   which writes whole lines: the file was changed or damaged by something
+ *   else. Nothing in it is trusted then. `read` answers `unreadable`, which is
+ *   neither a record nor the absence of one, so it proves nothing and the
+ *   owner's standing grant, which is for an employee the office holds no
+ *   record of, does not apply either. The next record that is written sets
+ *   the damaged file aside whole as `.damaged` and starts a new one, which
+ *   holds exactly what running laptops show from then on.
+ *
+ * A file that is not this user's own private file is `unreadable` as well. */
 import { renameSync } from 'node:fs';
 import { z } from 'zod';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
@@ -56,27 +73,54 @@ const refusals: DockerPrivateJournalRefusals = {
 const same = (a: DockerStorageIdentity, b: DockerStorageIdentity) =>
   JSON.stringify({ ...a, recordedAt: 0 }) === JSON.stringify({ ...b, recordedAt: 0 });
 
+interface Contents {
+  readonly latest: Map<string, DockerStorageIdentity>;
+  /** The last line was never finished. */
+  readonly torn: boolean;
+  /** A line that is not the last does not read. */
+  readonly damaged: boolean;
+}
+
 export class DockerStorageIdentityJournal {
   constructor(
     private readonly path: string,
-    private readonly now: () => number = Date.now
+    private readonly now: () => number = Date.now,
+    private readonly log: (line: string) => void = (line) => console.warn(line)
   ) {}
 
-  #latest(): Map<string, DockerStorageIdentity> {
+  #contents(): Contents {
     const latest = new Map<string, DockerStorageIdentity>();
-    for (const line of readDockerPrivateJournal(this.path, refusals, { emptyAllowed: true })) {
-      const value = DockerStorageIdentity.parse(JSON.parse(line));
+    let torn = false,
+      damaged = false;
+    const lines = readDockerPrivateJournal(this.path, refusals, {
+      emptyAllowed: true,
+      tornTail: () => {
+        torn = true;
+      },
+    });
+    for (const line of lines) {
+      let value: DockerStorageIdentity;
+      try {
+        value = DockerStorageIdentity.parse(JSON.parse(line));
+      } catch {
+        damaged = true;
+        continue;
+      }
       latest.set(value.employeeId, value);
     }
-    return latest;
+    return { latest, torn, damaged };
   }
 
-  /** The newest record of one employee. Undefined when there is none, or when the file cannot be read. */
-  read(employeeId: string): DockerStorageIdentity | undefined {
+  /**
+   * The newest record of one employee, or undefined when the office holds none. `unreadable` when the file cannot
+   * be trusted: see the file comment. An unfinished last line is left out and changes nothing else.
+   */
+  read(employeeId: string): DockerStorageIdentity | undefined | 'unreadable' {
     try {
-      return this.#latest().get(employeeId);
+      const contents = this.#contents();
+      return contents.damaged ? 'unreadable' : contents.latest.get(employeeId);
     } catch {
-      return undefined;
+      return 'unreadable';
     }
   }
 
@@ -84,21 +128,33 @@ export class DockerStorageIdentityJournal {
    * who loses a later proof and nothing else. */
   remember(input: Omit<DockerStorageIdentity, 'version' | 'recordedAt'>): void {
     const next = DockerStorageIdentity.parse({ ...input, version: 1, recordedAt: this.now() });
-    const latest = this.#latest(),
-      before = latest.get(next.employeeId);
-    if (before && same(before, next)) return;
-    const line = JSON.stringify(next) + '\n';
+    let contents = this.#contents();
+    if (contents.damaged) {
+      // Not what an interrupted append leaves. The file is kept for whoever wants to look, and a new one is begun.
+      renameSync(this.path, this.path + '.damaged');
+      this.log(
+        '[docker-storage-identity] the record of employee storage held a line that does not read and was set aside ' +
+          'as docker-storage-identity.jsonl.damaged; a new one is begun from what running laptops show'
+      );
+      contents = { latest: new Map(), torn: false, damaged: false };
+    }
+    const before = contents.latest.get(next.employeeId);
+    if (before && same(before, next) && !contents.torn) return;
+    // Only the newest record of an employee is ever read. A file with an unfinished last line, and a full one, is
+    // set aside whole, and the newest record of everyone is carried into the new one.
+    const renew = () => {
+      renameSync(this.path, this.path + '.previous');
+      contents.latest.set(next.employeeId, before && same(before, next) ? before : next);
+      for (const kept of contents.latest.values())
+        appendDockerPrivateJournal(this.path, JSON.stringify(kept) + '\n', refusals);
+    };
+    if (contents.torn) return renew();
     try {
-      appendDockerPrivateJournal(this.path, line, refusals);
+      appendDockerPrivateJournal(this.path, JSON.stringify(next) + '\n', refusals);
     } catch (error) {
       if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_STORAGE_IDENTITY_JOURNAL_FULL')
         throw error;
-      // Only the newest record of an employee is ever read, so a full file is set aside whole and the newest
-      // record of everyone else is carried into the new one.
-      renameSync(this.path, this.path + '.previous');
-      latest.delete(next.employeeId);
-      for (const kept of latest.values()) appendDockerPrivateJournal(this.path, JSON.stringify(kept) + '\n', refusals);
-      appendDockerPrivateJournal(this.path, line, refusals);
+      renew();
     }
   }
 }

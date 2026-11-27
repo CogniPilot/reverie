@@ -2936,6 +2936,18 @@ describe('the stored home of a stopped laptop after a host restart', () => {
     }
   });
 
+  it('lets neither the grant nor anything else stand in for a record that cannot be trusted', async () => {
+    for (const granted of [false, true]) {
+      const w = await restarted({ granted, recorded: 'unreadable' as never });
+      w.renumber('7');
+      await expect(w.read(), String(granted)).resolves.toBe('renumbered:record-unreadable');
+      expect(w.helper.verdict(w.f.row)).toBe('renumbered-record-unreadable');
+    }
+    // On the same device number the record is not asked: the holder's own receipt is confirmed.
+    const same = await restarted({ recorded: 'unreadable' as never });
+    await expect(same.read()).resolves.toBe('verified');
+  });
+
   it('accepts an unproved new device number under the standing grant, and proves the next one itself', async () => {
     const w = await restarted({ granted: true });
     w.renumber('7');

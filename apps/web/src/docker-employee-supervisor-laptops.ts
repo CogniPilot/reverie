@@ -146,7 +146,10 @@ export interface DockerSupervisorLaptopDeps {
     /** What the configured verifier image can do; `none` when the office is configured with no verifier. */
     capability?(): 'none' | DockerVerifierCapability;
     /** Record which filesystem a running laptop's directories are on. See `DockerEmployeeEngine.rememberStorage`. */
-    remember?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<boolean>;
+    remember?(
+      row: DockerEmployeeContinuationRecord,
+      current: () => void
+    ): Promise<'recorded' | 'not-running' | 'not-recorded'>;
   };
   /** The in-place repair of one finished laptop's own limits that does not ask where its employee is. */
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
@@ -198,8 +201,6 @@ function settled(result: DockerContinuationResult): SupervisorActionResult {
 }
 
 export class DockerSupervisorLaptops {
-  /** The laptop operation of each employee whose storage this office process already asked to record. */
-  readonly #storageAsked = new Map<string, string>();
   constructor(private readonly deps: DockerSupervisorLaptopDeps) {}
 
   /** The whole of what the supervisor presents where a route presents a verified owner. See the file comment. */
@@ -488,10 +489,7 @@ export class DockerSupervisorLaptops {
         if (error instanceof DockerEmployeeContinuationError && POOL_FIRST.has(error.code)) return error;
         throw error;
       });
-      if (!(first instanceof DockerEmployeeContinuationError)) {
-        await this.#rememberStorage(row, authority.require);
-        return { outcome: 'done', detail: first.limits };
-      }
+      if (!(first instanceof DockerEmployeeContinuationError)) return { outcome: 'done', detail: first.limits };
       if (!(await this.#repairPool(employee, authority))) throw first;
       await restore();
       return { outcome: 'done', detail: 'restored' };
@@ -667,13 +665,25 @@ export class DockerSupervisorLaptops {
     return this.deps.storage?.capability?.() ?? 'none';
   }
 
-  /** Once for each laptop operation that this office process sees finished and running: record which filesystem
-   * its directories are on, so a later device renumbering can be proved. Never fails the step it rides on. */
-  async #rememberStorage(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
-    const remember = this.deps.storage?.remember;
-    if (!remember || this.#storageAsked.get(row.employeeId) === row.request.operationId) return;
-    this.#storageAsked.set(row.employeeId, row.request.operationId);
-    await remember(row, current).catch(() => false);
+  /**
+   * Record which filesystem the directories of this employee's finished, running laptop are on, so that a later
+   * device renumbering can be proved. It is asked for every finished laptop alike: one a set-up made, one a
+   * rebuild made and one a plan move made. Attendance is not asked, as for the limits: a laptop that runs has a
+   * home, wherever its employee is. `unsupported`: this office has no verifier that can make the read.
+   */
+  async rememberHome(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard
+  ): Promise<'recorded' | 'not-running' | 'not-recorded' | 'unsupported' | 'failed'> {
+    const row = this.#row(employee.id),
+      storage = this.deps.storage;
+    if (!storage?.remember || !['full', 'unknown'].includes(this.storedHomeCheck())) return 'unsupported';
+    if (!row?.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-running';
+    try {
+      return await storage.remember(row, this.#authority(employee, guard).require);
+    } catch {
+      return 'failed';
+    }
   }
 
   /**

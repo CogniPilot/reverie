@@ -452,10 +452,29 @@ office start the office probes the image once, writes one console line
 | `none` | no image is configured; nothing is checked |
 
 Device numbers of one filesystem can change across a restart. The office
-proves that case itself: about once per laptop and office process, while the
-laptop runs, it records the kernel filesystem ID of the ext4 filesystem the two
-directories are on, in `docker-storage-identity.jsonl` beside the company
-store. The ID is derived from the filesystem's own identifier and does not
+proves that case itself: while a laptop runs, it records the kernel filesystem
+ID of the ext4 filesystem the two directories are on, in
+`docker-storage-identity.jsonl` beside the company store. Because the next
+restart may come at any time, the records are made promptly: two laptops per
+thirty-second pass from the first pass after an office start, those of
+employees in the office first, so that every running laptop has its record
+within a few minutes. Every finished laptop is recorded alike, whether a
+set-up, a rebuild or a plan move made it, and wherever its employee is. A
+laptop operation is recorded once and a new one (a rebuild, a plan move) again.
+An attempt that recorded nothing is tried again after 1, 5, 15 and 60 minutes
+and then every hour. The console shows `[supervisor] … record-home -> …` when
+a home is recorded and when an attempt first records nothing. Recording needs
+`supervisorEnabled` and a recovery helper image whose `storedHomeCheck` is
+`full`.
+
+The file is read with its damage told apart. A last line that was never
+finished is what an interrupted write leaves: it is left out, every earlier
+record stands, and the next record starts a clean file (the old one is kept as
+`.previous`). A line in the middle that does not read cannot come from an
+interrupted write, so nothing in that file is trusted: it is neither a record
+nor the absence of one, it proves nothing, and the grant below does not apply
+while it stands. The next record that is made sets the file aside as
+`.damaged`, says so in the console and begins a new one. The ID is derived from the filesystem's own identifier and does not
 change with the device number. A later renumbering is accepted when that ID and
 both inodes match, and the verifier then confirms the renumbered reference with
 the filesystem ID on both mounts, twice, exactly as it does for an owner's

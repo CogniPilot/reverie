@@ -39,20 +39,84 @@ describe('the office’s own record of employee storage', () => {
     expect(journal.read(A)).toEqual({ version: 1, ...identity(A, '7'), recordedAt: 200 });
     expect(journal.read(B)).toMatchObject({ filesystemId: '77', recordedAt: 100 });
     // Another process reads the same.
-    expect(new DockerStorageIdentityJournal(path).read(A)?.device).toBe('7');
+    expect(new DockerStorageIdentityJournal(path).read(A)).toMatchObject({ device: '7' });
   });
 
-  it('proves nothing with a file it cannot trust: a readable one, or a malformed one', () => {
+  const device = (seen: ReturnType<DockerStorageIdentityJournal['read']>) =>
+    seen === 'unreadable' ? seen : seen?.device;
+
+  it('says that a file it cannot trust is unreadable, which is neither a record nor the absence of one', () => {
     const path = file();
-    const journal = new DockerStorageIdentityJournal(path);
+    const journal = new DockerStorageIdentityJournal(path, Date.now, () => {});
     journal.remember(identity(A));
     chmodSync(path, 0o644);
-    expect(journal.read(A)).toBeUndefined();
+    expect(journal.read(A)).toBe('unreadable');
+    expect(journal.read(B)).toBe('unreadable');
     expect(() => journal.remember(identity(A, '7'))).toThrow('DOCKER_STORAGE_IDENTITY_JOURNAL_UNCONFIRMED');
     chmodSync(path, 0o600);
-    expect(journal.read(A)?.device).toBe('4');
-    writeFileSync(path, '{"version":1}\n', { mode: 0o600 });
-    expect(journal.read(A)).toBeUndefined();
+    expect(device(journal.read(A))).toBe('4');
+  });
+
+  it('leaves out a last line that was never finished and keeps working', () => {
+    const path = file();
+    const journal = new DockerStorageIdentityJournal(
+      path,
+      () => 5,
+      () => {}
+    );
+    journal.remember(identity(A));
+    journal.remember(identity(B, '4', '77'));
+    // The office stopped in the middle of an append: half a line and no line end.
+    const whole = readFileSync(path, 'utf8');
+    writeFileSync(path, whole + JSON.stringify({ ...identity(A, '9'), version: 1, recordedAt: 6 }).slice(0, 40), {
+      mode: 0o600,
+    });
+    // Every record before the fragment still reads, for every employee.
+    expect(device(journal.read(A))).toBe('4');
+    expect(journal.read(B)).toMatchObject({ filesystemId: '77' });
+    // The next record is written to a new file that holds the newest record of everyone and no fragment.
+    journal.remember(identity(A, '7'));
+    expect(device(journal.read(A))).toBe('7');
+    expect(journal.read(B)).toMatchObject({ filesystemId: '77' });
+    const lines = readFileSync(path, 'utf8').split('\n');
+    expect(lines.at(-1)).toBe('');
+    expect(
+      lines
+        .slice(0, -1)
+        .map((line) => JSON.parse(line).employeeId)
+        .sort()
+    ).toEqual([A, B]);
+    expect(readFileSync(path + '.previous', 'utf8').endsWith('\n')).toBe(false);
+    // The same facts again, with a fragment at the end, still clear the fragment.
+    writeFileSync(path, readFileSync(path, 'utf8') + '{"vers', { mode: 0o600 });
+    journal.remember(identity(A, '7'));
+    expect(readFileSync(path, 'utf8').endsWith('\n')).toBe(true);
+    expect(device(journal.read(A))).toBe('7');
+  });
+
+  it('trusts nothing in a file with a line in the middle that does not read, and begins a new one at the next record', () => {
+    const path = file();
+    const logs: string[] = [];
+    const journal = new DockerStorageIdentityJournal(
+      path,
+      () => 5,
+      (line) => logs.push(line)
+    );
+    journal.remember(identity(A));
+    journal.remember(identity(B, '4', '77'));
+    const [first, second] = readFileSync(path, 'utf8').trimEnd().split('\n');
+    // Not what an interrupted append leaves: an append writes whole lines, and this one is cut in the middle.
+    writeFileSync(path, first!.slice(0, 30) + '\n' + second + '\n', { mode: 0o600 });
+    expect(journal.read(A)).toBe('unreadable');
+    // Not even the line that does read is used: the file as a whole was changed by something else.
+    expect(journal.read(B)).toBe('unreadable');
+    journal.remember(identity(A, '7'));
+    expect(device(journal.read(A))).toBe('7');
+    // What the damaged file said of anyone else is gone with it, until a running laptop is recorded again.
+    expect(journal.read(B)).toBeUndefined();
+    expect(readFileSync(path + '.damaged', 'utf8')).toContain(second);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/set aside as docker-storage-identity\.jsonl\.damaged/);
   });
 
   it('refuses facts that could not be verified later', () => {
@@ -75,7 +139,7 @@ describe('the office’s own record of employee storage', () => {
     for (let device = 1; device < 9; device++) journal.remember(identity(A, String(device)));
     expect(statSync(path).size).toBeLessThan(before);
     expect(statSync(path + '.previous').size).toBeGreaterThan(500 * 1024);
-    expect(journal.read(A)?.device).toBe('8');
-    expect(journal.read(B)?.filesystemId).toBe('77');
+    expect(journal.read(A)).toMatchObject({ device: '8' });
+    expect(journal.read(B)).toMatchObject({ filesystemId: '77' });
   });
 });

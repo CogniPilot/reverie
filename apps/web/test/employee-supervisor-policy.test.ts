@@ -2744,7 +2744,7 @@ describe('employee supervisor: after a host restart', () => {
     expect(renumbered.needsHuman).toMatch(
       /The office holds no record of its own of that filesystem, and the company setting acceptStorageRenumbering is off, so the laptop is not rebuilt onto it\. Set acceptStorageRenumbering to true \(PUT \/api\/company\/settings\) and the office rebuilds the laptop at its next read, within ten minutes/
     );
-    const reason = (cause: 'record-names-other-directories' | 'not-one-ext4-filesystem' | 'verifier-refused') =>
+    const reason = (cause: SupervisorStoredHomeCause) =>
       assess({
         provider: 'no-laptop',
         pool: 'up',
@@ -2755,6 +2755,7 @@ describe('employee supervisor: after a host restart', () => {
     expect(reason('record-names-other-directories')).not.toMatch(/Set acceptStorageRenumbering/);
     expect(reason('not-one-ext4-filesystem')).toMatch(/not on one ext4 filesystem.*neither the office nor an approval can accept it/);
     expect(reason('verifier-refused')).toMatch(/The verifier refused the filesystem it was asked to confirm/);
+    expect(reason('record-unreadable')).toMatch(/holds a line that does not read, so it proves nothing, and acceptStorageRenumbering applies only where the office holds no record/);
     // A verifier image that can only compare refused the recorded directories: never rebuilt on, and it says so.
     const changed = assess({ provider: 'no-laptop', pool: 'up', storedHome: 'changed' });
     expect(changed.next.action).toBeNull();

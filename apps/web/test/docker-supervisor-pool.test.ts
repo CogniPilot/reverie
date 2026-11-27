@@ -53,6 +53,11 @@ function world() {
     resume: undefined as ((id: string) => Status | Error) | undefined,
     stopped: { state: 'verified' } as DockerStoppedStorage | Error,
     remembered: [] as string[],
+    /** What the configured verifier image can do, and what one attempt to record a home answers. */
+    capability: 'none' as 'none' | 'full' | 'compare-only' | 'image-missing' | 'unknown',
+    remember: (() => 'recorded') as () => 'recorded' | 'not-running' | 'not-recorded',
+    /** The laptop record version of each employee; 3 is a laptop a plan move made. */
+    versions: new Map<string, number>(),
     limits: 'unchanged' as 'unchanged' | 'restored' | Error,
     calls: [] as Array<[string, string, unknown?]>,
     tiers: [] as Array<[string, 'retry' | 'repair']>,
@@ -98,7 +103,13 @@ function world() {
     store: {
       record: (id: string) =>
         state.records.has(id)
-          ? { employeeId: id, version: 2, phase: 'ready', request: { operationId: 'op-' + id }, destination: {} }
+          ? {
+              employeeId: id,
+              version: state.versions.get(id) ?? 2,
+              phase: 'ready',
+              request: { operationId: 'op-' + id },
+              destination: {},
+            }
           : undefined,
       policy: () => ({}),
     },
@@ -169,9 +180,11 @@ function world() {
         state.calls.push(['stored-home', row.employeeId]);
         return give(state.stopped);
       },
+      capability: () => state.capability,
       remember: async (row: { employeeId: string }) => {
-        state.remembered.push(row.employeeId);
-        return true;
+        const outcome = state.remember();
+        if (outcome === 'recorded') state.remembered.push(row.employeeId);
+        return outcome;
       },
     },
     sessions: { get: () => undefined },
@@ -495,16 +508,44 @@ describe('the stored home of a stopped laptop', () => {
     await expect(w.laptops.storedHome(A, guard)).resolves.toEqual({ found: 'unchecked' });
   });
 
-  it('asks once for each running laptop that the office record which filesystem its home is on', async () => {
+  it('records the home of every finished laptop alike, also one a plan move made', async () => {
     const w = world();
-    await expect(w.laptops.keepLimits(A, guard)).resolves.toEqual({ outcome: 'done', detail: 'unchanged' });
-    await w.laptops.keepLimits(A, guard);
-    await w.laptops.keepLimits(B, guard);
+    w.state.capability = 'full';
+    w.state.versions.set(B.id, 3);
+    await expect(w.laptops.rememberHome(A, guard)).resolves.toBe('recorded');
+    await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('recorded');
     expect(w.state.remembered).toEqual([A.id, B.id]);
-    // A laptop that is not running records nothing.
-    w.state.limits = refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
-    await expect(w.laptops.keepLimits(C, guard)).resolves.toEqual({ outcome: 'done', detail: 'not-running' });
+    // The limits check records nothing of its own any more: it skips laptops of a plan move.
+    await w.laptops.keepLimits(C, guard);
     expect(w.state.remembered).toEqual([A.id, B.id]);
+  });
+
+  it('says why nothing was recorded, so that it is tried again', async () => {
+    const w = world();
+    w.state.capability = 'full';
+    w.state.remember = () => 'not-running';
+    await expect(w.laptops.rememberHome(A, guard)).resolves.toBe('not-running');
+    w.state.remember = () => {
+      throw refuse('DOCKER_CONTINUATION_REATTACH_VERIFIER_UNCONFIRMED');
+    };
+    await expect(w.laptops.rememberHome(A, guard)).resolves.toBe('failed');
+    w.state.remember = () => 'recorded';
+    await expect(
+      w.laptops.rememberHome(A, () => {
+        throw new Error('The office supervisor was switched off');
+      })
+    ).resolves.toBe('failed');
+    // No record of a laptop set-up: nothing runs to be read.
+    w.state.records.delete(A.id);
+    await expect(w.laptops.rememberHome(A, guard)).resolves.toBe('not-running');
+    // A verifier image that cannot read what is mounted, and an office with none, record nothing.
+    for (const capability of ['compare-only', 'image-missing', 'none'] as const) {
+      w.state.capability = capability;
+      await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('unsupported');
+    }
+    // An image that has not answered the probe yet is asked: the first read settles what it can do.
+    w.state.capability = 'unknown';
+    await expect(w.laptops.rememberHome(B, guard)).resolves.toBe('recorded');
   });
 });
 

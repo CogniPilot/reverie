@@ -36,6 +36,8 @@ interface Person {
   storedHomeCause?: SupervisorStoredHomeCause;
   /** A hold of a laptop that still runs, as its read names it. */
   hold?: { code: string; allowedActions: string[] };
+  /** How many laptop operations this employee has had: a rebuild and its start make a new one. */
+  operation: number;
 }
 const person = (id: string, laptop: Laptop = 'stopped', patch: Partial<SupervisedEmployee> = {}): Person => ({
   employee: {
@@ -51,6 +53,7 @@ const person = (id: string, laptop: Laptop = 'stopped', patch: Partial<Supervise
   },
   laptop,
   storedHome: 'verified',
+  operation: 1,
 });
 
 function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
@@ -75,6 +78,9 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
     acts: [] as string[],
     reads: [] as string[],
     kept: [] as string[],
+    /** Every attempt to record a running laptop's home, as `<seconds since the start>:<employee>:<outcome>`. */
+    homes: [] as string[],
+    recordHome: (() => 'recorded') as (employee: SupervisedEmployee) => 'recorded' | 'not-recorded' | 'failed',
     logs: [] as string[],
     audits: [] as SupervisorAuditEntry[],
     histories: new Map<string, SupervisorHistory>(),
@@ -97,7 +103,10 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
         ? { available: true, runtimeHealth: 'healthy', viewerHealth: 'connected', providerHealth: 'healthy' }
         : { available: false, runtimeHealth: 'unknown', viewerHealth: 'disconnected', providerHealth: 'unknown' },
       laptop: {
-        record: row.laptop === 'fresh-source' ? null : { phase: 'ready', version: 2, operationId: 'op-' + employee.id },
+        record:
+          row.laptop === 'fresh-source'
+            ? null
+            : { phase: 'ready', version: 2, operationId: `op-${employee.id}-${row.operation}` },
         bound: row.laptop !== 'fresh-source',
         policyApproved: true,
         templateOnRecord: true,
@@ -183,6 +192,7 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
         if (state.anchor !== 'running')
           return { outcome: 'refused', detail: 'DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED' };
         row.laptop = 'attached';
+        row.operation++;
         return { outcome: 'done', detail: 'ready' };
       }
       return { outcome: 'refused', detail: 'nothing to do' };
@@ -211,6 +221,12 @@ function box(people: Person[], limits: Record<string, unknown> = LIMITS) {
       return { outcome: 'refused', detail: 'DOCKER_CONTINUATION_POOL_UNCONFIRMED' };
     },
     storedHomeCheck: () => 'compare-only',
+    rememberHome: async (employee, guard) => {
+      guard();
+      const outcome = running(find(employee)) ? state.recordHome(employee) : 'not-running';
+      state.homes.push(`${at()}:${employee.id}:${outcome}`);
+      return outcome;
+    },
     keepPool,
     actions: {
       'resend-continuation': act('resend-continuation'),
@@ -555,6 +571,75 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
     w.state.anchor = 'running';
     await w.run(MINUTE);
     expect(w.report('a').storedHomeCheck).toBe('compare-only');
+  });
+});
+
+describe('EmployeeSupervisor: the record of each running laptop’s home', () => {
+  const recorded = (w: ReturnType<typeof box>) => w.state.homes.filter((line) => line.endsWith(':recorded'));
+  it('records every running laptop within minutes of an office start, those in the office first, and each once', async () => {
+    const w = box([
+      person('away', 'running-detached', { onVacation: true }),
+      person('a', 'attached'),
+      person('b', 'attached'),
+      person('c', 'attached'),
+      person('d', 'attached'),
+    ]);
+    w.state.anchor = 'running';
+    await w.run(2 * MINUTE);
+    // Two per pass: five laptops within three passes of the first.
+    expect(recorded(w).map((line) => line.split(':')[1])).toEqual(['a', 'b', 'c', 'd', 'away']);
+    expect(Number(recorded(w).at(-1)!.split(':')[0])).toBeLessThanOrEqual(90);
+    await w.run(3 * 60 * MINUTE);
+    expect(w.state.homes).toHaveLength(5);
+  });
+
+  it('tries again with a growing wait when nothing was recorded, for as long as it takes', async () => {
+    const w = box([person('a', 'attached')]);
+    w.state.anchor = 'running';
+    w.state.recordHome = () => 'failed';
+    await w.run(3 * 60 * MINUTE);
+    const times = w.state.homes.map((line) => Number(line.split(':')[0]));
+    // At once, then after 1, 5, 15 and 60 minutes, then every hour.
+    expect(times.slice(0, 6).map((value, index) => (index ? value - times[index - 1]! : value))).toEqual([
+      30, 60, 300, 900, 3600, 3600,
+    ]);
+    w.state.recordHome = () => 'recorded';
+    await w.run(61 * MINUTE);
+    expect(w.state.homes.at(-1)).toMatch(/:a:recorded$/);
+    const count = w.state.homes.length;
+    await w.run(3 * 60 * MINUTE);
+    expect(w.state.homes).toHaveLength(count);
+    // The first attempt that recorded nothing is said once, and the record when it is made.
+    expect(w.state.logs.filter((line) => line.includes('record-home'))).toEqual([
+      '[supervisor] A (a): record-home -> failed',
+      '[supervisor] A (a): record-home -> recorded',
+    ]);
+  });
+
+  it('records a laptop that was rebuilt again, and one that was not running once it runs', async () => {
+    const w = box([person('a'), person('b', 'attached')]);
+    w.state.anchor = 'running';
+    await w.run(20 * MINUTE);
+    // 'a' was stopped, then rebuilt and started by the supervisor: its new laptop is recorded.
+    expect(w.report('a').condition).toBe('healthy');
+    expect(
+      recorded(w)
+        .map((line) => line.split(':')[1])
+        .sort()
+    ).toEqual(['a', 'b']);
+    // A rebuild later on makes a new laptop operation, which is recorded again.
+    w.state.people[1]!.laptop = 'stopped';
+    await w.run(30 * MINUTE);
+    expect(w.report('b').condition).toBe('healthy');
+    expect(recorded(w).filter((line) => line.includes(':b:'))).toHaveLength(2);
+  });
+
+  it('records nothing while the supervisor is switched off', async () => {
+    const w = box([person('a', 'attached')]);
+    w.state.anchor = 'running';
+    w.state.flags = { enabled: false, autoRepair: false };
+    await w.run(10 * MINUTE);
+    expect(w.state.homes).toEqual([]);
   });
 });
 

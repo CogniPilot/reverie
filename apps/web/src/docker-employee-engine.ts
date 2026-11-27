@@ -330,6 +330,7 @@ export type DockerRenumberedReason =
   | 'no-record-no-grant'
   | 'record-names-other-directories'
   | 'not-one-ext4-filesystem'
+  | 'record-unreadable'
   | 'verifier-refused';
 const VERIFIER_CAUSES: Readonly<Record<DockerVerifierFailure, DockerStoredHomeCause>> = {
   'image-missing': 'verifier-image-missing',
@@ -862,6 +863,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (verdict === 'renumbered') return { state: 'renumbered', reason: 'no-record-no-grant' };
       if (verdict === 'renumbered-stale-record') return { state: 'renumbered', reason: 'record-names-other-directories' };
       if (verdict === 'renumbered-unverifiable') return { state: 'renumbered', reason: 'not-one-ext4-filesystem' };
+      if (verdict === 'renumbered-record-unreadable') return { state: 'renumbered', reason: 'record-unreadable' };
       // The verifier ran and refused the reference it was given. That is an answer, and it is kept.
       if (failed.verify === 'refused')
         return verdict === 'same' || verdict === 'unobserved'
@@ -872,21 +874,26 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       return { state: 'unconfirmed', cause: failure ? VERIFIER_CAUSES[failure] : 'receipt-unreadable' };
     }
   }
-  /** Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix
-   * directories are on. Reads only; false when nothing was recorded. */
+  /**
+   * Lets the office record, for a later proof, which filesystem a finished, running laptop's HOME and Nix
+   * directories are on. It is the same for every finished laptop, whatever made it (a set-up, a rebuild or a plan
+   * move). Reads only. `recorded`: the office holds a record of what this laptop shows now. `not-running`: there
+   * is no running laptop to read. `not-recorded`: the verifier did not see the directories the laptop itself
+   * reports on one ext4 filesystem, so there is nothing a later proof could use.
+   */
   async rememberStorage(
     row: DockerEmployeeContinuationRecord,
     helper: DockerWorkerReattachHelper,
     current: () => void
-  ): Promise<boolean> {
+  ): Promise<'recorded' | 'not-running' | 'not-recorded'> {
     current();
-    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return false;
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase)) return 'not-running';
     const raw = await this.#destination(row, current, true);
     current();
-    if (!raw?.State.Running) return false;
+    if (!raw?.State.Running) return 'not-running';
     const live = await probeDockerEmployeeStorage(this.command, raw.Id);
     current();
-    return helper.rememberRunning(row, raw, live, current);
+    return (await helper.rememberRunning(row, raw, live, current)) ? 'recorded' : 'not-recorded';
   }
   /** Read-only current stopped worker membership, separate from requester/effect
    * authority. The caller must retain the original binding across every await. */

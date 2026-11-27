@@ -28,11 +28,14 @@ function requirePrivate(fd: number, refuse: DockerPrivateJournalRefusals): void 
 }
 
 /** Every complete line, oldest first. A missing file has none. An existing
- * file that is empty is refused unless the owner says it may be. */
+ * file that is empty is refused unless the owner says it may be. A file whose
+ * last line was never finished is refused as well, unless the owner asks for
+ * that fragment to be left out (`tornTail`, which is then called): an append
+ * that was cut off wrote no complete line, so every line before it stands. */
 export function readDockerPrivateJournal(
   path: string,
   refuse: DockerPrivateJournalRefusals,
-  options: { readonly emptyAllowed?: boolean } = {}
+  options: { readonly emptyAllowed?: boolean; readonly tornTail?: () => void } = {}
 ): string[] {
   let fd: number;
   try {
@@ -45,7 +48,12 @@ export function readDockerPrivateJournal(
     requirePrivate(fd, refuse);
     const raw = readFileSync(fd, 'utf8');
     if (!raw && options.emptyAllowed) return [];
-    if (!raw.endsWith('\n')) refuse.unconfirmed();
+    if (!raw.endsWith('\n')) {
+      if (!options.tornTail) refuse.unconfirmed();
+      options.tornTail!();
+      const complete = raw.lastIndexOf('\n');
+      return complete < 0 ? [] : raw.slice(0, complete).split('\n');
+    }
     return raw.slice(0, -1).split('\n');
   } finally {
     closeSync(fd);
